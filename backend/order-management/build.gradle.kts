@@ -1,5 +1,5 @@
-// Order Management module skeleton. Architectural placeholder only — no business
-// logic, no domain entities, no database model, no API endpoint.
+// Order Management module. Implements the Order Lifecycle capability
+// (domain + application layers only — no database model, no API endpoint).
 // Responsibility and boundary: docs/MODULE_STRUCTURE.md, "Order Management Module".
 // Interaction contracts: docs/INTERFACE_CONTRACTS.md.
 
@@ -20,6 +20,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
+
+    testImplementation(kotlin("test"))
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
