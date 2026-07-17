@@ -12,6 +12,7 @@ This directory is the documentation hierarchy for the PIOS platform. It is the s
 - [Use Cases](#use-cases)
 - [Application Architecture](#application-architecture)
 - [API](#api)
+- [Data](#data)
 - [Database](#database)
 - [Security](#security)
 - [Observability](#observability)
@@ -73,6 +74,10 @@ The [Application Architecture](APPLICATION_ARCHITECTURE.md) describes how applic
 ## API
 
 The [API Specification](API_SPECIFICATION.md) defines what interactions cross PIOS's system boundaries, what capabilities are exposed, and what contracts exist conceptually, at a technology-independent level. It is not a REST, GraphQL, gRPC, or OpenAPI specification; transport and implementation are left to future documents.
+
+## Data
+
+The [Conceptual Data Model](CONCEPTUAL_DATA_MODEL.md) defines what information exists in PIOS, who owns it, and how information concepts relate, from the business domain perspective. It is not a database schema, table design, or storage architecture; it is the business-grounded source a future Logical Data Model or Database Design derives from.
 
 ## Database
 
