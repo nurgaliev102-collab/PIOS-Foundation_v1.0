@@ -43,21 +43,28 @@ PIOS interacts with the following external actors, each carrying the responsibil
 
 ## 5. High-Level Architecture
 
-PIOS is organized as a set of independently owned architectural capabilities, each with an explicit boundary, rather than as a stack of technical layers. A capability communicates with others only through its declared interaction style or the events it publishes, owns its own data exclusively, and is releasable independently of the others.
+PIOS follows a Capability-Based architecture, ratified in ADR-016: the system as a whole is organized as a set of independently owned architectural capabilities, each with an explicit boundary, rather than around technical layers shared uniformly across the system. A capability communicates with others only through its declared interaction style or the events it publishes, owns its own data exclusively, and is releasable independently of the others.
 
-**Architecture Decision Required:** no ADR specifies an internal layering scheme (such as presentation, application, domain, integration, or infrastructure layers) for any capability. This document does not assume one. The capability-oriented organization described above is what is established; any further internal structure is left to future architectural decisions.
+How any single capability structures its own internals — whether in a layered, hexagonal, clean, vertical-slice, or other pattern — is a separate question that ADR-016 explicitly leaves open; it is not required at this system-wide level and is left to future architectural decisions if and when it is needed.
 
 ## 6. Core Architectural Components
 
-The following components are architecturally established at this stage:
+The following eight architectural components are ratified, per ADR-018, each owning the responsibility stated and no other:
 
-- **Dispatch.** An independent architectural capability that owns the assignment decision connecting a transportation request to a driver exclusively. No other component makes or overrides that decision. The specific assignment logic is explicitly not an architectural concern.
+- **Dispatch.** Owns the assignment decision connecting a transportation request to a driver exclusively, per ADR-002. No other component makes or overrides that decision. The specific assignment logic is explicitly not an architectural concern.
+- **Order Management.** Owns the receiving and tracking of transportation demand from any source through its lifecycle.
+- **Driver Management.** Owns the representation of drivers within the platform, including their standing, availability, and participation.
+- **Passenger Experience.** Owns the representation of passengers and corporate customers and their interaction with the platform.
+- **Payments.** Owns the platform's own record of payment-related information associated with transportation demand.
+- **Administration.** Owns support for platform administrators in overseeing and governing the ecosystem.
+- **Analytics.** Owns the production of insight into how the platform and its ecosystem are behaving and performing.
+- **Notifications.** Owns informing participants of information relevant to them.
 
-The following are candidate components, drawn from the product-level capability groupings in Product Foundation, that have not yet been ratified as architectural components by an ADR: Order Management, Driver Management, Passenger Experience, Payments, Administration, Analytics, and Notifications. **Architecture Decision Required:** formal definition of these as architectural components, with explicit boundaries and responsibilities, is pending; see Section 7.
+No interaction diagram, sequence, or internal structure is defined for any component here.
 
 ## 7. Bounded Context Overview
 
-**Architecture Decision Required.** No ADR enumerates the bounded contexts (domains) of the PIOS system. ADR-009 establishes the rule that will govern any bounded context once identified — an explicit responsibility, a boundary crossed only through declared interaction or published events, and no shared internal logic or data with another context — but it deliberately does not name the contexts themselves. The candidate components in Section 6 may inform that future decision but do not themselves constitute it.
+PIOS is divided into bounded contexts, ratified in ADR-017: each of the eight components named in Section 6 is one conceptual bounded context, governed by the boundary rule established in ADR-009 — an explicit responsibility, a boundary crossed only through declared interaction or published events, and no shared internal logic or data with another context. No entity, aggregate, class, or relationship within or between these contexts is defined here.
 
 ## 8. Communication Model
 
@@ -72,16 +79,27 @@ At a conceptual level, and without defining any algorithm or sequence: an order 
 
 ## 10. Data Ownership
 
-Each architectural component owns the data relevant to its own responsibility exclusively; no component's data is jointly owned, and a component that needs information it does not own obtains it only through another component's declared interaction style or the events that component publishes, never through direct access. **Architecture Decision Required:** the definitive mapping of specific data to a specific owning component depends on the bounded context decision flagged in Section 7 and is not made here.
+Each architectural component owns the data relevant to its own responsibility exclusively; no component's data is jointly owned, and a component that needs information it does not own obtains it only through another component's declared interaction style or the events that component publishes, never through direct access. The definitive mapping, ratified in ADR-019, is:
+
+- **Order Management** owns information about orders and their status, from submission through completion or cancellation.
+- **Dispatch** owns information about assignments — the outcome of allocating an order to a driver.
+- **Driver Management** owns information about drivers, including their standing and their own declared availability.
+- **Passenger Experience** owns information about passengers and corporate customers and their interaction with the platform.
+- **Payments** owns the platform's own record of payment-related information associated with orders.
+- **Administration** owns information about platform governance and participant standing within it.
+- **Analytics** owns only the derived, aggregate insight it produces, not the underlying information it draws on, which remains owned by the component that originated it.
+- **Notifications** owns only information about what has been communicated to participants, not the underlying information that triggers a notification.
 
 ## 11. Integration Boundaries
 
-The platform depends on external systems for concerns that are explicitly outside its boundary, per Section 4:
+The platform depends on external systems for concerns that are explicitly outside its boundary, per Section 4. Per ADR-020, every such dependency is treated the same way as another component's boundary under ADR-009: PIOS never assumes direct access to an external system's internals, interacts with it only through a declared interaction at the platform's own edge under the same security discipline as ADR-011, and does not assume its own record and the external system's record are simultaneously consistent.
 
-- **Payment.** The platform's own record of payment-related information is an internal responsibility; settlement of that payment through banking or financial infrastructure is external. **Architecture Decision Required:** the specific integration mechanism with that external infrastructure is not defined.
-- **Location and Routing.** Physical road, traffic, and routing infrastructure is explicitly outside the platform. **Architecture Decision Required:** whether and how the platform consumes externally provided location or routing information is not defined by any existing document.
-- **Notifications.** Informing participants is an internal platform responsibility. **Architecture Decision Required:** whether that responsibility depends on an external delivery channel, and how, is not defined.
-- **Identity.** Driver licensing and certification remain the responsibility of external regulatory authorities. **Architecture Decision Required:** whether or how the platform integrates with an external authority or identity source for this purpose is not defined; ADR-011 requires every boundary to enforce authentication and authorization but does not name an identity source.
+- **Payment.** The platform's own record of payment-related information is an internal responsibility (Section 10); settlement of that payment through banking or financial infrastructure is external and reached only through a declared interaction, per ADR-020.
+- **Location and Routing.** Physical road, traffic, and routing infrastructure is explicitly outside the platform; where the platform depends on externally provided location or routing information, that dependency follows the same declared-boundary philosophy.
+- **Notifications.** Informing participants is an internal platform responsibility (Section 10); where that responsibility depends on an external delivery channel, that dependency follows the same declared-boundary philosophy.
+- **Identity.** Driver licensing and certification remain the responsibility of external regulatory authorities; where the platform depends on an external authority or identity source, ADR-011 requires authentication and authorization at that boundary, and ADR-020 governs the dependency itself.
+
+The specific interaction style (synchronous or event-based) and any protocol or technology for each of these dependencies is left to future architectural or domain-level decisions, per ADR-020.
 
 ## 12. Scalability Principles
 
@@ -111,13 +129,13 @@ The architecture evolves only through a new ADR that explicitly supersedes an ex
 | 2. Architectural Principles | Section 4 | ADR-001, ADR-004, ADR-005, ADR-009, ADR-011 | — |
 | 3. System Context | — | — | Sections 6–7 |
 | 4. System Boundaries | Section 3 (Extensibility) | ADR-009, ADR-015 | Section 8 |
-| 5. High-Level Architecture | — | ADR-001, ADR-009 | Section 9 |
-| 6. Core Architectural Components | — | ADR-002 | Section 9 |
-| 7. Bounded Context Overview | — | ADR-009 | Section 9 |
+| 5. High-Level Architecture | — | ADR-001, ADR-009, ADR-016 | Section 9 |
+| 6. Core Architectural Components | — | ADR-002, ADR-005, ADR-009, ADR-017, ADR-018 | Section 9 |
+| 7. Bounded Context Overview | — | ADR-009, ADR-017 | Section 9 |
 | 8. Communication Model | — | ADR-003, ADR-004 | — |
 | 9. Order Flow Overview | — | ADR-002, ADR-003 | Section 10 |
-| 10. Data Ownership | — | ADR-005, ADR-009 | — |
-| 11. Integration Boundaries | — | ADR-011 | Sections 8, 14 |
+| 10. Data Ownership | — | ADR-002, ADR-005, ADR-009, ADR-018, ADR-019 | — |
+| 11. Integration Boundaries | — | ADR-003, ADR-004, ADR-005, ADR-009, ADR-011, ADR-020 | Sections 8, 14 |
 | 12. Scalability Principles | Section 14 (Scalability) | ADR-009, ADR-014 | Section 11 |
 | 13. Reliability Principles | Section 3 (Reliability) | ADR-012, ADR-014 | Section 11 |
 | 14. Security Principles | Section 3 (Trust) | ADR-011 | — |

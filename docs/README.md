@@ -45,6 +45,11 @@ Architecture Decision Records. Every change to an architectural decision is reco
 | [ADR-013](adr/ADR-013-Testing-Philosophy.md) | Testing Philosophy | Proposed |
 | [ADR-014](adr/ADR-014-Deployment-Philosophy.md) | Deployment Philosophy | Proposed |
 | [ADR-015](adr/ADR-015-Evolution-Strategy.md) | Evolution Strategy | Proposed |
+| [ADR-016](adr/ADR-016-Architectural-Layers.md) | Architectural Layers | Proposed |
+| [ADR-017](adr/ADR-017-Bounded-Context-Strategy.md) | Bounded Context Strategy | Proposed |
+| [ADR-018](adr/ADR-018-Core-Architectural-Components.md) | Core Architectural Components | Proposed |
+| [ADR-019](adr/ADR-019-Conceptual-Data-Ownership.md) | Conceptual Data Ownership | Proposed |
+| [ADR-020](adr/ADR-020-Integration-Philosophy.md) | Integration Philosophy | Proposed |
 
 ## Domain
 
