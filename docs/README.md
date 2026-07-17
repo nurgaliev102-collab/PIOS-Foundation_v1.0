@@ -86,9 +86,7 @@ The [Persistence Architecture](PERSISTENCE_ARCHITECTURE.md) defines the architec
 
 ## Database
 
-Data model, schema, and storage design.
-
-Content pending.
+The [Database Design](DATABASE_DESIGN.md) translates the Logical Data Model and Persistence Architecture into technology-neutral physical storage structures: physical shape, relationships, constraints, and indexing principles for each domain. It selects no specific database product or vendor; per-domain technology selection remains a distinct, later decision under ADR-021.
 
 ## Security
 
