@@ -58,6 +58,7 @@ Architecture Decision Records. Every change to an architectural decision is reco
 | [ADR-020](adr/ADR-020-Integration-Philosophy.md) | Integration Philosophy | Proposed |
 | [ADR-021](adr/ADR-021-Database-Technology-Strategy.md) | Database Technology Strategy | Proposed |
 | [ADR-022](adr/ADR-022-Technology-Stack-Strategy.md) | Technology Stack Strategy | Proposed |
+| [ADR-023](adr/ADR-023-Backend-Technology-Decision.md) | Backend Technology Decision | Proposed |
 
 ## Domain
 
