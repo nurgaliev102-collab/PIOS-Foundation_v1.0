@@ -72,9 +72,7 @@ The [Application Architecture](APPLICATION_ARCHITECTURE.md) describes how applic
 
 ## API
 
-API contracts and interface specifications.
-
-Content pending.
+The [API Specification](API_SPECIFICATION.md) defines what interactions cross PIOS's system boundaries, what capabilities are exposed, and what contracts exist conceptually, at a technology-independent level. It is not a REST, GraphQL, gRPC, or OpenAPI specification; transport and implementation are left to future documents.
 
 ## Database
 
