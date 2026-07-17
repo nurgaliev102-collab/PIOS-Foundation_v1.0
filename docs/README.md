@@ -8,6 +8,7 @@ This directory is the documentation hierarchy for the PIOS platform. It is the s
 - [Architecture](#architecture)
 - [ADR](#adr)
 - [Domain](#domain)
+- [Events](#events)
 - [API](#api)
 - [Database](#database)
 - [Security](#security)
@@ -54,6 +55,10 @@ Architecture Decision Records. Every change to an architectural decision is reco
 ## Domain
 
 The [Domain Model](DOMAIN_MODEL.md) is the technology-independent business domain of PIOS: domains, aggregates, entities, value objects, domain services, events, commands, queries, invariants, lifecycles, and relationships. It is derived from the Constitution, the Product Foundation, the System Architecture, and the ADR Foundation, and is the single source of truth for any future API, database, event, or implementation design.
+
+## Events
+
+The [Event Catalog](EVENT_CATALOG.md) is a business-language catalog of the domain events already established in the Domain Model: what meaningful facts occur, why they matter, which domain owns them, and what they represent. It introduces no event the Domain Model does not already establish, and contains no message broker design, payload, or schema.
 
 ## API
 
