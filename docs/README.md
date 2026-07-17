@@ -9,6 +9,7 @@ This directory is the documentation hierarchy for the PIOS platform. It is the s
 - [ADR](#adr)
 - [Domain](#domain)
 - [Events](#events)
+- [Use Cases](#use-cases)
 - [API](#api)
 - [Database](#database)
 - [Security](#security)
@@ -60,6 +61,10 @@ The [Domain Model](DOMAIN_MODEL.md) is the technology-independent business domai
 
 The [Event Catalog](EVENT_CATALOG.md) is a business-language catalog of the domain events already established in the Domain Model: what meaningful facts occur, why they matter, which domain owns them, and what they represent. It introduces no event the Domain Model does not already establish, and contains no message broker design, payload, or schema.
 
+## Use Cases
+
+The [Use Case Catalog](USE_CASE_CATALOG.md) describes who interacts with PIOS, what goals they achieve, and what a successful outcome means for each of them, mapped to the domains, aggregates, and events already established. It is a business behavior document, not a UI, API, or database specification.
+
 ## API
 
 API contracts and interface specifications.
@@ -100,4 +105,4 @@ Content pending.
 
 Product scope and requirements.
 
-The [Product Foundation](PRODUCT_FOUNDATION.md) defines the product domain: what PIOS is, who participates in it, why it exists, and where its architectural boundaries originate. It derives from the Constitution and the ADR Foundation and precedes any future PRD, domain model, or use-case documentation.
+The [Product Foundation](PRODUCT_FOUNDATION.md) defines the product domain: what PIOS is, who participates in it, why it exists, and where its architectural boundaries originate. It derives from the Constitution and the ADR Foundation and precedes any future PRD; the Domain Model and Use Case Catalog now build on it.
