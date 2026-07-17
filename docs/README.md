@@ -10,6 +10,7 @@ This directory is the documentation hierarchy for the PIOS platform. It is the s
 - [Domain](#domain)
 - [Events](#events)
 - [Use Cases](#use-cases)
+- [Application Architecture](#application-architecture)
 - [API](#api)
 - [Database](#database)
 - [Security](#security)
@@ -64,6 +65,10 @@ The [Event Catalog](EVENT_CATALOG.md) is a business-language catalog of the doma
 ## Use Cases
 
 The [Use Case Catalog](USE_CASE_CATALOG.md) describes who interacts with PIOS, what goals they achieve, and what a successful outcome means for each of them, mapped to the domains, aggregates, and events already established. It is a business behavior document, not a UI, API, or database specification.
+
+## Application Architecture
+
+The [Application Architecture](APPLICATION_ARCHITECTURE.md) describes how application responsibilities are organized between actor intentions and domain capabilities: how the goals in the Use Case Catalog are executed conceptually, and how application capabilities coordinate the domain behavior already established. It is the bridge between business intentions and system implementation, not an API, database, frontend, backend, or deployment design.
 
 ## API
 
