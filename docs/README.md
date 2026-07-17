@@ -118,9 +118,7 @@ Content pending.
 
 ## Development
 
-Local development setup and contributor workflow.
-
-Content pending.
+The [Engineering Guidelines](ENGINEERING_GUIDELINES.md) define development principles, quality standards, change discipline, review practices, testing philosophy, and operational expectations, including explicit rules for AI-assisted development. It selects no programming language, framework, tool, or repository structure.
 
 ## Product
 
