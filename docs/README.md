@@ -82,6 +82,8 @@ The [Conceptual Data Model](CONCEPTUAL_DATA_MODEL.md) defines what information e
 
 The [Logical Data Model](LOGICAL_DATA_MODEL.md) carries the Conceptual Data Model one level closer to implementation: logical entities, relationships, attribute groups, and constraints, still independent of storage technology. It is not a database schema, SQL model, or physical storage design; it is the bridge to any future Database Design.
 
+The [Persistence Architecture](PERSISTENCE_ARCHITECTURE.md) defines the architectural principles governing persistence across PIOS: responsibility, boundaries, ownership, consistency, and evolution. It is the architectural bridge between the Logical Data Model and any future Physical Database Design; it selects no technology and defines no schema.
+
 ## Database
 
 Data model, schema, and storage design.
