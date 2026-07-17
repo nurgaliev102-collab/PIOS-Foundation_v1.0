@@ -4,6 +4,7 @@ This directory is the documentation hierarchy for the PIOS platform. It is the s
 
 ## Structure
 
+- [Constitution](#constitution)
 - [Architecture](#architecture)
 - [ADR](#adr)
 - [Domain](#domain)
@@ -14,6 +15,10 @@ This directory is the documentation hierarchy for the PIOS platform. It is the s
 - [Deployment](#deployment)
 - [Development](#development)
 - [Product](#product)
+
+## Constitution
+
+The [Project Constitution](PROJECT_CONSTITUTION.md) is the highest-level specification for PIOS. It defines the project's vision, mission, and governance, and every other document in this hierarchy must reference it and must not contradict it.
 
 ## Architecture
 
