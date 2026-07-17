@@ -14,6 +14,7 @@ This directory is the documentation hierarchy for the PIOS platform. It is the s
 - [API](#api)
 - [Data](#data)
 - [Database](#database)
+- [Module Structure](#module-structure)
 - [Security](#security)
 - [Observability](#observability)
 - [Deployment](#deployment)
@@ -87,6 +88,10 @@ The [Persistence Architecture](PERSISTENCE_ARCHITECTURE.md) defines the architec
 ## Database
 
 The [Database Design](DATABASE_DESIGN.md) translates the Logical Data Model and Persistence Architecture into technology-neutral physical storage structures: physical shape, relationships, constraints, and indexing principles for each domain. It selects no specific database product or vendor; per-domain technology selection remains a distinct, later decision under ADR-021.
+
+## Module Structure
+
+The [Module Structure](MODULE_STRUCTURE.md) defines software module responsibilities, dependency boundaries, ownership, and architectural isolation, before any implementation. It maps one module to each of the eight ratified capabilities; it is not code, a repository or folder structure, a framework choice, or a microservice deployment design.
 
 ## Security
 
