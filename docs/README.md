@@ -127,6 +127,8 @@ The [Engineering Guidelines](ENGINEERING_GUIDELINES.md) define development princ
 
 The [Project Scaffolding Plan](PROJECT_SCAFFOLDING_PLAN.md) defines how the repository and initial project structure will be organized before implementation begins: repository organization, module and frontend placement, documentation placement, development sequence, and the first implementation milestone. It creates no repository file, code, or infrastructure.
 
+The [Initial Implementation Plan](INITIAL_IMPLEMENTATION_PLAN.md) converts the approved architecture into the first controlled implementation roadmap: MVP definition, implementation sequence, module priority, the first vertical slice, MVP exclusions, and validation criteria. It creates no code, user story, ticket, or implementation detail.
+
 ## Product
 
 Product scope and requirements.
