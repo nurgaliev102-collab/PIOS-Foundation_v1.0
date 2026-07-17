@@ -54,6 +54,7 @@ Architecture Decision Records. Every change to an architectural decision is reco
 | [ADR-018](adr/ADR-018-Core-Architectural-Components.md) | Core Architectural Components | Proposed |
 | [ADR-019](adr/ADR-019-Conceptual-Data-Ownership.md) | Conceptual Data Ownership | Proposed |
 | [ADR-020](adr/ADR-020-Integration-Philosophy.md) | Integration Philosophy | Proposed |
+| [ADR-021](adr/ADR-021-Database-Technology-Strategy.md) | Database Technology Strategy | Proposed |
 
 ## Domain
 
