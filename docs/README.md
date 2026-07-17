@@ -22,9 +22,7 @@ The [Project Constitution](PROJECT_CONSTITUTION.md) is the highest-level specifi
 
 ## Architecture
 
-System architecture: components, boundaries, and how they interact.
-
-Content pending.
+The [System Architecture](SYSTEM_ARCHITECTURE.md) describes how PIOS is organized: its major architectural components, their responsibilities, and how they relate to one another. It is derived exclusively from the Constitution, the ADR Foundation, and the Product Foundation; where a required architectural decision does not yet exist, the document marks that section "Architecture Decision Required" rather than inventing one.
 
 ## ADR
 
