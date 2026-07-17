@@ -79,6 +79,8 @@ The [API Specification](API_SPECIFICATION.md) defines what interactions cross PI
 
 The [Conceptual Data Model](CONCEPTUAL_DATA_MODEL.md) defines what information exists in PIOS, who owns it, and how information concepts relate, from the business domain perspective. It is not a database schema, table design, or storage architecture; it is the business-grounded source a future Logical Data Model or Database Design derives from.
 
+The [Logical Data Model](LOGICAL_DATA_MODEL.md) carries the Conceptual Data Model one level closer to implementation: logical entities, relationships, attribute groups, and constraints, still independent of storage technology. It is not a database schema, SQL model, or physical storage design; it is the bridge to any future Database Design.
+
 ## Database
 
 Data model, schema, and storage design.
