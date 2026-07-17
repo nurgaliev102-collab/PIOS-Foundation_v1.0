@@ -61,6 +61,7 @@ Architecture Decision Records. Every change to an architectural decision is reco
 | [ADR-023](adr/ADR-023-Backend-Technology-Decision.md) | Backend Technology Decision | Proposed |
 | [ADR-024](adr/ADR-024-Frontend-Technology-Decision.md) | Frontend Technology Decision | Proposed |
 | [ADR-025](adr/ADR-025-Database-Technology-Decision.md) | Database Technology Decision | Proposed |
+| [ADR-026](adr/ADR-026-Deployment-Strategy.md) | Deployment Strategy | Proposed |
 
 ## Domain
 
