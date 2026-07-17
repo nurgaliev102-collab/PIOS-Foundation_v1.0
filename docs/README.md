@@ -94,4 +94,4 @@ Content pending.
 
 Product scope and requirements.
 
-Content pending.
+The [Product Foundation](PRODUCT_FOUNDATION.md) defines the product domain: what PIOS is, who participates in it, why it exists, and where its architectural boundaries originate. It derives from the Constitution and the ADR Foundation and precedes any future PRD, domain model, or use-case documentation.
