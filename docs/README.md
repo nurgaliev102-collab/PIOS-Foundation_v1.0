@@ -15,6 +15,7 @@ This directory is the documentation hierarchy for the PIOS platform. It is the s
 - [Data](#data)
 - [Database](#database)
 - [Module Structure](#module-structure)
+- [Interface Contracts](#interface-contracts)
 - [Security](#security)
 - [Observability](#observability)
 - [Deployment](#deployment)
@@ -92,6 +93,10 @@ The [Database Design](DATABASE_DESIGN.md) translates the Logical Data Model and 
 ## Module Structure
 
 The [Module Structure](MODULE_STRUCTURE.md) defines software module responsibilities, dependency boundaries, ownership, and architectural isolation, before any implementation. It maps one module to each of the eight ratified capabilities; it is not code, a repository or folder structure, a framework choice, or a microservice deployment design.
+
+## Interface Contracts
+
+The [Interface Contracts](INTERFACE_CONTRACTS.md) define architectural interaction contracts between modules: interaction boundaries, ownership of operations, allowed communication directions, and exchanged conceptual information. It is not an API specification, a programming interface, or a message schema; it consolidates what the Event Catalog, Application Architecture, and Module Structure already establish about which module depends on which.
 
 ## Security
 
