@@ -125,6 +125,8 @@ Content pending.
 
 The [Engineering Guidelines](ENGINEERING_GUIDELINES.md) define development principles, quality standards, change discipline, review practices, testing philosophy, and operational expectations, including explicit rules for AI-assisted development. It selects no programming language, framework, tool, or repository structure.
 
+The [Project Scaffolding Plan](PROJECT_SCAFFOLDING_PLAN.md) defines how the repository and initial project structure will be organized before implementation begins: repository organization, module and frontend placement, documentation placement, development sequence, and the first implementation milestone. It creates no repository file, code, or infrastructure.
+
 ## Product
 
 Product scope and requirements.
