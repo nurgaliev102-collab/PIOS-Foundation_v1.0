@@ -129,6 +129,8 @@ The [Project Scaffolding Plan](PROJECT_SCAFFOLDING_PLAN.md) defines how the repo
 
 The [Initial Implementation Plan](INITIAL_IMPLEMENTATION_PLAN.md) converts the approved architecture into the first controlled implementation roadmap: MVP definition, implementation sequence, module priority, the first vertical slice, MVP exclusions, and validation criteria. It creates no code, user story, ticket, or implementation detail.
 
+The [Repository Initialization Plan](REPOSITORY_INITIALIZATION_PLAN.md) defines the controlled transition from architecture documentation to the first real software repository: initial repository and module scope, deferred modules, first commit definition, and the transition to implementation. It creates no repository, folder, file, or source code.
+
 ## Product
 
 Product scope and requirements.
