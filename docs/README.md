@@ -28,9 +28,25 @@ Content pending.
 
 ## ADR
 
-Architecture Decision Records. Every change to an architectural decision is recorded here before or alongside the change.
+Architecture Decision Records. Every change to an architectural decision is recorded here before or alongside the change, per [PROJECT_CONSTITUTION.md](PROJECT_CONSTITUTION.md) Section 7. All ADRs listed below are Proposed and require explicit approval by the Human Architect, per [ADR-007](adr/ADR-007-AI-Development-Workflow.md), before they become Accepted.
 
-Content pending.
+| ADR | Title | Status |
+| --- | --- | --- |
+| [ADR-001](adr/ADR-001-System-Philosophy.md) | System Philosophy | Proposed |
+| [ADR-002](adr/ADR-002-Dispatch-Engine.md) | Dispatch Engine | Proposed |
+| [ADR-003](adr/ADR-003-Event-Driven-Domain.md) | Event-Driven Domain | Proposed |
+| [ADR-004](adr/ADR-004-API-Style.md) | API Style | Proposed |
+| [ADR-005](adr/ADR-005-Data-Ownership.md) | Data Ownership | Proposed |
+| [ADR-006](adr/ADR-006-Documentation-Driven-Development.md) | Documentation Driven Development | Proposed |
+| [ADR-007](adr/ADR-007-AI-Development-Workflow.md) | AI Development Workflow | Proposed |
+| [ADR-008](adr/ADR-008-Repository-Strategy.md) | Repository Strategy | Proposed |
+| [ADR-009](adr/ADR-009-Domain-Isolation.md) | Domain Isolation | Proposed |
+| [ADR-010](adr/ADR-010-Versioning-Strategy.md) | Versioning Strategy | Proposed |
+| [ADR-011](adr/ADR-011-Security-Principles.md) | Security Principles | Proposed |
+| [ADR-012](adr/ADR-012-Observability-Principles.md) | Observability Principles | Proposed |
+| [ADR-013](adr/ADR-013-Testing-Philosophy.md) | Testing Philosophy | Proposed |
+| [ADR-014](adr/ADR-014-Deployment-Philosophy.md) | Deployment Philosophy | Proposed |
+| [ADR-015](adr/ADR-015-Evolution-Strategy.md) | Evolution Strategy | Proposed |
 
 ## Domain
 
