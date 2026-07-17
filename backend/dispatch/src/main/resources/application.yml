@@ -1,0 +1,6 @@
+spring:
+  application:
+    name: dispatch
+
+server:
+  port: 8084

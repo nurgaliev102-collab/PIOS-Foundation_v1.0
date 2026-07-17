@@ -2,6 +2,8 @@
 
 This directory is the documentation hierarchy for the PIOS platform. It is the source of truth for architecture, decisions, and domain knowledge, and it is maintained ahead of implementation as described in [CLAUDE.md](../CLAUDE.md).
 
+As of Repository Foundation v1.0, implementation has begun in [../backend/](../backend/), per [PROJECT_SCAFFOLDING_PLAN.md](PROJECT_SCAFFOLDING_PLAN.md) and [REPOSITORY_INITIALIZATION_PLAN.md](REPOSITORY_INITIALIZATION_PLAN.md). Code never duplicates this documentation; it references it.
+
 ## Structure
 
 - [Constitution](#constitution)

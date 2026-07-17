@@ -216,3 +216,26 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Java / Kotlin / Gradle (backend, ADR-023)
+*.class
+*.jar
+!**/gradle/wrapper/gradle-wrapper.jar
+.gradle/
+build/
+out/
+.kotlin/
+
+# IDE (JetBrains / IntelliJ, used for Kotlin development)
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Node / TypeScript (frontend, ADR-024)
+node_modules/
+dist/
+.next/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
