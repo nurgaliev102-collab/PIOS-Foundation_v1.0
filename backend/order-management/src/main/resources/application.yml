@@ -1,6 +1,12 @@
 spring:
   application:
     name: order-management
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:5432/pios_order_management
+    username: postgres
+    password:
+  flyway:
+    enabled: true
 
 server:
   port: 8083
