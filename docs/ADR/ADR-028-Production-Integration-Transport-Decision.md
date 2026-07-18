@@ -69,6 +69,8 @@ This ADR decides *transport category per interaction type*, not a specific produ
 
 Until both exist and an implementation task wires the selected broker in, ADR-027's mechanism remains PIOS's only actually-implemented integration transport. Any future decision changing the category split established here (for example, introducing cross-module synchronous commands) requires a decision that explicitly supersedes this one, consistent with ADR-015.
 
+**Update:** Follow-up decision 1 (message broker product selection) is now [ADR-029: Message Broker Selection for PIOS Event Infrastructure](ADR-029-Message-Broker-Selection.md), which selects RabbitMQ. Follow-up decision 2 (event schema versioning strategy) remains open.
+
 ## Related ADRs
 
 - [ADR-001: System Philosophy](ADR-001-System-Philosophy.md) — independent evolution of capabilities, which the event/broker split preserves.
