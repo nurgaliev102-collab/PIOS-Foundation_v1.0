@@ -22,6 +22,19 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-reflect")
 
     testImplementation(kotlin("test"))
+
+    // Test-scoped only, per ADR-027 (MVP Integration Mechanism): used
+    // solely by MvpVerticalSliceScenarioTest, which hosts the first
+    // complete MVP vertical-slice verification here since Order
+    // Management participates in the most steps of the six (Create
+    // Order, Complete Order) and already holds two of the three ADR-027
+    // consumer handlers exercised by that scenario. Excluded from this
+    // module's packaged/deployed artifact, so it does not affect
+    // independent buildability or deployability (ADR-026). No production
+    // code in this module depends on any of the three.
+    testImplementation(project(":passenger-experience"))
+    testImplementation(project(":driver-management"))
+    testImplementation(project(":dispatch"))
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
