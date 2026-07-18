@@ -1,8 +1,10 @@
 package com.pios.ordermanagement.application
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.ordermanagement.domain.Order
 import com.pios.ordermanagement.domain.OrderCancelled
 import com.pios.ordermanagement.domain.OrderCompleted
+import com.pios.ordermanagement.domain.OrderSubmitted
 import com.pios.ordermanagement.domain.SubmittedOrder
 import org.springframework.stereotype.Service
 
@@ -12,44 +14,70 @@ import org.springframework.stereotype.Service
  * command into the Order aggregate's own behavior; it does not decide an
  * order's status itself (APPLICATION_ARCHITECTURE.md Section 2, "Domain
  * Decides Business Meaning"). After each transition, the service persists
- * the affected [Order] through [orderRepository]
- * (PERSISTENCE_ARCHITECTURE.md Section 3, "Order Management") — the only
- * point in this module where persistence is invoked; the [Order] aggregate
- * itself remains entirely unaware that a repository exists. [completeOrder]
- * and [cancelOrder] are each overloaded: one form still operates on an
- * [Order] instance supplied by the caller, the other restores the
- * [Order] from [orderRepository] by id first, proving the aggregate can
- * be saved, loaded back, and continue its own domain operation exactly
- * as it would if it had never left memory.
+ * the affected [Order] *and* a corresponding [OutboxRecord] together,
+ * inside one [transactionRunner] boundary (ADR-032, Outbox Foundation
+ * v1.0) — so the two either both commit or both roll back, closing the
+ * dual-write gap ADR-031 identified. The [Order] aggregate itself remains
+ * entirely unaware that a repository or an outbox exists.
+ *
+ * [transactionRunner] and [outboxRepository] default to no-ops so that
+ * existing tests exercising only order lifecycle behavior (not the
+ * outbox) continue to work unchanged; a real, Spring-wired instance of
+ * this service always receives the real
+ * [com.pios.ordermanagement.persistence.SpringTransactionRunner] and
+ * [com.pios.ordermanagement.persistence.PostgreSQLOutboxRepository] beans
+ * instead, since Spring's constructor injection always supplies an
+ * argument for a parameter it can resolve a bean for, regardless of a
+ * Kotlin default being present.
+ *
+ * [transactionRunner] deliberately names only this module's own
+ * [TransactionRunner] abstraction, never a transaction-management
+ * framework type directly — this application-layer class stays
+ * framework-independent, exactly as [OrderRepository]'s own KDoc already
+ * requires of persistence. It is also what lets this class remain
+ * constructible from another module's test code across a project
+ * dependency (see [com.pios.ordermanagement.persistence.SpringTransactionRunner]'s
+ * KDoc for why this matters concretely).
+ *
+ * [completeOrder] and [cancelOrder] are each overloaded: one form still
+ * operates on an [Order] instance supplied by the caller, the other
+ * restores the [Order] from [orderRepository] by id first, proving the
+ * aggregate can be saved, loaded back, and continue its own domain
+ * operation exactly as it would if it had never left memory.
  */
 @Service
 class OrderLifecycleApplicationService(
-    private val orderRepository: OrderRepository
+    private val orderRepository: OrderRepository,
+    private val outboxRepository: OutboxRepository = NoOpOutboxRepository,
+    private val transactionRunner: TransactionRunner = NoOpTransactionRunner,
+    private val objectMapper: ObjectMapper = ObjectMapper()
 ) {
 
     /**
      * Coordinates a [SubmitOrderCommand], producing a new order and the
      * [com.pios.ordermanagement.domain.OrderSubmitted] event recording it,
-     * and persisting the new order.
+     * persisting the new order and its outbox record together.
      */
-    fun submitOrder(command: SubmitOrderCommand): SubmittedOrder {
+    fun submitOrder(command: SubmitOrderCommand): SubmittedOrder = transactionRunner.run {
         val submitted = Order.submit()
         orderRepository.save(submitted.order)
-        return submitted
+        outboxRepository.save(outboxRecordFor(submitted.event))
+        submitted
     }
 
     /**
      * Coordinates a [CompleteOrderCommand] against the given [order],
      * returning the resulting [OrderCompleted] event and persisting the
-     * order's new status.
+     * order's new status and its outbox record together.
      */
-    fun completeOrder(order: Order, command: CompleteOrderCommand): OrderCompleted {
+    fun completeOrder(order: Order, command: CompleteOrderCommand): OrderCompleted = transactionRunner.run {
         require(order.id == command.orderId) {
             "Command targets order ${command.orderId.value} but was handled against order ${order.id.value}"
         }
         val event = order.complete()
         orderRepository.save(order)
-        return event
+        outboxRepository.save(outboxRecordFor(event))
+        event
     }
 
     /**
@@ -59,23 +87,24 @@ class OrderLifecycleApplicationService(
      * persistence or domain one (see that class's own KDoc) — if no
      * Order identified by [CompleteOrderCommand.orderId] has been saved.
      */
-    fun completeOrder(command: CompleteOrderCommand): OrderCompleted {
+    fun completeOrder(command: CompleteOrderCommand): OrderCompleted = transactionRunner.run {
         val order = orderRepository.findById(command.orderId) ?: throw OrderNotFoundException(command.orderId)
-        return completeOrder(order, command)
+        completeOrder(order, command)
     }
 
     /**
      * Coordinates a [CancelOrderCommand] against the given [order],
      * returning the resulting [OrderCancelled] event and persisting the
-     * order's new status.
+     * order's new status and its outbox record together.
      */
-    fun cancelOrder(order: Order, command: CancelOrderCommand): OrderCancelled {
+    fun cancelOrder(order: Order, command: CancelOrderCommand): OrderCancelled = transactionRunner.run {
         require(order.id == command.orderId) {
             "Command targets order ${command.orderId.value} but was handled against order ${order.id.value}"
         }
         val event = order.cancel()
         orderRepository.save(order)
-        return event
+        outboxRepository.save(outboxRecordFor(event))
+        event
     }
 
     /**
@@ -85,8 +114,32 @@ class OrderLifecycleApplicationService(
      * that class's own KDoc) — if no Order identified by
      * [CancelOrderCommand.orderId] has been saved.
      */
-    fun cancelOrder(command: CancelOrderCommand): OrderCancelled {
+    fun cancelOrder(command: CancelOrderCommand): OrderCancelled = transactionRunner.run {
         val order = orderRepository.findById(command.orderId) ?: throw OrderNotFoundException(command.orderId)
-        return cancelOrder(order, command)
+        cancelOrder(order, command)
     }
+
+    private fun outboxRecordFor(event: OrderSubmitted): OutboxRecord = OutboxRecord(
+        aggregateId = event.orderId.value,
+        eventType = "OrderSubmitted",
+        routingKey = "order.submitted",
+        payload = payloadFor(event.orderId.value, event.occurredAt.toString())
+    )
+
+    private fun outboxRecordFor(event: OrderCompleted): OutboxRecord = OutboxRecord(
+        aggregateId = event.orderId.value,
+        eventType = "OrderCompleted",
+        routingKey = "order.completed",
+        payload = payloadFor(event.orderId.value, event.occurredAt.toString())
+    )
+
+    private fun outboxRecordFor(event: OrderCancelled): OutboxRecord = OutboxRecord(
+        aggregateId = event.orderId.value,
+        eventType = "OrderCancelled",
+        routingKey = "order.cancelled",
+        payload = payloadFor(event.orderId.value, event.occurredAt.toString())
+    )
+
+    private fun payloadFor(orderId: String, occurredAt: String): String =
+        objectMapper.writeValueAsString(mapOf("orderId" to orderId, "occurredAt" to occurredAt))
 }
