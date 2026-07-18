@@ -69,6 +69,7 @@ This ADR selects RabbitMQ for PIOS's current, demonstrated event-delivery needs;
 - If Analytics's own dedicated future technology evaluation (anticipated but not finalized per ADR-025) determines it needs long-term historical event replay for derived-insight computation beyond what RabbitMQ Streams provides, introducing Kafka for that specific purpose is a legitimate future decision — to be recorded as its own ADR explicitly superseding or extending this one, consistent with ADR-015.
 - A change to this selection for any other reason (operational experience, a demonstrated throughput ceiling, a team-capability shift) likewise requires a decision that explicitly supersedes this one, never a silent substitution.
 - Event schema versioning strategy, independent of which broker carries the events, is now [ADR-030: Event Schema and Versioning Strategy](ADR-030-Event-Schema-Versioning-Strategy.md).
+- How RabbitMQ itself is structured — exchanges, queues, publisher/consumer boundaries, and failure handling — is now [ADR-031: Event Infrastructure Foundation Architecture](ADR-031-Event-Infrastructure-Foundation-Architecture.md).
 
 ## Related ADRs
 
