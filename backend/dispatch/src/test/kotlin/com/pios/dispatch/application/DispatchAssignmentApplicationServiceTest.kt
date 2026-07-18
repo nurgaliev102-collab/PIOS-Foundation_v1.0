@@ -42,4 +42,37 @@ class DispatchAssignmentApplicationServiceTest {
             service.handle(command, existingAssignments = listOf(existing))
         }
     }
+
+    @Test
+    fun `accepting an assignment matching the command produces an AssignmentAccepted event`() {
+        val assignment = Assignment.create(order, driver).assignment
+        val command = AcceptAssignmentCommand(assignment.id)
+
+        val event = service.acceptAssignment(assignment, command)
+
+        assertEquals(order, event.orderId)
+        assertEquals(driver, event.driverId)
+    }
+
+    @Test
+    fun `accepting an assignment whose id does not match the command is rejected`() {
+        val assignment = Assignment.create(order, driver).assignment
+        val otherAssignment = Assignment.create(OrderReference("order-2"), driver).assignment
+        val command = AcceptAssignmentCommand(otherAssignment.id)
+
+        assertFailsWith<IllegalArgumentException> {
+            service.acceptAssignment(assignment, command)
+        }
+    }
+
+    @Test
+    fun `accepting an already-accepted assignment through the service is rejected`() {
+        val assignment = Assignment.create(order, driver).assignment
+        assignment.accept()
+        val command = AcceptAssignmentCommand(assignment.id)
+
+        assertFailsWith<IllegalStateException> {
+            service.acceptAssignment(assignment, command)
+        }
+    }
 }

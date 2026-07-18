@@ -66,4 +66,42 @@ class AssignmentTest {
 
         assertEquals(driver, second.assignment.driver)
     }
+
+    // --- Acceptance ---
+
+    @Test
+    fun `a newly created assignment starts in CREATED status`() {
+        val assignment = Assignment.create(order, driver).assignment
+
+        assertEquals(AssignmentStatus.CREATED, assignment.status)
+    }
+
+    @Test
+    fun `accepting a created assignment transitions it to ACCEPTED`() {
+        val assignment = Assignment.create(order, driver).assignment
+
+        assignment.accept()
+
+        assertEquals(AssignmentStatus.ACCEPTED, assignment.status)
+    }
+
+    @Test
+    fun `accepting a created assignment produces an AssignmentAccepted event for the same order and driver`() {
+        val assignment = Assignment.create(order, driver).assignment
+
+        val event = assignment.accept()
+
+        assertEquals(order, event.orderId)
+        assertEquals(driver, event.driverId)
+    }
+
+    @Test
+    fun `accepting an already-accepted assignment is rejected`() {
+        val assignment = Assignment.create(order, driver).assignment
+        assignment.accept()
+
+        assertFailsWith<IllegalStateException> {
+            assignment.accept()
+        }
+    }
 }
