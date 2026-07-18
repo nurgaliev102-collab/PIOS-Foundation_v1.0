@@ -138,10 +138,6 @@ No event schema is defined here.
 
 No module accesses another module's owned information directly. A module obtains information it does not own only through the contracts in Section 5 — never through direct access to another module's physical structures (DATABASE_DESIGN.md Sections 4–5), consistent with the exclusive-ownership rule in ADR-005 and its concrete mapping in ADR-019, and with the Forbidden Ownership principle already established in PERSISTENCE_ARCHITECTURE.md Section 5.
 
-## 9. MVP Contract Verification (Addendum)
-
-Until a concrete transport mechanism is selected for carrying an event between independently deployed modules — a decision this document does not make — compatibility between a contract's provider and consumer is verified through the mechanism ADR-027 establishes: a minimal, primitive-typed application-layer boundary on each side, checked only through test-scoped module references, never through a production-code dependency between modules. This addendum does not alter the contracts already stated in Section 5; it records how their correctness is checked ahead of transport selection.
-
 ## 9. External Boundary Interfaces
 
 Consistent with API_SPECIFICATION.md Section 4; no endpoint is designed here.
@@ -170,5 +166,10 @@ A contract evolves only through a decision that explicitly supersedes it, consis
 | 8. Data Access Boundaries | ADR-005, ADR-009, ADR-019 | — | — | Section 7 | — | — | — | Sections 4–5 |
 | 9. External Boundary Interfaces | ADR-011, ADR-020 | Section 3 | — | — | — | — | Sections 3–4, 8, 12 | — |
 | 10. Evolution Strategy | ADR-010, ADR-015, ADR-021 | Section 16 | — | Section 8 | — | — | Section 9 | Section 10 |
+| 12. MVP Contract Verification and Transport Selection (Addendum) | ADR-027, ADR-028 | — | Section 10 | — | — | — | — | — |
+
+## 12. MVP Contract Verification and Transport Selection (Addendum)
+
+Until ADR-028's selected transport category (message broker for events, REST for direct request-driven interaction) has a specific product chosen and implemented, compatibility between a contract's provider and consumer is verified through the mechanism ADR-027 establishes: a minimal, primitive-typed application-layer boundary on each side, checked only through test-scoped module references, never through a production-code dependency between modules. This addendum does not alter the contracts already stated in Section 5; it records how their correctness is checked ahead of transport implementation, and which category of transport (ADR-028) will eventually carry them.
 
 Where this document is silent — including on which specific events Notifications and Analytics consume — no lower-priority document may fill that silence by invention; resolution requires the relevant higher-priority document to be extended first, per the authority order established in PROJECT_CONSTITUTION.md Section 5.

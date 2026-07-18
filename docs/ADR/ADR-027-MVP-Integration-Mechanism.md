@@ -46,6 +46,8 @@ How can PIOS verify, at this stage of implementation, that its modules' applicat
 
 This ADR establishes a documented, reusable pattern for proving contract correctness ahead of transport selection; it applies to any future module pair facing the same gap, not only the three MVP flows. Selecting the concrete transport mechanism that eventually carries these events between independently running services is a distinct decision, to be recorded as its own future ADR consistent with ADR-015 (Evolution Strategy); it is not anticipated or pre-selected here.
 
+**Update:** That future decision is now [ADR-028: Production Integration Transport Decision](ADR-028-Production-Integration-Transport-Decision.md), which selects transport *category* (message broker for events, REST for direct request-driven interaction) but not yet a specific broker product. Until a broker product is selected and implemented, this ADR's mechanism remains the only one actually in effect.
+
 ## Related ADRs
 
 - [ADR-001: System Philosophy](ADR-001-System-Philosophy.md) — independent evolution of capabilities, which this decision preserves.
