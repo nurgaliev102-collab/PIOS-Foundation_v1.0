@@ -23,6 +23,19 @@ dependencies {
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
 
+    // PostgreSQL Persistence Dispatch v1.0: plain JDBC access
+    // (JdbcTemplate) to the Dispatch-owned PostgreSQL database (ADR-025;
+    // PERSISTENCE_ARCHITECTURE.md Section 3). No ORM is added —
+    // spring-boot-starter-jdbc provides JdbcTemplate and DataSource
+    // autoconfiguration only, never entity mapping or annotations. Schema
+    // is version-controlled and applied exclusively through Flyway
+    // migrations (src/main/resources/db/migration/dispatch), consistent
+    // with PostgreSQL Persistence Order/Driver Management v1.0.
+    implementation("org.springframework.boot:spring-boot-starter-jdbc")
+    implementation("org.postgresql:postgresql")
+    implementation("org.flywaydb:flyway-core")
+    implementation("org.flywaydb:flyway-database-postgresql")
+
     testImplementation(kotlin("test"))
 
     // Test-scoped only, per ADR-027 (MVP Integration Mechanism): used
