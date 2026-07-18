@@ -84,7 +84,7 @@ Given RabbitMQ as the selected broker (ADR-029) and the ownership and versioning
 
 This ADR fixes the topology's shape — exchange-per-domain, queue-per-consumer, the publisher/consumer boundary, and the failure-handling principles — not its concrete configuration. Anticipated follow-up decisions:
 
-1. **Dual-write resolution** — a dedicated decision (for example, evaluating a transactional outbox pattern) addressing how a domain's persistence write and event publish are kept consistent with each other.
+1. **Dual-write resolution** — a dedicated decision (for example, evaluating a transactional outbox pattern) addressing how a domain's persistence write and event publish are kept consistent with each other. **Update:** this is now [ADR-032: Reliable Event Publication Strategy](ADR-032-Reliable-Event-Publication-Strategy.md), which selects a transactional outbox.
 2. **Concrete retry/backoff parameters and message envelope format** — implementation-level detail, dependent on the schema-representation decision ADR-030 already deferred.
 3. **New event-owning domains** — if a future ADR grants Passenger Experience, Administration, Payments, or any other domain a catalogued event it does not currently own, that domain gains its own exchange following exactly this same architecture, without requiring this ADR to be revisited.
 
