@@ -7,6 +7,7 @@ import com.pios.drivermanagement.application.DriverAvailabilityChangedPublisher
 import com.pios.drivermanagement.domain.Availability
 import com.pios.drivermanagement.domain.Driver
 import com.pios.drivermanagement.domain.DriverId
+import com.pios.drivermanagement.persistence.InMemoryDriverRepository
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -25,7 +26,7 @@ import kotlin.test.assertTrue
  */
 class DriverAvailabilityContractVerificationTest {
 
-    private val service = DriverAvailabilityApplicationService()
+    private val service = DriverAvailabilityApplicationService(InMemoryDriverRepository())
     private val publisher = DriverAvailabilityChangedPublisher()
     private val consumerHandler = DriverAvailabilityNotificationHandler()
 

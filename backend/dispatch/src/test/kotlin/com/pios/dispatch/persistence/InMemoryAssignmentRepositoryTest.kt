@@ -11,18 +11,29 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
+/**
+ * Exercises [InMemoryAssignmentRepository] directly (repository-level
+ * save/load) as well as through [DispatchAssignmentApplicationService],
+ * which now persists automatically after assignment creation and
+ * acceptance (Application Persistence Wiring v1.0).
+ */
 class InMemoryAssignmentRepositoryTest {
 
     private val repository = InMemoryAssignmentRepository()
-    private val service = DispatchAssignmentApplicationService()
+    private val service = DispatchAssignmentApplicationService(repository)
 
     @Test
-    fun `create, accept, save, and load preserves an assignment's status`() {
+    fun `creating an assignment through the service persists it, loadable by id`() {
         val created = service.handle(AssignOrderCommand(OrderReference("order-1"), DriverReference("driver-1")))
-        repository.save(created.assignment)
+
+        assertEquals(AssignmentStatus.CREATED, repository.findById(created.assignment.id)?.status)
+    }
+
+    @Test
+    fun `accepting an assignment through the service persists its ACCEPTED status`() {
+        val created = service.handle(AssignOrderCommand(OrderReference("order-2"), DriverReference("driver-2")))
 
         service.acceptAssignment(created.assignment, AcceptAssignmentCommand(created.assignment.id))
-        repository.save(created.assignment)
 
         assertEquals(AssignmentStatus.ACCEPTED, repository.findById(created.assignment.id)?.status)
     }

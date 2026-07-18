@@ -9,22 +9,32 @@ import org.springframework.stereotype.Service
  * (APPLICATION_ARCHITECTURE.md Section 6). This service sequences the
  * command into the Driver aggregate's own behavior; it does not decide a
  * driver's availability state itself (APPLICATION_ARCHITECTURE.md
- * Section 2, "Domain Decides Business Meaning") and contains no
- * persistence, since that remains a separate, later concern
- * (PERSISTENCE_ARCHITECTURE.md), out of scope for this capability.
+ * Section 2, "Domain Decides Business Meaning"). Once the aggregate has
+ * actually changed, the service persists it through [driverRepository]
+ * (PERSISTENCE_ARCHITECTURE.md Section 3, "Driver Management") — the only
+ * point in this module where persistence is invoked; the [Driver]
+ * aggregate itself remains entirely unaware that a repository exists.
  */
 @Service
-class DriverAvailabilityApplicationService {
+class DriverAvailabilityApplicationService(
+    private val driverRepository: DriverRepository
+) {
 
     /**
      * Coordinates a [DeclareAvailabilityCommand] against the given [driver],
      * returning the resulting [DriverAvailabilityChanged] event, or null if
-     * the declaration did not change the driver's availability.
+     * the declaration did not change the driver's availability. Persists
+     * [driver] only when its availability actually changed — there is
+     * nothing new to persist otherwise.
      */
     fun handle(driver: Driver, command: DeclareAvailabilityCommand): DriverAvailabilityChanged? {
         require(driver.id == command.driverId) {
             "Command targets driver ${command.driverId.value} but was handled against driver ${driver.id.value}"
         }
-        return driver.declareAvailability(command.requestedAvailability)
+        val event = driver.declareAvailability(command.requestedAvailability)
+        if (event != null) {
+            driverRepository.save(driver)
+        }
+        return event
     }
 }

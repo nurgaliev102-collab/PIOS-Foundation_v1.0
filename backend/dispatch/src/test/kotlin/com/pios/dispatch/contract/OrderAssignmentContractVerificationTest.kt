@@ -5,6 +5,7 @@ import com.pios.dispatch.application.DispatchAssignmentApplicationService
 import com.pios.dispatch.application.OrderAssignedPublisher
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
+import com.pios.dispatch.persistence.InMemoryAssignmentRepository
 import com.pios.ordermanagement.application.OrderAssignmentRecognitionHandler
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -23,7 +24,7 @@ import kotlin.test.assertEquals
  */
 class OrderAssignmentContractVerificationTest {
 
-    private val dispatchService = DispatchAssignmentApplicationService()
+    private val dispatchService = DispatchAssignmentApplicationService(InMemoryAssignmentRepository())
     private val publisher = OrderAssignedPublisher()
     private val consumerHandler = OrderAssignmentRecognitionHandler()
 

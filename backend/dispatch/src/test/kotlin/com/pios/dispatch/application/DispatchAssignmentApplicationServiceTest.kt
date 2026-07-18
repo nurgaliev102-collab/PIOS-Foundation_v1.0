@@ -1,15 +1,18 @@
 package com.pios.dispatch.application
 
 import com.pios.dispatch.domain.Assignment
+import com.pios.dispatch.domain.AssignmentStatus
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
+import com.pios.dispatch.persistence.InMemoryAssignmentRepository
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class DispatchAssignmentApplicationServiceTest {
 
-    private val service = DispatchAssignmentApplicationService()
+    private val repository = InMemoryAssignmentRepository()
+    private val service = DispatchAssignmentApplicationService(repository)
     private val order = OrderReference("order-1")
     private val driver = DriverReference("driver-1")
 
@@ -44,6 +47,15 @@ class DispatchAssignmentApplicationServiceTest {
     }
 
     @Test
+    fun `handling a command persists the created assignment through the repository`() {
+        val command = AssignOrderCommand(order, driver)
+
+        val result = service.handle(command)
+
+        assertEquals(order, repository.findById(result.assignment.id)?.order)
+    }
+
+    @Test
     fun `accepting an assignment matching the command produces an AssignmentAccepted event`() {
         val assignment = Assignment.create(order, driver).assignment
         val command = AcceptAssignmentCommand(assignment.id)
@@ -74,5 +86,14 @@ class DispatchAssignmentApplicationServiceTest {
         assertFailsWith<IllegalStateException> {
             service.acceptAssignment(assignment, command)
         }
+    }
+
+    @Test
+    fun `accepting an assignment persists its ACCEPTED status through the repository`() {
+        val assignment = Assignment.create(order, driver).assignment
+
+        service.acceptAssignment(assignment, AcceptAssignmentCommand(assignment.id))
+
+        assertEquals(AssignmentStatus.ACCEPTED, repository.findById(assignment.id)?.status)
     }
 }

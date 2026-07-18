@@ -3,6 +3,7 @@ package com.pios.drivermanagement.application
 import com.pios.drivermanagement.domain.Availability
 import com.pios.drivermanagement.domain.Driver
 import com.pios.drivermanagement.domain.DriverId
+import com.pios.drivermanagement.persistence.InMemoryDriverRepository
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -11,7 +12,8 @@ import kotlin.test.assertNull
 
 class DriverAvailabilityApplicationServiceTest {
 
-    private val service = DriverAvailabilityApplicationService()
+    private val repository = InMemoryDriverRepository()
+    private val service = DriverAvailabilityApplicationService(repository)
 
     @Test
     fun `handling a command that changes availability returns the resulting event`() {
@@ -22,6 +24,16 @@ class DriverAvailabilityApplicationServiceTest {
 
         assertNotNull(event)
         assertEquals(Availability.AVAILABLE, driver.availability)
+    }
+
+    @Test
+    fun `handling a command that changes availability persists the driver through the repository`() {
+        val driver = Driver(id = DriverId("driver-3"), availability = Availability.UNAVAILABLE)
+        val command = DeclareAvailabilityCommand(DriverId("driver-3"), Availability.AVAILABLE)
+
+        service.handle(driver, command)
+
+        assertEquals(Availability.AVAILABLE, repository.findById(DriverId("driver-3"))?.availability)
     }
 
     @Test
@@ -42,5 +54,15 @@ class DriverAvailabilityApplicationServiceTest {
         val event = service.handle(driver, command)
 
         assertNull(event)
+    }
+
+    @Test
+    fun `handling a command with no actual change does not persist the driver`() {
+        val driver = Driver(id = DriverId("driver-4"), availability = Availability.AVAILABLE)
+        val command = DeclareAvailabilityCommand(DriverId("driver-4"), Availability.AVAILABLE)
+
+        service.handle(driver, command)
+
+        assertNull(repository.findById(DriverId("driver-4")))
     }
 }

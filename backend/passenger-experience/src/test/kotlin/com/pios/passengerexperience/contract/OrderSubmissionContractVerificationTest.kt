@@ -2,6 +2,7 @@ package com.pios.passengerexperience.contract
 
 import com.pios.ordermanagement.application.OrderLifecycleApplicationService
 import com.pios.ordermanagement.application.OrderSubmissionRequestHandler
+import com.pios.ordermanagement.persistence.InMemoryOrderRepository
 import com.pios.passengerexperience.application.OrderSubmissionRequestedPublisher
 import com.pios.passengerexperience.application.PassengerOrderSubmissionApplicationService
 import com.pios.passengerexperience.application.SubmitOrderCommand
@@ -26,7 +27,7 @@ class OrderSubmissionContractVerificationTest {
 
     private val passengerService = PassengerOrderSubmissionApplicationService()
     private val publisher = OrderSubmissionRequestedPublisher()
-    private val consumerHandler = OrderSubmissionRequestHandler(OrderLifecycleApplicationService())
+    private val consumerHandler = OrderSubmissionRequestHandler(OrderLifecycleApplicationService(InMemoryOrderRepository()))
 
     @Test
     fun `passenger experience's provider payload is accepted by Order Management's consumer handler`() {
