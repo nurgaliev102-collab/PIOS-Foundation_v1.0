@@ -26,6 +26,16 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-reflect")
 
     testImplementation(kotlin("test"))
+
+    // Test-scoped only, per ADR-027 (MVP Integration Mechanism): used
+    // solely by OrderSubmissionContractVerificationTest to prove that
+    // this module's OrderSubmissionRequestedPublisher (application layer)
+    // produces a payload order-management's OrderSubmissionRequestHandler
+    // accepts. Excluded from this module's packaged/deployed artifact, so
+    // it does not affect independent buildability or deployability
+    // (ADR-026). No production code in this module depends on
+    // order-management.
+    testImplementation(project(":order-management"))
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {

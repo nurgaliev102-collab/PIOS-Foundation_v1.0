@@ -22,6 +22,16 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-reflect")
 
     testImplementation(kotlin("test"))
+
+    // Test-scoped only, per ADR-027 (MVP Integration Mechanism): used
+    // solely by DriverAvailabilityContractVerificationTest to prove that
+    // this module's DriverAvailabilityChangedPublisher (application
+    // layer) produces a payload dispatch's
+    // DriverAvailabilityNotificationHandler accepts. Excluded from this
+    // module's packaged/deployed artifact, so it does not affect
+    // independent buildability or deployability (ADR-026). No production
+    // code in this module depends on dispatch.
+    testImplementation(project(":dispatch"))
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
