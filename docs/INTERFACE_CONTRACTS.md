@@ -138,6 +138,10 @@ No event schema is defined here.
 
 No module accesses another module's owned information directly. A module obtains information it does not own only through the contracts in Section 5 — never through direct access to another module's physical structures (DATABASE_DESIGN.md Sections 4–5), consistent with the exclusive-ownership rule in ADR-005 and its concrete mapping in ADR-019, and with the Forbidden Ownership principle already established in PERSISTENCE_ARCHITECTURE.md Section 5.
 
+## 9. MVP Contract Verification (Addendum)
+
+Until a concrete transport mechanism is selected for carrying an event between independently deployed modules — a decision this document does not make — compatibility between a contract's provider and consumer is verified through the mechanism ADR-027 establishes: a minimal, primitive-typed application-layer boundary on each side, checked only through test-scoped module references, never through a production-code dependency between modules. This addendum does not alter the contracts already stated in Section 5; it records how their correctness is checked ahead of transport selection.
+
 ## 9. External Boundary Interfaces
 
 Consistent with API_SPECIFICATION.md Section 4; no endpoint is designed here.
