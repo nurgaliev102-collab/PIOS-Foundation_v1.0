@@ -35,6 +35,13 @@ dependencies {
     implementation("org.flywaydb:flyway-core")
     implementation("org.flywaydb:flyway-database-postgresql")
 
+    // RabbitMQ Event Publishing Foundation v1.0: Spring AMQP client for
+    // RabbitMQ (ADR-029). Provides RabbitTemplate (publishing, with
+    // publisher confirms per ADR-031) and RabbitAdmin (declares this
+    // module's own exchange on startup). No message schema or ORM-like
+    // mapping framework is added.
+    implementation("org.springframework.boot:spring-boot-starter-amqp")
+
     testImplementation(kotlin("test"))
 
     // Test-scoped only, per ADR-027 (MVP Integration Mechanism): used
