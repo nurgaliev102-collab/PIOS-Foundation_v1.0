@@ -16,9 +16,13 @@ import org.springframework.stereotype.Service
  * (PERSISTENCE_ARCHITECTURE.md Section 3, "Dispatch") — the only point in
  * this module where persistence is invoked; the [Assignment] aggregate
  * itself remains entirely unaware that a repository exists.
- * [existingAssignments] and the [Assignment] passed to [acceptAssignment]
- * are still supplied by the caller, since [AssignmentRepository] offers
- * lookup by id but no query capability beyond that.
+ * [existingAssignments] is still supplied by the caller, since
+ * [AssignmentRepository] offers lookup by id but no query capability
+ * beyond that. [acceptAssignment] is overloaded: one form still operates
+ * on an [Assignment] instance supplied by the caller, the other restores
+ * the [Assignment] from [assignmentRepository] by id first, proving the
+ * aggregate can be saved, loaded back, and continue its own domain
+ * operation exactly as it would if it had never left memory.
  */
 @Service
 class DispatchAssignmentApplicationService(
@@ -54,5 +58,19 @@ class DispatchAssignmentApplicationService(
         val event = assignment.accept()
         assignmentRepository.save(assignment)
         return event
+    }
+
+    /**
+     * Confirms the assignment referenced by [command] by first restoring
+     * it through [assignmentRepository]. Throws
+     * [AssignmentNotFoundException] — an application-layer error, never a
+     * persistence or domain one (see that class's own KDoc) — if no
+     * Assignment identified by [AcceptAssignmentCommand.assignmentId] has
+     * been saved.
+     */
+    fun acceptAssignment(command: AcceptAssignmentCommand): AssignmentAccepted {
+        val assignment = assignmentRepository.findById(command.assignmentId)
+            ?: throw AssignmentNotFoundException(command.assignmentId)
+        return acceptAssignment(assignment, command)
     }
 }

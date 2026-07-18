@@ -37,4 +37,19 @@ class DriverAvailabilityApplicationService(
         }
         return event
     }
+
+    /**
+     * Coordinates a [DeclareAvailabilityCommand] by first restoring the
+     * targeted Driver through [driverRepository], proving the aggregate
+     * can be saved, loaded back, and continue its own domain operation
+     * exactly as it would if it had never left memory. Throws
+     * [DriverNotFoundException] — an application-layer error, never a
+     * persistence or domain one (see that class's own KDoc) — if no
+     * Driver identified by [DeclareAvailabilityCommand.driverId] has been
+     * saved.
+     */
+    fun handle(command: DeclareAvailabilityCommand): DriverAvailabilityChanged? {
+        val driver = driverRepository.findById(command.driverId) ?: throw DriverNotFoundException(command.driverId)
+        return handle(driver, command)
+    }
 }

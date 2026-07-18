@@ -16,9 +16,11 @@ import org.springframework.stereotype.Service
  * (PERSISTENCE_ARCHITECTURE.md Section 3, "Order Management") — the only
  * point in this module where persistence is invoked; the [Order] aggregate
  * itself remains entirely unaware that a repository exists. [completeOrder]
- * and [cancelOrder] still operate on an [Order] instance supplied by the
- * caller, since [OrderRepository] offers lookup by id but no query
- * capability beyond that.
+ * and [cancelOrder] are each overloaded: one form still operates on an
+ * [Order] instance supplied by the caller, the other restores the
+ * [Order] from [orderRepository] by id first, proving the aggregate can
+ * be saved, loaded back, and continue its own domain operation exactly
+ * as it would if it had never left memory.
  */
 @Service
 class OrderLifecycleApplicationService(
@@ -51,6 +53,18 @@ class OrderLifecycleApplicationService(
     }
 
     /**
+     * Coordinates a [CompleteOrderCommand] by first restoring the
+     * targeted Order through [orderRepository]. Throws
+     * [OrderNotFoundException] — an application-layer error, never a
+     * persistence or domain one (see that class's own KDoc) — if no
+     * Order identified by [CompleteOrderCommand.orderId] has been saved.
+     */
+    fun completeOrder(command: CompleteOrderCommand): OrderCompleted {
+        val order = orderRepository.findById(command.orderId) ?: throw OrderNotFoundException(command.orderId)
+        return completeOrder(order, command)
+    }
+
+    /**
      * Coordinates a [CancelOrderCommand] against the given [order],
      * returning the resulting [OrderCancelled] event and persisting the
      * order's new status.
@@ -62,5 +76,17 @@ class OrderLifecycleApplicationService(
         val event = order.cancel()
         orderRepository.save(order)
         return event
+    }
+
+    /**
+     * Coordinates a [CancelOrderCommand] by first restoring the targeted
+     * Order through [orderRepository]. Throws [OrderNotFoundException] —
+     * an application-layer error, never a persistence or domain one (see
+     * that class's own KDoc) — if no Order identified by
+     * [CancelOrderCommand.orderId] has been saved.
+     */
+    fun cancelOrder(command: CancelOrderCommand): OrderCancelled {
+        val order = orderRepository.findById(command.orderId) ?: throw OrderNotFoundException(command.orderId)
+        return cancelOrder(order, command)
     }
 }
