@@ -70,6 +70,7 @@ Module Structure exists to give each of the eight already-ratified architectural
 - **Responsibility.** What has been communicated to participants, not the underlying trigger (ADR-018, ADR-019).
 - **Owned capabilities.** Consumption of events from other modules in order to inform participants (DOMAIN_MODEL.md Section 7).
 - **Boundary.** Never owns the underlying information that triggers a notification.
+- **Scaffolding status.** [ADR-033: Notifications Module and Event Consumption Boundary](ADR/ADR-033-Notifications-Module-and-Event-Consumption-Boundary.md) confirms this module's entitlement to eventual independent deployment but has not authorized scaffolding it yet: ADR-025's database-technology evaluation for this domain remains open, and no specific event-consumption relationship (including OrderSubmitted) is yet authorized.
 
 ### Payments Module
 
@@ -112,7 +113,7 @@ A new module is added only when a new bounded context is ratified through a deci
 | --- | --- | --- | --- | --- | --- |
 | 1. Purpose | ADR-016, ADR-018 | Section 5 | Section 3 | Section 1 | Section 1 |
 | 2. Module Design Principles | ADR-001, ADR-003, ADR-004, ADR-009, ADR-018 | — | — | Section 2 | — |
-| 3. Core Modules | ADR-002, ADR-005, ADR-018, ADR-019, ADR-020 | Section 6 | Section 3 | Sections 5–7 | Sections 4–5 |
+| 3. Core Modules | ADR-002, ADR-005, ADR-018, ADR-019, ADR-020, ADR-033 (Notifications) | Section 6 | Section 3 | Sections 5–7 | Sections 4–5 |
 | 4. Shared Capabilities | ADR-010, ADR-011, ADR-012 | Sections 14–15 | — | — | Sections 8–9 |
 | 5. Dependency Rules | ADR-003, ADR-004, ADR-005, ADR-009 | Section 8 | — | Section 8 | Section 6 |
 | 6. Application Coordination | — | Section 8 | Section 7 | Sections 2, 8 | — |

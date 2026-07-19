@@ -65,7 +65,7 @@ DOMAIN_MODEL.md Section 8 identifies which of the events above become business e
 - **DriverAvailabilityChanged** is relied upon by Dispatch, which needs to know which drivers are currently available in order to make an assignment.
 - **AssignmentAccepted** is relied upon by Order Management, which needs to know an assignment has been confirmed in order to track the order's status.
 
-In addition, the Notification Delivery and Analytics Aggregation domain services (DOMAIN_MODEL.md Section 7) are each described as producing their output from information obtained from other domains, without owning that information themselves. This means any event in this catalog may, in principle, be relied upon by Notifications or Analytics; the Domain Model does not name which specific events each of them consumes, and this document does not invent that specificity.
+In addition, the Notification Delivery and Analytics Aggregation domain services (DOMAIN_MODEL.md Section 7) are each described as producing their output from information obtained from other domains, without owning that information themselves. This means any event in this catalog may, in principle, be relied upon by Notifications or Analytics; the Domain Model does not name which specific events each of them consumes, and this document does not invent that specificity. [ADR-033: Notifications Module and Event Consumption Boundary](ADR/ADR-033-Notifications-Module-and-Event-Consumption-Boundary.md) has since examined this specific gap for Notifications and confirmed it remains open, pending a product/business decision — it does not resolve the silence, only records that it was deliberately examined and left unresolved rather than overlooked.
 
 ## 10. Event Ownership Rules
 
@@ -84,4 +84,4 @@ In addition, the Notification Delivery and Analytics Aggregation domain services
 | AssignmentAccepted | Section 3 (Fair Dispatch) | ADR-002, ADR-003 | Section 10 (Acceptance) | Sections 6, 9 | Sections 4, 8, 11 |
 | DriverAvailabilityChanged | Section 3 (Driver Ownership) | ADR-005, ADR-009 | Section 10 (Availability) | Sections 3, 9 | Sections 4, 8, 11 |
 
-Where this document is silent — including on Passenger Domain Events in Section 8 — no lower-priority document may fill that silence by invention; resolution requires DOMAIN_MODEL.md to be extended first, per the authority order established in PROJECT_CONSTITUTION.md Section 5.
+Where this document is silent — including on Passenger Domain Events in Section 8, and on which specific events Notifications or Analytics consume in Section 9 (examined, and left open pending a product decision, by ADR-033) — no lower-priority document may fill that silence by invention; resolution requires DOMAIN_MODEL.md, or USE_CASE_CATALOG.md/PRODUCT_FOUNDATION.md for the Section 9 gap specifically, to be extended first, per the authority order established in PROJECT_CONSTITUTION.md Section 5.

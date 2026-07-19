@@ -166,10 +166,15 @@ A contract evolves only through a decision that explicitly supersedes it, consis
 | 8. Data Access Boundaries | ADR-005, ADR-009, ADR-019 | — | — | Section 7 | — | — | — | Sections 4–5 |
 | 9. External Boundary Interfaces | ADR-011, ADR-020 | Section 3 | — | — | — | — | Sections 3–4, 8, 12 | — |
 | 10. Evolution Strategy | ADR-010, ADR-015, ADR-021 | Section 16 | — | Section 8 | — | — | Section 9 | Section 10 |
-| 12. MVP Contract Verification and Transport Selection (Addendum) | ADR-027, ADR-028 | — | Section 10 | — | — | — | — | — |
+| 12. MVP Contract Verification and Transport Selection (Addendum) | ADR-027, ADR-028 | — | Section 10 | — | — | — | — |
+| 13. Notifications Module Boundary Confirmation (Addendum) | ADR-017, ADR-018, ADR-025, ADR-026, ADR-033 | — | — | Section 3 (Notifications) | — | Section 9 | — | — |
 
 ## 12. MVP Contract Verification and Transport Selection (Addendum)
 
 Until ADR-028's selected transport category (message broker for events, REST for direct request-driven interaction) has a specific product chosen and implemented, compatibility between a contract's provider and consumer is verified through the mechanism ADR-027 establishes: a minimal, primitive-typed application-layer boundary on each side, checked only through test-scoped module references, never through a production-code dependency between modules. This addendum does not alter the contracts already stated in Section 5; it records how their correctness is checked ahead of transport implementation, and which category of transport (ADR-028) will eventually carry them.
 
-Where this document is silent — including on which specific events Notifications and Analytics consume — no lower-priority document may fill that silence by invention; resolution requires the relevant higher-priority document to be extended first, per the authority order established in PROJECT_CONSTITUTION.md Section 5.
+## 13. Notifications Module Boundary Confirmation (Addendum)
+
+[ADR-033: Notifications Module and Event Consumption Boundary](ADR/ADR-033-Notifications-Module-and-Event-Consumption-Boundary.md) confirmed that Notifications is entitled, per ADR-017/ADR-018/ADR-026, to become an independently deployable module, but found no approved document authorizes a specific event-consumption relationship for it — the generic contract in Section 5 and the generic entries in Section 7's table remain exactly as stated, unaltered. ADR-033 also reaffirmed that ADR-025's own database-technology gate for Notifications remains a separate, still-open prerequisite. This addendum does not change any contract in Sections 4, 5, or 7; it records that the silence they already stated on Notifications' specific consumption was examined, not overlooked, and remains open pending a product/business decision.
+
+Where this document is silent — including on which specific events Notifications and Analytics consume (examined, and left open pending a product decision, by ADR-033) — no lower-priority document may fill that silence by invention; resolution requires the relevant higher-priority document to be extended first, per the authority order established in PROJECT_CONSTITUTION.md Section 5.
