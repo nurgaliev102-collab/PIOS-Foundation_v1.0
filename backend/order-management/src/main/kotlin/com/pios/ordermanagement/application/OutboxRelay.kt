@@ -17,17 +17,22 @@ import org.springframework.stereotype.Component
  * actual confirmation, and one record's failure does not stop the rest
  * of the batch from being attempted (ADR-032).
  *
- * [eventPublisher] defaults to [NoOpEventPublisher] so that a caller not
- * concerned with actual publication (for example, a test only checking
- * which records are pending) does not need a real broker; a real,
- * Spring-wired instance always receives the real
- * [com.pios.ordermanagement.persistence.RabbitMQEventPublisher] bean
- * instead.
+ * [eventPublisher] has no default. A Kotlin default here would let Spring
+ * silently fall back to it whenever no [EventPublisher] bean can be
+ * resolved (for example, RabbitMQ autoconfiguration failing to produce a
+ * `RabbitTemplate` bean) — constructing this relay with
+ * [NoOpEventPublisher] and discarding every event without any error,
+ * exactly the silent-data-loss failure mode Hardening Review v1.0
+ * identified. Requiring the argument means a production context missing a
+ * real [EventPublisher] bean fails to start with a clear
+ * `NoSuchBeanDefinitionException` instead. A caller that genuinely wants
+ * no-op publication (for example, a test only checking which records are
+ * pending) passes [NoOpEventPublisher] explicitly.
  */
 @Component
 class OutboxRelay(
     private val outboxRepository: OutboxRepository,
-    private val eventPublisher: EventPublisher = NoOpEventPublisher
+    private val eventPublisher: EventPublisher
 ) {
     private val logger = LoggerFactory.getLogger(OutboxRelay::class.java)
 
