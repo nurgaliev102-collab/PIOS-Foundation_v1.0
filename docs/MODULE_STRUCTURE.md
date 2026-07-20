@@ -35,6 +35,7 @@ Module Structure exists to give each of the eight already-ratified architectural
 - **Responsibility.** Connecting a transportation request to a driver, exclusively (ADR-002).
 - **Owned capabilities.** Assign Order and Accept Assignment (APPLICATION_ARCHITECTURE.md Section 6); Retrieve Assignment (Section 7); OrderAssigned and AssignmentAccepted (EVENT_CATALOG.md Section 6).
 - **Boundary.** No other module determines or changes an assignment; the specific assignment criteria are excluded from this document as from every other (ADR-002).
+- **Assignment decision architecture.** [ADR-034: Assignment Policy and Dispatch Decision Architecture](ADR/ADR-034-Assignment-Policy-and-Dispatch-Decision-Architecture.md) defines the input boundary (what Dispatch's eventual assignment decision may and must never use) and the Assignment Policy abstraction the decision will sit behind, without choosing or authorizing any algorithm.
 
 ### Driver Management Module
 
