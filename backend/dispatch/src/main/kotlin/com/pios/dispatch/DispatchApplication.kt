@@ -2,6 +2,7 @@ package com.pios.dispatch
 
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
+import org.springframework.scheduling.annotation.EnableScheduling
 
 /**
  * Structural boundary for the Dispatch module.
@@ -12,8 +13,14 @@ import org.springframework.boot.runApplication
  * started as its own, independently deployable unit, consistent with
  * MODULE_STRUCTURE.md and ADR-023/ADR-026. Per ADR-002, the specific
  * assignment criteria are never implemented here.
+ *
+ * [EnableScheduling] activates the periodic production trigger
+ * (`com.pios.dispatch.application.OutboxRelayScheduler`) for the
+ * already-existing outbox relay (Implementation Plan: Production Outbox
+ * Relay Trigger v1.0).
  */
 @SpringBootApplication
+@EnableScheduling
 class DispatchApplication
 
 fun main(args: Array<String>) {

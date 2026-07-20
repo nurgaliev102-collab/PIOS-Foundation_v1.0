@@ -17,3 +17,11 @@ spring:
 
 server:
   port: 8081
+
+# Implementation Plan: Production Outbox Relay Trigger v1.0. Interval, in
+# milliseconds, between the end of one OutboxRelayScheduler tick and the
+# start of the next -- a configuration default, not a product invariant.
+pios:
+  outbox:
+    relay:
+      fixed-delay-ms: 2000
