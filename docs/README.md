@@ -4,6 +4,8 @@ This directory is the documentation hierarchy for the PIOS platform. It is the s
 
 As of Repository Foundation v1.0, implementation has begun in [../backend/](../backend/), per [PROJECT_SCAFFOLDING_PLAN.md](PROJECT_SCAFFOLDING_PLAN.md) and [REPOSITORY_INITIALIZATION_PLAN.md](REPOSITORY_INITIALIZATION_PLAN.md). Code never duplicates this documentation; it references it.
 
+A new AI agent picking up this project should start at [../project-brain/AI_HANDOFF.md](../project-brain/AI_HANDOFF.md) — a portable, canonical consolidation of project history, current authority, and current code reality, subordinate to this documentation hierarchy, never a replacement for it.
+
 ## Structure
 
 - [Constitution](#constitution)
