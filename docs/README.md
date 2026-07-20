@@ -138,3 +138,5 @@ The [Repository Initialization Plan](REPOSITORY_INITIALIZATION_PLAN.md) defines 
 Product scope and requirements.
 
 The [Product Foundation](PRODUCT_FOUNDATION.md) defines the product domain: what PIOS is, who participates in it, why it exists, and where its architectural boundaries originate. It derives from the Constitution and the ADR Foundation and precedes any future PRD; the Domain Model and Use Case Catalog now build on it.
+
+The [Product Baseline v2.0](PRODUCT_BASELINE_V2.md) reconciles a consolidated product/domain model against current repository authority, classifying each claim as ratified, derived, hypothesis, or open, and records the resulting repository impact analysis and required decision sequence. It is subordinate to the Constitution and creates no Product Decision itself.
