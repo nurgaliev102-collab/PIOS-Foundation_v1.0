@@ -158,3 +158,5 @@ The [Product Experiment: Network Pilot v1.0](PRODUCT_EXPERIMENT_NETWORK_PILOT_V1
 The [Product Experiment: Network Pilot Execution Plan v1.0](PRODUCT_EXPERIMENT_NETWORK_PILOT_EXECUTION_PLAN.md) defines the concrete operational execution of the Network Pilot — participant selection, role responsibilities, the exact manual workflow, a manual case log template, interview questions, and qualitative (non-thresholded) decision criteria for interpreting results.
 
 The [Product Experiment: Network Pilot Operations Checklist v1.0](PRODUCT_EXPERIMENT_NETWORK_PILOT_OPERATIONS_CHECKLIST.md) turns the Execution Plan into a runnable, itemized checklist for preparation, role guidance, case execution, data collection, interviews, weekly review, safety boundaries, and end-of-pilot review, without adding any new mechanism.
+
+The [Product Experiment: Network Pilot Launch Pack v1.0](PRODUCT_EXPERIMENT_NETWORK_PILOT_LAUNCH_PACK.md) is the practical package for starting the first pilot cases — recruitment guidance, first-contact scripts, participation confirmation, a first-case runbook, case/weekly review templates, safety rules, and qualitative exit conditions.
