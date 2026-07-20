@@ -26,6 +26,8 @@ These principles describe the philosophy that product decisions must honor. They
 - **Simplicity.** The simplest solution that satisfies a genuine need is preferred over a more elaborate one.
 - **Reliability.** The platform must behave predictably and consistently for the people who depend on it.
 - **Trust.** Every product decision is evaluated, in part, by whether it strengthens or weakens the trust riders, drivers, and operators place in the platform.
+- **Relationship Protection.** Durable, recognized relationships between a driver and the passengers or corporate customers they recurrently serve are a first-class product concern, never owned or captured by the platform, and never a byproduct of any single transaction.
+- **No Hidden Algorithmic Decisions.** Replacing a human decision-making process with a software one never justifies less transparency than the process it replaces; an algorithmic decision must remain as explainable as Fair Dispatch and Transparency already require of any other decision.
 
 ## 4. Engineering Principles
 
@@ -42,6 +44,9 @@ Documentation within PIOS is organized in a strict precedence order. A document 
 
 ```
 Constitution
+    |
+    v
+Product Decisions (docs/PRODUCT_DECISION_*.md)
     |
     v
 ADR (Architecture Decision Records)
@@ -63,6 +68,8 @@ Implementation
 ```
 
 This Constitution sits above all other documents. When a conflict is found between two documents, the document higher in this hierarchy prevails, and the lower document is corrected.
+
+A Product Decision (for example, `docs/PRODUCT_DECISION_DISPATCH_PHILOSOPHY.md`) records a Product Owner-authority decision about product meaning, principle, or scope — informing the ADRs and architecture below it, never itself an architectural or implementation decision, and never contradicting this Constitution.
 
 ## 6. Architecture Governance
 
@@ -189,3 +196,84 @@ This Constitution overrides every other document produced for this project. In t
 Future documents may extend this Constitution by adding detail within the scope it defines. Future documents may clarify this Constitution by resolving ambiguity without changing its meaning. Future documents may not contradict this Constitution.
 
 Any amendment to this Constitution itself is a governance act, not a documentation act, and requires explicit, deliberate approval at the highest level of project authority. It is not amended implicitly through the accumulation of lower-level documents.
+
+---
+
+**Sections 18 onward** were added as a deliberate, explicit governance act consolidating product philosophy already approved across PRODUCT_FOUNDATION.md, DOMAIN_MODEL.md, USE_CASE_CATALOG.md, EVENT_CATALOG.md, PRODUCT_DECISION_DISPATCH_PHILOSOPHY.md, PRODUCT_DECISION_PERSONAL_CLIENT_RELATIONSHIP.md, and ADR-001 through ADR-034 — per this Section's own rule, this is an addition of detail within the scope Sections 1–17 already define, not a change to their meaning. Numbering above is untouched so that every existing cross-reference to a section of this Constitution elsewhere in the documentation set remains valid.
+
+## 18. Fundamental Laws
+
+The Product Principles in Section 3 are this Constitution's fundamental, immutable laws. Consolidated here under the specific names this addition uses elsewhere in the document, each pointing back to where it is actually established rather than restating it:
+
+- **Driver Independence** — Section 3, Driver Ownership; PRODUCT_FOUNDATION.md Section 12 ("the platform cannot assume centralized control or ownership of drivers, vehicles, or fleets").
+- **Trust Preservation** — Section 3, Trust.
+- **Fair Shared Dispatch** — Section 3, Fair Dispatch.
+- **Transparency** — Section 3, Transparency.
+- **Relationship Protection** — Section 3 (added above); PRODUCT_DECISION_PERSONAL_CLIENT_RELATIONSHIP.md.
+- **No Hidden Algorithmic Decisions** — Section 3 (added above); PRODUCT_DECISION_DISPATCH_PHILOSOPHY.md Section 6.
+
+**Reciprocity is deliberately not included as a law.** ADR-034 Part 4 names "reciprocal balancing" only as one of several unapproved candidate Assignment Policy strategies, explicitly stating "none is approved, previewed, or ranked." Including it here as an immutable law would contradict that ADR directly. It is carried instead as an open question (Section 26).
+
+## 19. Identity
+
+**What PIOS is.** A trustworthy, transparent mechanism connecting independent supply with demand from multiple sources, without concentrating unaccountable control over that connection in a single intermediary (PRODUCT_FOUNDATION.md Section 1).
+
+**What PIOS is not:**
+
+- **Not an opaque aggregator.** PRODUCT_FOUNDATION.md Section 1's own Purpose is stated in direct opposition to this; Section 3's Transparency law reinforces it.
+- **Not a hidden dispatcher.** A digital system that reproduces the same opacity as the manual dispatching it replaces would repeat exactly the failure mode PRODUCT_FOUNDATION.md Section 4's Core Problem exists to correct — see Section 18's No Hidden Algorithmic Decisions law.
+- **Not an owner of driver relationships.** PRODUCT_DECISION_PERSONAL_CLIENT_RELATIONSHIP.md Part 1 establishes directly that a Personal Client Relationship is not ownership of either party.
+- **Not (necessarily) a commission-based marketplace — stated precisely, not overclaimed.** DOMAIN_MODEL.md Section 14 is explicit: "any pricing, commission, or regulatory rule, none of which is established by any approved document." PIOS's identity does not include commission-based aggregation, but this is because the commercial model remains genuinely undecided, not because a commission model has been ratified against. Treated as an open question (Section 26), not a settled identity claim.
+
+## 20. Economic Model Principles
+
+- A driver remains an independent entrepreneur, never an employee of the platform (PRODUCT_FOUNDATION.md Section 12).
+- Personal Client relationships are preserved, not absorbed into platform-mediated demand (PRODUCT_DECISION_PERSONAL_CLIENT_RELATIONSHIP.md; PRODUCT_FOUNDATION.md Section 13).
+- Shared (Platform Order) demand is executed through the platform's own dispatch mechanism (ADR-002) — this is an execution responsibility, not a claim of ownership over the demand or the relationships fulfilling it.
+- The platform does not capture a driver's personal client relationships as its own asset (Section 18, Relationship Protection).
+
+## 21. Relationship Principles
+
+Personal Client Relationship, consolidated from PRODUCT_DECISION_PERSONAL_CLIENT_RELATIONSHIP.md — only what that document ratifies:
+
+- **Not ownership** of either party (Part 1).
+- **Not guaranteed orders** — no ratified document connects it to Assignment (Part 6).
+- **Independent from any single order** — DOMAIN_MODEL.md Section 13, stated directly.
+- **Recognized, recurring** — the ratified characterization (PRODUCT_FOUNDATION.md Section 10); "recognition" itself is real, its precise mechanism is not yet defined.
+
+**Deliberately not stated as principles here, because they are open questions, not ratified facts:** whether the relationship is exclusive, and whether recognition requires mutual confirmation from both parties. PRODUCT_DECISION_PERSONAL_CLIENT_RELATIONSHIP.md Part 8 lists both explicitly as unresolved; stating either here as settled would contradict that document. See Section 26.
+
+## 22. Dispatch Principles
+
+- Dispatch handles the execution of shared assignment, exclusively (ADR-002).
+- Dispatch does not own, and has no ratified access to, Personal Client Relationship information (PRODUCT_DECISION_PERSONAL_CLIENT_RELATIONSHIP.md Part 2).
+- Dispatch does not invent business rules; the specific assignment algorithm and its criteria remain undefined by every document in this project, deliberately (ADR-002; ADR-034).
+- Dispatch's eventual assignment decision is made through Assignment Policy — a replaceable abstraction, not a decision embedded in Dispatch's own infrastructure (ADR-034 Part 3).
+
+## 23. Network Principles
+
+The platform's ecosystem (PRODUCT_FOUNDATION.md Section 6) exists and endures because its participants preserve mutual trust in it (Section 18, Trust Preservation) — this is the Constitution's own Mission (Section 2) applied to the ecosystem as a whole, not a new claim.
+
+**Reciprocity as the basis of help between participants is not stated as a principle here.** No approved document establishes this; ADR-034 treats reciprocal balancing only as one unapproved candidate among several for a future Assignment Policy. Carried as an open question (Section 26).
+
+## 24. Anti-Principles
+
+PIOS must never become: an opaque aggregator; a platform that replaces manual dispatching with an equally hidden algorithmic one; a system optimized only for platform benefit at drivers' expense. Each is established directly in Section 19 above. The fuller reasoning and evidence for each is recorded in PRODUCT_DECISION_DISPATCH_PHILOSOPHY.md Section 6, referenced here rather than restated, consistent with the Single Source of Truth principle (Section 4).
+
+## 25. Evolution Rules
+
+A new feature, product decision, or architectural decision must not violate the Fundamental Laws (Section 18) or contradict this Constitution, consistent with Section 17's existing rule and the Change Management process in Section 12. A feature that would require violating a Fundamental Law is not implemented as proposed; either the feature is reshaped to comply, or a deliberate constitutional amendment (Section 17) is sought first — a law is never quietly worked around at a lower layer of the hierarchy (Section 5).
+
+## 26. Open Product Questions
+
+Consolidated from PRODUCT_DECISION_DISPATCH_PHILOSOPHY.md and PRODUCT_DECISION_PERSONAL_CLIENT_RELATIONSHIP.md; listed, not resolved:
+
+- The concrete fairness metric or model for Dispatch's eventual assignment decision.
+- Whether, and how, reciprocity factors into help between participants, or into any future Assignment Policy — currently only one of several unapproved candidate strategies (ADR-034).
+- The assignment algorithm itself — deliberately undefined by every document in this project (ADR-002; ADR-034).
+- The platform's commercial/commission model (Section 19).
+- Personal Client Relationship priority rules relative to shared dispatch, and whether a personal-client-directed order is even routed through Dispatch's decision at all.
+- Whether a Personal Client Relationship can be exclusive, and whether it requires mutual confirmation from both parties (Section 21).
+- Any driver incentive, contribution, or reward model — currently unsupported by any evidence, not merely undecided in detail.
+
+Resolution of any of these requires a Product Owner decision (Section 9) recorded as a Product Decision (Section 5) before any lower-layer document may act on it.
