@@ -156,3 +156,5 @@ The [Product Decision: MVP Pilot Boundary v1.0](PRODUCT_DECISION_MVP_PILOT_BOUND
 The [Product Experiment: Network Pilot v1.0](PRODUCT_EXPERIMENT_NETWORK_PILOT_V1.md) operationalizes the MVP Pilot Boundary into one concrete, entirely manual Driver A / Coordinator / Driver B scenario, defining data collection and evidence patterns for H1/H2 without any software, ranking, or automated matching.
 
 The [Product Experiment: Network Pilot Execution Plan v1.0](PRODUCT_EXPERIMENT_NETWORK_PILOT_EXECUTION_PLAN.md) defines the concrete operational execution of the Network Pilot — participant selection, role responsibilities, the exact manual workflow, a manual case log template, interview questions, and qualitative (non-thresholded) decision criteria for interpreting results.
+
+The [Product Experiment: Network Pilot Operations Checklist v1.0](PRODUCT_EXPERIMENT_NETWORK_PILOT_OPERATIONS_CHECKLIST.md) turns the Execution Plan into a runnable, itemized checklist for preparation, role guidance, case execution, data collection, interviews, weekly review, safety boundaries, and end-of-pilot review, without adding any new mechanism.
