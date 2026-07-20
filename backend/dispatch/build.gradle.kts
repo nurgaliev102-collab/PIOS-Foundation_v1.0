@@ -36,6 +36,17 @@ dependencies {
     implementation("org.flywaydb:flyway-core")
     implementation("org.flywaydb:flyway-database-postgresql")
 
+    // Dispatch Consumer Foundation v1.0: Spring AMQP client for RabbitMQ
+    // (ADR-029, ADR-031), consuming Driver Management's own
+    // driver-management.events exchange through Dispatch's own queue and
+    // dead-letter queue. spring-retry + spring-boot-starter-aop back the
+    // bounded retry-then-DLQ policy (RetryInterceptorBuilder), Spring
+    // AMQP's own standard mechanism for this -- not a custom-built retry
+    // platform.
+    implementation("org.springframework.boot:spring-boot-starter-amqp")
+    implementation("org.springframework.retry:spring-retry")
+    implementation("org.springframework.boot:spring-boot-starter-aop")
+
     testImplementation(kotlin("test"))
 
     // Test-scoped only, per ADR-027 (MVP Integration Mechanism): used
