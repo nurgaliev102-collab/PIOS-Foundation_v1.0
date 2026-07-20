@@ -42,6 +42,15 @@ dependencies {
     // mapping framework is added.
     implementation("org.springframework.boot:spring-boot-starter-amqp")
 
+    // Tranche 1: Dispatch Event Publishing Completion -- this module's own
+    // first RabbitMQ consumer (AssignmentAccepted). spring-retry +
+    // spring-boot-starter-aop back the bounded retry-then-DLQ policy
+    // (RetryInterceptorBuilder), Spring AMQP's own standard mechanism for
+    // this -- not a custom-built retry platform, mirroring Dispatch's own
+    // already-proven consumer dependencies exactly.
+    implementation("org.springframework.retry:spring-retry")
+    implementation("org.springframework.boot:spring-boot-starter-aop")
+
     testImplementation(kotlin("test"))
 
     // Test-scoped only, per ADR-027 (MVP Integration Mechanism): used
