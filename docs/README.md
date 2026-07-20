@@ -160,3 +160,5 @@ The [Product Experiment: Network Pilot Execution Plan v1.0](PRODUCT_EXPERIMENT_N
 The [Product Experiment: Network Pilot Operations Checklist v1.0](PRODUCT_EXPERIMENT_NETWORK_PILOT_OPERATIONS_CHECKLIST.md) turns the Execution Plan into a runnable, itemized checklist for preparation, role guidance, case execution, data collection, interviews, weekly review, safety boundaries, and end-of-pilot review, without adding any new mechanism.
 
 The [Product Experiment: Network Pilot Launch Pack v1.0](PRODUCT_EXPERIMENT_NETWORK_PILOT_LAUNCH_PACK.md) is the practical package for starting the first pilot cases — recruitment guidance, first-contact scripts, participation confirmation, a first-case runbook, case/weekly review templates, safety rules, and qualitative exit conditions.
+
+The [PIOS Consolidation & Implementation Readiness Review v1.0](PIOS_CONSOLIDATION_IMPLEMENTATION_READINESS_REVIEW.md) is a control-checkpoint audit reconstructing PIOS's complete state from the entire authority chain and actual repository, identifying the real product core, implementation-ready work, and a recommended first implementation tranche, independent of the manual pilot.
