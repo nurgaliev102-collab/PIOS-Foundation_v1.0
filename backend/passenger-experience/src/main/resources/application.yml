@@ -4,3 +4,10 @@ spring:
 
 server:
   port: 8082
+
+# Tranche 2: Passenger Experience REST Transport. Order Management's own
+# Submit Order REST endpoint (server.port in order-management's own
+# application.yml).
+pios:
+  order-management:
+    base-url: http://127.0.0.1:8083
