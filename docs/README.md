@@ -140,3 +140,5 @@ Product scope and requirements.
 The [Product Foundation](PRODUCT_FOUNDATION.md) defines the product domain: what PIOS is, who participates in it, why it exists, and where its architectural boundaries originate. It derives from the Constitution and the ADR Foundation and precedes any future PRD; the Domain Model and Use Case Catalog now build on it.
 
 The [Product Baseline v2.0](PRODUCT_BASELINE_V2.md) reconciles a consolidated product/domain model against current repository authority, classifying each claim as ratified, derived, hypothesis, or open, and records the resulting repository impact analysis and required decision sequence. It is subordinate to the Constitution and creates no Product Decision itself.
+
+The [Product Decision: Fulfillment Authority and Scope v1.0](PRODUCT_DECISION_FULFILLMENT_AUTHORITY_SCOPE.md) defines the authority boundary governing when and how a transport request may move from preferred/direct fulfillment toward alternative fulfillment, resolving who may authorize scope expansion while explicitly deferring Opportunity and Eligibility design to future decisions.
