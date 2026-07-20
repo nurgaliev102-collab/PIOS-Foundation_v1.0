@@ -154,3 +154,5 @@ The [ADR Migration Strategy and Architecture Impact Analysis](ADR_MIGRATION_STRA
 The [Product Decision: MVP Pilot Boundary v1.0](PRODUCT_DECISION_MVP_PILOT_BOUNDARY.md) defines the smallest realistic pilot validating PIOS's product core, finding that the existing Assignment flow already supports a manual, no-new-code fallback loop sufficient to test both existential hypotheses (driver willingness to share, willingness to pay).
 
 The [Product Experiment: Network Pilot v1.0](PRODUCT_EXPERIMENT_NETWORK_PILOT_V1.md) operationalizes the MVP Pilot Boundary into one concrete, entirely manual Driver A / Coordinator / Driver B scenario, defining data collection and evidence patterns for H1/H2 without any software, ranking, or automated matching.
+
+The [Product Experiment: Network Pilot Execution Plan v1.0](PRODUCT_EXPERIMENT_NETWORK_PILOT_EXECUTION_PLAN.md) defines the concrete operational execution of the Network Pilot — participant selection, role responsibilities, the exact manual workflow, a manual case log template, interview questions, and qualitative (non-thresholded) decision criteria for interpreting results.
