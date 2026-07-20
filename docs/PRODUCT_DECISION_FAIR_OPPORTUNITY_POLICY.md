@@ -68,6 +68,19 @@ Reusing, and extending only for clarity of distinction, the four candidate dimen
 
 **[HYPOTHESIS] — one candidate recorded, not selected.** ADR-034 Part 4 already names Simple FIFO (submission order) as one candidate future strategy, alongside several others, with none "approved, previewed, or ranked." FIFO is the simplest candidate consistent with every ratified principle above: it requires no new driver measurement (no contribution tracking, no rating), is trivially explainable (submission order is externally verifiable), and satisfies Equal Opportunity's qualitative direction (Section 3) without requiring Balanced Participation to be separately measured. This document records it as one legitimate pilot candidate; it does not adopt, rank, or preview it over any other candidate ADR-034 Part 4 already named.
 
+## 11. Candidate Mechanisms Evaluated, None Chosen
+
+Per this task's own instruction, each of the following is evaluated only as a possible future mechanism — none is chosen, ranked, previewed, or implemented here:
+
+- **Round Robin.** **[HYPOTHESIS]** — matches ADR-034 Part 4's "fair queue (some notion of rotation across drivers)." Requires no new driver measurement beyond Eligibility (Section 4 of PRODUCT_DECISION_ELIGIBILITY_MINIMUM_TRUST_BOUNDARY.md), and is a plausible operationalization of Balanced Participation (Section 3), but "rotation" itself is undefined in any measurable sense — same caution as Section 5.
+- **Ranking system.** **[HYPOTHESIS]** — the general mechanism Contribution-Based Priority and Service Quality Priority (Section 3) would both require; not itself a distinct dimension, but the implementation shape either would need. Requires a new driver measurement no ratified document establishes.
+- **Scoring system.** **[HYPOTHESIS]** — a specific technique for implementing a ranking system; carries the same evidentiary status. No formula, weighting, or scoring model is evaluated, previewed, or implied.
+- **AI selection.** **[HYPOTHESIS]** — matches ADR-034 Part 4's "machine-learning-based selection," the most speculative candidate named there. Would require every other candidate input (contribution, service quality, or any other signal) to already be ratified before it could even be trained against; presupposes decisions this document explicitly does not make (Sections 4–5).
+- **Reciprocity engine.** **[OPEN]** — unchanged from Section 7; matches ADR-034 Part 4's "reciprocal balancing," one of several unapproved candidates, "none... approved, previewed, or ranked."
+- **Reputation system.** **[OPEN]** — unchanged from Section 3 and PRODUCT_DECISION_ELIGIBILITY_MINIMUM_TRUST_BOUNDARY.md Section 2; matches ADR-034 Part 4's "reputation-based selection," explicitly forbidden as a current input (ADR-034 Part 2).
+
+**Conclusion, restated:** all six are legitimate candidates for a *future* Assignment Policy implementation (ADR-034 Part 4), evaluated here only for how they would relate to the principles this document already established (Sections 1–9) — none is selected, designed, ranked, or implemented by this document, consistent with this task's own instruction.
+
 ## Explicit Preservations
 
 - **No hidden dispatcher preference.** **[RATIFIED]** — PRODUCT_DECISION_DISPATCH_PHILOSOPHY.md Section 3.
@@ -81,14 +94,16 @@ Reusing, and extending only for clarity of distinction, the four candidate dimen
 Per this task's own instruction, none of the following is designed here:
 
 - **Algorithm** — remains excluded from every level of documentation (ADR-002; ADR-034).
+- **Round Robin** — evaluated only as a candidate mechanism (Section 11); not chosen or implemented.
 - **Ranking system** — remains undesigned; Section 3 only classifies candidate dimensions, none selected.
-- **Scoring** — no scoring concept is introduced; Section 5's metrics remain unvalidated hypotheses.
+- **Scoring system** — no scoring concept is introduced; Section 5's metrics remain unvalidated hypotheses.
+- **AI selection** — evaluated only as a candidate mechanism (Section 11); not chosen, designed, or implied as a direction.
 - **Reciprocity engine** — remains excluded (Section 7).
 - **Reputation system** — remains **[OPEN]**, unchanged from PRODUCT_DECISION_ELIGIBILITY_MINIMUM_TRUST_BOUNDARY.md Section 2.
 
 ## Files Changed
 
-`docs/PRODUCT_DECISION_FAIR_OPPORTUNITY_POLICY.md` (new) is the only content file this decision creates. `docs/README.md` receives one minimal traceability pointer under its existing "Product" heading, consistent with the precedent set for the three preceding documents in this chain. No ADR, code, database, event, or API is created or modified.
+`docs/PRODUCT_DECISION_FAIR_OPPORTUNITY_POLICY.md` is the only content file this decision touches — originally created in an earlier pass of this same v1.0 decision, extended here (Section 11) to explicitly evaluate Round Robin and AI selection by name alongside the mechanisms already covered, per this task's own restated instruction. `docs/README.md` already carries its traceability pointer from that earlier pass; no further change to it is required. No ADR, code, database, event, or API is created or modified.
 
 ## Unresolved Decisions
 
@@ -127,5 +142,6 @@ Not an algorithm, ranking system, or ADR (all explicitly excluded). The most evi
 | 8. Payment/Subscription | PRODUCT_BASELINE_V2.md Sections 11, 13; PRODUCT_DECISION_ELIGIBILITY_MINIMUM_TRUST_BOUNDARY.md Section 7 |
 | 9. Transparency | PROJECT_CONSTITUTION.md Sections 3, 18; PRODUCT_DECISION_DISPATCH_PHILOSOPHY.md Section 3; PRODUCT_FOUNDATION.md Section 4 |
 | 10. MVP Candidate | ADR-034 Part 4 |
+| 11. Candidate Mechanisms Evaluated | ADR-034 Part 4; PRODUCT_DECISION_ELIGIBILITY_MINIMUM_TRUST_BOUNDARY.md Sections 2–3 |
 
 Where this document finds no evidence, it states so explicitly rather than filling the gap; resolution of any Unresolved Decision (above) requires a further Product Owner decision, per PROJECT_CONSTITUTION.md Section 7, before any lower-authority document — including a future ADR or implementation task — may act on it.
