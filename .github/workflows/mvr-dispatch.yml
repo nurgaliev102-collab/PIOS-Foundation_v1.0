@@ -1,0 +1,29 @@
+name: MVR Deterministic Dispatch
+
+on:
+  push:
+    branches: [main, "milestone/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  constitutional-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run deterministic milestone tests
+        working-directory: mvr
+        run: python -m unittest -v
+      - name: Run 10,000-order simulation
+        working-directory: mvr
+        run: python dispatch_simulation.py --decisions dispatch-decisions.jsonl | tee metrics.json
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: mvr-dispatch-evidence
+          path: |
+            mvr/metrics.json
+            mvr/dispatch-decisions.jsonl
