@@ -31,24 +31,40 @@ class ConcurrentDispatchTests(unittest.TestCase):
         b = self.second_instance()
         barrier = threading.Barrier(2)
         results, errors = [], []
-
         def worker(service, key):
             try:
                 barrier.wait()
                 results.append(service.accept(p.id, key))
             except Exception as exc:
                 errors.append(exc)
-
         t1 = threading.Thread(target=worker, args=(self.a, "K-A"))
         t2 = threading.Thread(target=worker, args=(b, "K-B"))
         t1.start(); t2.start(); t1.join(); t2.join()
         self.assertEqual([], errors)
         self.assertEqual(2, len(results))
         self.assertEqual(results[0], results[1])
-        rows = self.a.ledger.conn.execute("SELECT * FROM assignment_guard WHERE order_id=1").fetchall()
-        self.assertEqual(1, len(rows))
-        committed = [e for e in self.a.ledger.replay() if e.event_type == "ProposalCommitted"]
-        self.assertEqual(1, len(committed))
+        self.assertEqual(1, self.a.ledger.conn.execute("SELECT COUNT(*) FROM assignment_guard WHERE order_id=1").fetchone()[0])
+        self.assertEqual(1, len([e for e in self.a.ledger.replay() if e.event_type == "ProposalCommitted"]))
+
+    def test_crash_after_guard_before_event_rolls_back_both(self):
+        p = self.a.propose(1, 10, [10])
+        self.a.failpoint = "after_guard_before_event"
+        with self.assertRaisesRegex(RuntimeError, "INJECTED_CRASH_AFTER_GUARD"):
+            self.a.accept(p.id, "K1")
+        self.assertEqual(0, self.a.ledger.conn.execute("SELECT COUNT(*) FROM assignment_guard WHERE order_id=1").fetchone()[0])
+        self.assertEqual(0, len([e for e in self.a.ledger.replay() if e.event_type == "ProposalCommitted"]))
+        self.a.failpoint = None
+        assignment = self.a.accept(p.id, "K1-retry")
+        self.assertEqual(1, assignment.order_id)
+
+    def test_crash_after_event_before_commit_rolls_back_both(self):
+        p = self.a.propose(1, 10, [10])
+        self.a.failpoint = "after_event_before_commit"
+        with self.assertRaisesRegex(RuntimeError, "INJECTED_CRASH_AFTER_EVENT"):
+            self.a.accept(p.id, "K1")
+        self.assertEqual(0, self.a.ledger.conn.execute("SELECT COUNT(*) FROM assignment_guard WHERE order_id=1").fetchone()[0])
+        self.assertEqual(0, len([e for e in self.a.ledger.replay() if e.event_type == "ProposalCommitted"]))
+        self.assertTrue(self.a.ledger.verify_chain())
 
     def test_stale_instance_cannot_create_second_assignment(self):
         p = self.a.propose(1, 10, [10])
@@ -62,8 +78,6 @@ class ConcurrentDispatchTests(unittest.TestCase):
         p = self.a.propose(1, 10, [10, 11])
         b = self.second_instance()
         self.a.accept(p.id, "K1")
-        # b has stale memory, but propose in inherited core must not be trusted for cross-instance writes.
-        # Re-open to model request boundary refresh.
         b.close(); self.b = ConcurrentDispatchService(self.path)
         with self.assertRaisesRegex(DispatchConflict, "ORDER_ALREADY_ASSIGNED"):
             self.b.propose(1, 11, [10, 11])
@@ -75,6 +89,7 @@ class ConcurrentDispatchTests(unittest.TestCase):
         self.a = ConcurrentDispatchService(self.path)
         self.assertEqual(expected, self.a.core.assignment_by_order[1])
         self.a.core.assert_invariants()
+        self.assertTrue(self.a.ledger.verify_chain())
 
 
 if __name__ == "__main__":
