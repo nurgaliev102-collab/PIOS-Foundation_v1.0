@@ -14,114 +14,116 @@ class FencedProposal:
 
 
 class FencedDispatchService(ConcurrentDispatchService):
-    """Persistent fencing with one serialized durable terminal lifecycle boundary."""
+    """Persistent fencing with fail-closed durable recovery consistency."""
 
-    def _ensure_fencing_schema(self) -> None:
+    def _ensure_fencing_schema(self):
         self.ledger.conn.executescript("""
         CREATE TABLE IF NOT EXISTS order_fence (order_id INTEGER PRIMARY KEY,current_token INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS proposal_fence (proposal_id TEXT PRIMARY KEY,order_id INTEGER NOT NULL,fence_token INTEGER NOT NULL,UNIQUE(order_id,fence_token));
         CREATE TABLE IF NOT EXISTS proposal_terminal (proposal_id TEXT PRIMARY KEY,terminal_type TEXT NOT NULL CHECK(terminal_type IN ('COMMITTED','DECLINED','LAPSED')));
         """); self.ledger.conn.commit()
 
-    def __init__(self, db_path: str):
+    def __init__(self,db_path):
         super().__init__(db_path); self._ensure_fencing_schema(); self.fence_failpoint=None; self.terminal_failpoint=None
 
-    @staticmethod
-    def _next_proposal_id(conn):
-        rows=conn.execute("SELECT proposal_id FROM proposal_fence").fetchall(); n=max((int(r['proposal_id'][1:]) for r in rows),default=0); return f"P{n+1}"
+    def validate_recovery_consistency(self):
+        c=self.ledger.conn
+        if not self.ledger.verify_chain(): raise DispatchConflict('EVENT_LEDGER_CHAIN_INVALID')
+        for pf in c.execute('SELECT proposal_id,order_id,fence_token FROM proposal_fence').fetchall():
+            offered=c.execute("SELECT payload_json FROM event_ledger WHERE event_type='ProposalOffered' AND json_extract(payload_json,'$.proposal_id')=?",(pf['proposal_id'],)).fetchone()
+            if not offered: raise DispatchConflict('PROPOSAL_FENCE_WITHOUT_OFFER_EVIDENCE')
+            p=json.loads(offered['payload_json'])
+            if int(p['order_id'])!=pf['order_id'] or int(p.get('fence_token',-1))!=pf['fence_token']: raise DispatchConflict('PROPOSAL_FENCE_EVIDENCE_MISMATCH')
+        for of in c.execute('SELECT order_id,current_token FROM order_fence').fetchall():
+            mx=c.execute('SELECT MAX(fence_token) m FROM proposal_fence WHERE order_id=?',(of['order_id'],)).fetchone()['m']
+            if mx is None or mx!=of['current_token']: raise DispatchConflict('ORDER_FENCE_GENERATION_MISMATCH')
+        for t in c.execute('SELECT proposal_id,terminal_type FROM proposal_terminal').fetchall():
+            events=c.execute("SELECT event_type FROM event_ledger WHERE json_extract(payload_json,'$.proposal_id')=? AND event_type IN ('ProposalCommitted','ProposalDeclined','ProposalLapsed')",(t['proposal_id'],)).fetchall()
+            expected={'COMMITTED':'ProposalCommitted','DECLINED':'ProposalDeclined','LAPSED':'ProposalLapsed'}[t['terminal_type']]
+            if len(events)!=1 or events[0]['event_type']!=expected: raise DispatchConflict('TERMINAL_EVENT_MISMATCH')
+            assignment=c.execute('SELECT 1 FROM assignment_guard WHERE proposal_id=?',(t['proposal_id'],)).fetchone()
+            if (t['terminal_type']=='COMMITTED') != bool(assignment): raise DispatchConflict('TERMINAL_ASSIGNMENT_MISMATCH')
+        return True
 
     @staticmethod
-    def _durable_proposal_status(conn, proposal_id):
-        row=conn.execute("SELECT terminal_type FROM proposal_terminal WHERE proposal_id=?",(proposal_id,)).fetchone()
-        if row: return ProposalStatus(row['terminal_type'])
-        if conn.execute("SELECT 1 FROM assignment_guard WHERE proposal_id=?",(proposal_id,)).fetchone(): return ProposalStatus.COMMITTED
-        rows=conn.execute("SELECT event_type FROM event_ledger WHERE json_extract(payload_json,'$.proposal_id')=? ORDER BY seq",(proposal_id,)).fetchall()
-        status=ProposalStatus.OPEN
-        for event in rows:
-            if event['event_type']=='ProposalDeclined': status=ProposalStatus.DECLINED
-            elif event['event_type']=='ProposalLapsed': status=ProposalStatus.LAPSED
-            elif event['event_type']=='ProposalCommitted': status=ProposalStatus.COMMITTED
-        return status
-
+    def _next_proposal_id(c):
+        rows=c.execute('SELECT proposal_id FROM proposal_fence').fetchall(); return f"P{max((int(r['proposal_id'][1:]) for r in rows),default=0)+1}"
     @staticmethod
-    def _insert_event(conn,event_id,event_type,aggregate_id,payload):
-        payload_json=json.dumps(payload,sort_keys=True,separators=(",",":"),ensure_ascii=True)
-        last=conn.execute("SELECT event_hash FROM event_ledger ORDER BY seq DESC LIMIT 1").fetchone(); prev=last['event_hash'] if last else 'GENESIS'
-        h=hashlib.sha256('|'.join((prev,event_id,event_type,aggregate_id,payload_json)).encode()).hexdigest()
-        conn.execute("INSERT INTO event_ledger(event_id,event_type,aggregate_id,payload_json,prev_hash,event_hash) VALUES(?,?,?,?,?,?)",(event_id,event_type,aggregate_id,payload_json,prev,h))
-
-    def _assert_current_fence_row(self,conn,proposal_id,fence_token):
-        row=conn.execute("SELECT pf.order_id,pf.fence_token,of.current_token FROM proposal_fence pf JOIN order_fence of ON of.order_id=pf.order_id WHERE pf.proposal_id=?",(proposal_id,)).fetchone()
-        if row is None: raise DispatchConflict('UNKNOWN_PROPOSAL_FENCE')
-        if row['fence_token']!=fence_token or row['current_token']!=fence_token: raise DispatchConflict('STALE_PROPOSAL_FENCE')
-        return row
+    def _durable_proposal_status(c,pid):
+        r=c.execute('SELECT terminal_type FROM proposal_terminal WHERE proposal_id=?',(pid,)).fetchone()
+        if r:return ProposalStatus(r['terminal_type'])
+        if c.execute('SELECT 1 FROM assignment_guard WHERE proposal_id=?',(pid,)).fetchone():return ProposalStatus.COMMITTED
+        rows=c.execute("SELECT event_type FROM event_ledger WHERE json_extract(payload_json,'$.proposal_id')=? ORDER BY seq",(pid,)).fetchall(); s=ProposalStatus.OPEN
+        for e in rows:
+            if e['event_type']=='ProposalDeclined':s=ProposalStatus.DECLINED
+            elif e['event_type']=='ProposalLapsed':s=ProposalStatus.LAPSED
+            elif e['event_type']=='ProposalCommitted':s=ProposalStatus.COMMITTED
+        return s
+    @staticmethod
+    def _insert_event(c,eid,etype,agg,payload):
+        pj=json.dumps(payload,sort_keys=True,separators=(',',':'),ensure_ascii=True); last=c.execute('SELECT event_hash FROM event_ledger ORDER BY seq DESC LIMIT 1').fetchone(); prev=last['event_hash'] if last else 'GENESIS'; h=hashlib.sha256('|'.join((prev,eid,etype,agg,pj)).encode()).hexdigest(); c.execute('INSERT INTO event_ledger(event_id,event_type,aggregate_id,payload_json,prev_hash,event_hash) VALUES(?,?,?,?,?,?)',(eid,etype,agg,pj,prev,h))
+    def _assert_current_fence_row(self,c,pid,token):
+        r=c.execute('SELECT pf.order_id,pf.fence_token,of.current_token FROM proposal_fence pf JOIN order_fence of ON of.order_id=pf.order_id WHERE pf.proposal_id=?',(pid,)).fetchone()
+        if r is None:raise DispatchConflict('UNKNOWN_PROPOSAL_FENCE')
+        if r['fence_token']!=token or r['current_token']!=token:raise DispatchConflict('STALE_PROPOSAL_FENCE')
+        return r
 
     def propose_fenced(self,order_id,driver_id,eligible_driver_ids:List[int],reason='fairness'):
-        self._recover(); self._recover_assignment_guards(); conn=self.ledger.conn; conn.execute('BEGIN IMMEDIATE')
+        self._recover();self._recover_assignment_guards();c=self.ledger.conn;c.execute('BEGIN IMMEDIATE')
         try:
-            if conn.execute('SELECT 1 FROM assignment_guard WHERE order_id=?',(order_id,)).fetchone(): raise DispatchConflict('ORDER_ALREADY_ASSIGNED')
-            current=conn.execute("SELECT pf.proposal_id FROM proposal_fence pf JOIN order_fence of ON of.order_id=pf.order_id AND of.current_token=pf.fence_token WHERE pf.order_id=?",(order_id,)).fetchone()
-            if current and self._durable_proposal_status(conn,current['proposal_id'])==ProposalStatus.OPEN: raise DispatchConflict('OPEN_PROPOSAL_EXISTS')
-            row=conn.execute('SELECT current_token FROM order_fence WHERE order_id=?',(order_id,)).fetchone(); token=row['current_token']+1 if row else 1
-            pid=self._next_proposal_id(conn); did=f'DR-{order_id}-G{token}'
-            conn.execute('INSERT INTO order_fence(order_id,current_token) VALUES(?,?) ON CONFLICT(order_id) DO UPDATE SET current_token=excluded.current_token',(order_id,token))
-            conn.execute('INSERT INTO proposal_fence(proposal_id,order_id,fence_token) VALUES(?,?,?)',(pid,order_id,token))
-            ej=json.dumps({'ids':[str(x) for x in eligible_driver_ids]},sort_keys=True,separators=(",",":")); dp=json.dumps({'fence_token':token,'order_id':order_id,'selected_driver_id':driver_id},sort_keys=True,separators=(",",":"))
-            conn.execute('INSERT INTO decision_record(decision_id,order_id,selected_driver_id,eligible_driver_ids_json,reason,payload_json) VALUES(?,?,?,?,?,?)',(did,str(order_id),str(driver_id),ej,reason,dp))
-            if self.fence_failpoint=='after_fence_before_event': raise RuntimeError('INJECTED_CRASH_AFTER_FENCE')
-            self._insert_event(conn,f'proposal-offered:{pid}','ProposalOffered',str(order_id),{'proposal_id':pid,'order_id':order_id,'driver_id':driver_id,'fence_token':token})
-            if self.fence_failpoint=='after_event_before_commit': raise RuntimeError('INJECTED_CRASH_AFTER_PROPOSAL_EVENT')
-            conn.commit()
+            if c.execute('SELECT 1 FROM assignment_guard WHERE order_id=?',(order_id,)).fetchone():raise DispatchConflict('ORDER_ALREADY_ASSIGNED')
+            cur=c.execute('SELECT pf.proposal_id FROM proposal_fence pf JOIN order_fence of ON of.order_id=pf.order_id AND of.current_token=pf.fence_token WHERE pf.order_id=?',(order_id,)).fetchone()
+            if cur and self._durable_proposal_status(c,cur['proposal_id'])==ProposalStatus.OPEN:raise DispatchConflict('OPEN_PROPOSAL_EXISTS')
+            r=c.execute('SELECT current_token FROM order_fence WHERE order_id=?',(order_id,)).fetchone();token=r['current_token']+1 if r else 1;pid=self._next_proposal_id(c);did=f'DR-{order_id}-G{token}'
+            c.execute('INSERT INTO order_fence(order_id,current_token) VALUES(?,?) ON CONFLICT(order_id) DO UPDATE SET current_token=excluded.current_token',(order_id,token));c.execute('INSERT INTO proposal_fence(proposal_id,order_id,fence_token) VALUES(?,?,?)',(pid,order_id,token));ej=json.dumps({'ids':[str(x) for x in eligible_driver_ids]},sort_keys=True,separators=(',',':'));dp=json.dumps({'fence_token':token,'order_id':order_id,'selected_driver_id':driver_id},sort_keys=True,separators=(',',':'));c.execute('INSERT INTO decision_record(decision_id,order_id,selected_driver_id,eligible_driver_ids_json,reason,payload_json) VALUES(?,?,?,?,?,?)',(did,str(order_id),str(driver_id),ej,reason,dp))
+            if self.fence_failpoint=='after_fence_before_event':raise RuntimeError('INJECTED_CRASH_AFTER_FENCE')
+            self._insert_event(c,f'proposal-offered:{pid}','ProposalOffered',str(order_id),{'proposal_id':pid,'order_id':order_id,'driver_id':driver_id,'fence_token':token})
+            if self.fence_failpoint=='after_event_before_commit':raise RuntimeError('INJECTED_CRASH_AFTER_PROPOSAL_EVENT')
+            c.commit()
         except Exception:
-            if conn.in_transaction: conn.rollback()
+            if c.in_transaction:c.rollback()
             raise
-        self._recover(); return FencedProposal(self.core.proposals[pid],token)
+        self._recover();return FencedProposal(self.core.proposals[pid],token)
 
-    def _terminal(self,proposal_id,fence_token,terminal):
-        conn=self.ledger.conn; conn.execute('BEGIN IMMEDIATE')
+    def _terminal(self,pid,token,terminal):
+        c=self.ledger.conn;c.execute('BEGIN IMMEDIATE')
         try:
-            row=self._assert_current_fence_row(conn,proposal_id,fence_token)
-            if self._durable_proposal_status(conn,proposal_id)!=ProposalStatus.OPEN: raise DispatchConflict('PROPOSAL_NOT_OPEN')
-            conn.execute('INSERT INTO proposal_terminal(proposal_id,terminal_type) VALUES(?,?)',(proposal_id,terminal))
-            if self.terminal_failpoint=='after_terminal_before_event': raise RuntimeError('INJECTED_CRASH_AFTER_TERMINAL')
-            if terminal=='DECLINED': event_id=f'proposal-declined:{proposal_id}'; event_type='ProposalDeclined'
-            else: event_id=f'proposal-lapsed:{proposal_id}'; event_type='ProposalLapsed'
-            self._insert_event(conn,event_id,event_type,str(row['order_id']),{'proposal_id':proposal_id})
-            if self.terminal_failpoint=='after_event_before_commit': raise RuntimeError('INJECTED_CRASH_AFTER_TERMINAL_EVENT')
-            conn.commit()
+            r=self._assert_current_fence_row(c,pid,token)
+            if self._durable_proposal_status(c,pid)!=ProposalStatus.OPEN:raise DispatchConflict('PROPOSAL_NOT_OPEN')
+            c.execute('INSERT INTO proposal_terminal(proposal_id,terminal_type) VALUES(?,?)',(pid,terminal))
+            if self.terminal_failpoint=='after_terminal_before_event':raise RuntimeError('INJECTED_CRASH_AFTER_TERMINAL')
+            eid,etype=(f'proposal-declined:{pid}','ProposalDeclined') if terminal=='DECLINED' else (f'proposal-lapsed:{pid}','ProposalLapsed');self._insert_event(c,eid,etype,str(r['order_id']),{'proposal_id':pid})
+            if self.terminal_failpoint=='after_event_before_commit':raise RuntimeError('INJECTED_CRASH_AFTER_TERMINAL_EVENT')
+            c.commit()
         except Exception:
-            if conn.in_transaction: conn.rollback()
+            if c.in_transaction:c.rollback()
             raise
         self._recover()
 
-    def accept_fenced(self,proposal_id,fence_token,idempotency_key):
-        self._recover(); self._recover_assignment_guards(); conn=self.ledger.conn; conn.execute('BEGIN IMMEDIATE')
+    def accept_fenced(self,pid,token,key):
+        self._recover();self._recover_assignment_guards();c=self.ledger.conn;c.execute('BEGIN IMMEDIATE')
         try:
-            fence=self._assert_current_fence_row(conn,proposal_id,fence_token)
-            terminal=conn.execute('SELECT terminal_type FROM proposal_terminal WHERE proposal_id=?',(proposal_id,)).fetchone()
-            if terminal:
-                if terminal['terminal_type']!='COMMITTED': raise DispatchConflict('PROPOSAL_NOT_OPEN')
-                existing=conn.execute('SELECT * FROM assignment_guard WHERE proposal_id=?',(proposal_id,)).fetchone()
-                if existing is None: raise DispatchConflict('COMMITTED_WITHOUT_ASSIGNMENT')
-                if existing['idempotency_key']!=idempotency_key: raise DispatchConflict('IDEMPOTENCY_KEY_MISMATCH')
-                conn.commit(); return Assignment(existing['assignment_id'],existing['order_id'],existing['driver_id'],existing['proposal_id'])
-            if self._durable_proposal_status(conn,proposal_id)!=ProposalStatus.OPEN: raise DispatchConflict('PROPOSAL_NOT_OPEN')
-            existing=conn.execute('SELECT * FROM assignment_guard WHERE order_id=?',(fence['order_id'],)).fetchone()
-            if existing: raise DispatchConflict('ORDER_ALREADY_ASSIGNED')
-            offered=conn.execute("SELECT payload_json FROM event_ledger WHERE event_type='ProposalOffered' AND json_extract(payload_json,'$.proposal_id')=?",(proposal_id,)).fetchone()
-            if offered is None: raise DispatchConflict('PROPOSAL_EVIDENCE_MISSING')
-            payload=json.loads(offered['payload_json']); driver_id=int(payload['driver_id']); order_id=int(payload['order_id'])
-            maxrow=conn.execute("SELECT assignment_id FROM assignment_guard ORDER BY CAST(SUBSTR(assignment_id,2) AS INTEGER) DESC LIMIT 1").fetchone(); seq=int(maxrow['assignment_id'][1:])+1 if maxrow else 1; aid=f'A{seq}'
-            conn.execute("INSERT INTO proposal_terminal(proposal_id,terminal_type) VALUES(?,'COMMITTED')",(proposal_id,))
-            conn.execute('INSERT INTO assignment_guard(order_id,assignment_id,proposal_id,driver_id,idempotency_key) VALUES(?,?,?,?,?)',(order_id,aid,proposal_id,driver_id,idempotency_key))
-            if self.terminal_failpoint=='after_terminal_before_event': raise RuntimeError('INJECTED_CRASH_AFTER_TERMINAL')
-            self._insert_event(conn,f'proposal-committed:{proposal_id}','ProposalCommitted',str(order_id),{'proposal_id':proposal_id,'assignment_id':aid,'order_id':order_id,'driver_id':driver_id,'idempotency_key':idempotency_key})
-            if self.terminal_failpoint=='after_event_before_commit': raise RuntimeError('INJECTED_CRASH_AFTER_TERMINAL_EVENT')
-            conn.commit()
+            fence=self._assert_current_fence_row(c,pid,token);t=c.execute('SELECT terminal_type FROM proposal_terminal WHERE proposal_id=?',(pid,)).fetchone()
+            if t:
+                if t['terminal_type']!='COMMITTED':raise DispatchConflict('PROPOSAL_NOT_OPEN')
+                ex=c.execute('SELECT * FROM assignment_guard WHERE proposal_id=?',(pid,)).fetchone()
+                if ex is None:raise DispatchConflict('COMMITTED_WITHOUT_ASSIGNMENT')
+                if ex['idempotency_key']!=key:raise DispatchConflict('IDEMPOTENCY_KEY_MISMATCH')
+                c.commit();return Assignment(ex['assignment_id'],ex['order_id'],ex['driver_id'],ex['proposal_id'])
+            if self._durable_proposal_status(c,pid)!=ProposalStatus.OPEN:raise DispatchConflict('PROPOSAL_NOT_OPEN')
+            if c.execute('SELECT * FROM assignment_guard WHERE order_id=?',(fence['order_id'],)).fetchone():raise DispatchConflict('ORDER_ALREADY_ASSIGNED')
+            offered=c.execute("SELECT payload_json FROM event_ledger WHERE event_type='ProposalOffered' AND json_extract(payload_json,'$.proposal_id')=?",(pid,)).fetchone()
+            if offered is None:raise DispatchConflict('PROPOSAL_EVIDENCE_MISSING')
+            p=json.loads(offered['payload_json']);driver_id=int(p['driver_id']);order_id=int(p['order_id']);mr=c.execute("SELECT assignment_id FROM assignment_guard ORDER BY CAST(SUBSTR(assignment_id,2) AS INTEGER) DESC LIMIT 1").fetchone();aid=f"A{int(mr['assignment_id'][1:])+1 if mr else 1}"
+            c.execute("INSERT INTO proposal_terminal(proposal_id,terminal_type) VALUES(?,'COMMITTED')",(pid,));c.execute('INSERT INTO assignment_guard(order_id,assignment_id,proposal_id,driver_id,idempotency_key) VALUES(?,?,?,?,?)',(order_id,aid,pid,driver_id,key))
+            if self.terminal_failpoint=='after_terminal_before_event':raise RuntimeError('INJECTED_CRASH_AFTER_TERMINAL')
+            self._insert_event(c,f'proposal-committed:{pid}','ProposalCommitted',str(order_id),{'proposal_id':pid,'assignment_id':aid,'order_id':order_id,'driver_id':driver_id,'idempotency_key':key})
+            if self.terminal_failpoint=='after_event_before_commit':raise RuntimeError('INJECTED_CRASH_AFTER_TERMINAL_EVENT')
+            c.commit()
         except Exception:
-            if conn.in_transaction: conn.rollback()
+            if c.in_transaction:c.rollback()
             raise
-        self._recover(); self._recover_assignment_guards(); return self.core.assignment_by_order[order_id]
+        self._recover();self._recover_assignment_guards();return self.core.assignment_by_order[order_id]
 
-    def decline_fenced(self,proposal_id,fence_token): self._terminal(proposal_id,fence_token,'DECLINED')
-    def lapse_fenced(self,proposal_id,fence_token): self._terminal(proposal_id,fence_token,'LAPSED')
+    def decline_fenced(self,pid,token):self._terminal(pid,token,'DECLINED')
+    def lapse_fenced(self,pid,token):self._terminal(pid,token,'LAPSED')
