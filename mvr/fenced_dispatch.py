@@ -14,7 +14,7 @@ class FencedProposal:
 
 
 class FencedDispatchService(ConcurrentDispatchService):
-    """Persistent fencing with fail-closed durable recovery consistency."""
+    """Persistent fencing with fail-closed recovery admission."""
 
     def _ensure_fencing_schema(self):
         self.ledger.conn.executescript("""
@@ -25,6 +25,10 @@ class FencedDispatchService(ConcurrentDispatchService):
 
     def __init__(self,db_path):
         super().__init__(db_path); self._ensure_fencing_schema(); self.fence_failpoint=None; self.terminal_failpoint=None
+        # Admission is denied if durable evidence is contradictory. No dispatch
+        # method becomes reachable on a successfully constructed service until
+        # the complete recovery consistency proof passes.
+        self.validate_recovery_consistency()
 
     def validate_recovery_consistency(self):
         c=self.ledger.conn
