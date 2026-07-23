@@ -14,7 +14,7 @@ class FencedProposal:
 
 
 class FencedDispatchService(ConcurrentDispatchService):
-    """Persistent temporal fencing with atomic proposal-generation creation."""
+    """Persistent temporal fencing with atomic multi-instance proposal generation."""
 
     def _ensure_fencing_schema(self) -> None:
         self.ledger.conn.executescript("""
@@ -36,6 +36,34 @@ class FencedDispatchService(ConcurrentDispatchService):
         self._ensure_fencing_schema()
         self.fence_failpoint = None
 
+    @staticmethod
+    def _next_proposal_id(conn) -> str:
+        rows = conn.execute("SELECT proposal_id FROM proposal_fence").fetchall()
+        max_seq = max((int(row["proposal_id"][1:]) for row in rows), default=0)
+        return f"P{max_seq + 1}"
+
+    @staticmethod
+    def _durable_proposal_status(conn, proposal_id: str) -> ProposalStatus:
+        """Resolve lifecycle status from committed durable events, never stale RAM."""
+        committed = conn.execute(
+            "SELECT 1 FROM assignment_guard WHERE proposal_id=?", (proposal_id,)
+        ).fetchone()
+        if committed:
+            return ProposalStatus.COMMITTED
+        rows = conn.execute(
+            "SELECT event_type FROM event_ledger WHERE json_extract(payload_json,'$.proposal_id')=? ORDER BY seq",
+            (proposal_id,),
+        ).fetchall()
+        status = ProposalStatus.OPEN
+        for row in rows:
+            if row["event_type"] == "ProposalDeclined":
+                status = ProposalStatus.DECLINED
+            elif row["event_type"] == "ProposalLapsed":
+                status = ProposalStatus.LAPSED
+            elif row["event_type"] == "ProposalCommitted":
+                status = ProposalStatus.COMMITTED
+        return status
+
     def propose_fenced(self, order_id: int, driver_id: int, eligible_driver_ids: List[int], reason: str = "fairness") -> FencedProposal:
         self._recover()
         self._recover_assignment_guards()
@@ -45,36 +73,30 @@ class FencedDispatchService(ConcurrentDispatchService):
             if conn.execute("SELECT 1 FROM assignment_guard WHERE order_id=?", (order_id,)).fetchone():
                 raise DispatchConflict("ORDER_ALREADY_ASSIGNED")
 
-            open_row = conn.execute(
+            current = conn.execute(
                 "SELECT pf.proposal_id FROM proposal_fence pf "
                 "JOIN order_fence of ON of.order_id=pf.order_id AND of.current_token=pf.fence_token "
                 "WHERE pf.order_id=? ORDER BY pf.fence_token DESC LIMIT 1", (order_id,)
             ).fetchone()
-            if open_row:
-                existing = self.core.proposals.get(open_row["proposal_id"])
-                if existing and existing.status == ProposalStatus.OPEN:
-                    raise DispatchConflict("OPEN_PROPOSAL_EXISTS")
+            if current and self._durable_proposal_status(conn, current["proposal_id"]) == ProposalStatus.OPEN:
+                raise DispatchConflict("OPEN_PROPOSAL_EXISTS")
 
             row = conn.execute("SELECT current_token FROM order_fence WHERE order_id=?", (order_id,)).fetchone()
             token = (row["current_token"] + 1) if row else 1
-            proposal_id = f"P{self.core._proposal_seq + 1}"
+            proposal_id = self._next_proposal_id(conn)
             decision_id = f"DR-{order_id}-G{token}"
 
             conn.execute(
                 "INSERT INTO order_fence(order_id,current_token) VALUES(?,?) "
                 "ON CONFLICT(order_id) DO UPDATE SET current_token=excluded.current_token", (order_id, token)
             )
-            conn.execute(
-                "INSERT INTO proposal_fence(proposal_id,order_id,fence_token) VALUES(?,?,?)",
-                (proposal_id, order_id, token),
-            )
+            conn.execute("INSERT INTO proposal_fence(proposal_id,order_id,fence_token) VALUES(?,?,?)", (proposal_id, order_id, token))
             eligible_json = json.dumps({"ids": [str(x) for x in eligible_driver_ids]}, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
             decision_payload = json.dumps({"fence_token": token, "order_id": order_id, "selected_driver_id": driver_id}, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
             conn.execute(
                 "INSERT INTO decision_record(decision_id,order_id,selected_driver_id,eligible_driver_ids_json,reason,payload_json) VALUES(?,?,?,?,?,?)",
                 (decision_id, str(order_id), str(driver_id), eligible_json, reason, decision_payload),
             )
-
             if self.fence_failpoint == "after_fence_before_event":
                 raise RuntimeError("INJECTED_CRASH_AFTER_FENCE")
 
@@ -89,7 +111,6 @@ class FencedDispatchService(ConcurrentDispatchService):
                 "INSERT INTO event_ledger(event_id,event_type,aggregate_id,payload_json,prev_hash,event_hash) VALUES(?,?,?,?,?,?)",
                 (event_id, "ProposalOffered", str(order_id), payload_json, prev_hash, event_hash),
             )
-
             if self.fence_failpoint == "after_event_before_commit":
                 raise RuntimeError("INJECTED_CRASH_AFTER_PROPOSAL_EVENT")
             conn.commit()
@@ -99,8 +120,7 @@ class FencedDispatchService(ConcurrentDispatchService):
             raise
 
         self._recover()
-        proposal = self.core.proposals[proposal_id]
-        return FencedProposal(proposal, token)
+        return FencedProposal(self.core.proposals[proposal_id], token)
 
     def _assert_current_fence(self, proposal_id: str, fence_token: int) -> Proposal:
         row = self.ledger.conn.execute(
