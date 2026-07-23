@@ -21,7 +21,12 @@ class PersistentEventLedger:
 
     def __init__(self, db_path: str):
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
+        # Service instances may be constructed on an application/control thread
+        # and execute a request on a worker thread. SQLite's default thread-affinity
+        # check would reject that valid ownership transfer before DB serialization
+        # can even be exercised. Each service still owns one connection; concurrent
+        # assignment ownership is serialized by BEGIN IMMEDIATE + DB constraints.
+        self.conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=FULL")
