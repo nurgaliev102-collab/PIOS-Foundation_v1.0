@@ -16,7 +16,15 @@ jobs:
           python-version: "3.12"
       - name: Run deterministic milestone tests
         working-directory: mvr
-        run: python -m unittest -v
+        run: |
+          set -o pipefail
+          python -m unittest -v 2>&1 | tee unittest-output.log
+      - name: Upload deterministic test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mvr-unittest-diagnostics
+          path: mvr/unittest-output.log
       - name: Run 10,000-order simulation
         working-directory: mvr
         run: python dispatch_simulation.py --decisions dispatch-decisions.jsonl | tee metrics.json
