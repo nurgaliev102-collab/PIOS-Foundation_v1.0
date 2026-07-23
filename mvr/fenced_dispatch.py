@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List
 
 from concurrent_dispatch import ConcurrentDispatchService
-from stateful_dispatch import Assignment, DispatchConflict, Proposal, ProposalStatus
+from stateful_dispatch import Assignment, DispatchConflict, Proposal, ProposalStatus, StatefulDispatchCore
 
 
 @dataclass(frozen=True)
@@ -14,7 +14,7 @@ class FencedProposal:
 
 
 class FencedDispatchService(ConcurrentDispatchService):
-    """Persistent fencing with fail-closed durable recovery consistency."""
+    """Persistent fencing with fail-closed recovery admission."""
 
     def _ensure_fencing_schema(self):
         self.ledger.conn.executescript("""
@@ -25,6 +25,47 @@ class FencedDispatchService(ConcurrentDispatchService):
 
     def __init__(self,db_path):
         super().__init__(db_path); self._ensure_fencing_schema(); self.fence_failpoint=None; self.terminal_failpoint=None
+        # Admission is denied if durable evidence is contradictory. No dispatch
+        # method becomes reachable on a successfully constructed service until
+        # the complete recovery consistency proof passes.
+        self.validate_recovery_consistency()
+
+    def _recover(self):
+        """Replay durable state using fenced-generation semantics.
+
+        The legacy core forbids ever retrying the same driver for an order. Fenced
+        redispatch intentionally permits that after a terminal generation, so
+        recovery must preserve lifecycle invariants without applying that legacy
+        cross-generation uniqueness rule.
+        """
+        self.core = StatefulDispatchCore()
+        for event in self.ledger.replay():
+            p = event.payload
+            if event.event_type == 'ProposalOffered':
+                proposal = Proposal(p['proposal_id'], int(p['order_id']), int(p['driver_id']), ProposalStatus.OPEN)
+                self.core.proposals[proposal.id] = proposal
+                self.core.proposal_ids_by_order.setdefault(proposal.order_id, []).append(proposal.id)
+                self.core._proposal_seq = max(self.core._proposal_seq, int(proposal.id[1:]))
+            elif event.event_type == 'ProposalDeclined':
+                self.core.proposals[p['proposal_id']].status = ProposalStatus.DECLINED
+            elif event.event_type == 'ProposalLapsed':
+                self.core.proposals[p['proposal_id']].status = ProposalStatus.LAPSED
+            elif event.event_type == 'ProposalCommitted':
+                proposal = self.core.proposals[p['proposal_id']]
+                assignment = Assignment(p['assignment_id'], proposal.order_id, proposal.driver_id, proposal.id)
+                self.core.assignment_by_order[proposal.order_id] = assignment
+                proposal.status = ProposalStatus.COMMITTED
+                self.core._assignment_seq = max(self.core._assignment_seq, int(assignment.id[1:]))
+        for order_id, proposal_ids in self.core.proposal_ids_by_order.items():
+            open_count = sum(self.core.proposals[pid].status == ProposalStatus.OPEN for pid in proposal_ids)
+            assert open_count <= 1, f'multiple OPEN proposals for order {order_id}'
+            committed = [self.core.proposals[pid] for pid in proposal_ids if self.core.proposals[pid].status == ProposalStatus.COMMITTED]
+            assert len(committed) <= 1, f'multiple COMMITTED proposals for order {order_id}'
+            for proposal in committed:
+                assignment = self.core.assignment_by_order.get(order_id)
+                assert assignment is not None, f'orphan COMMITTED proposal {proposal.id}'
+                assert assignment.proposal_id == proposal.id
+                assert assignment.driver_id == proposal.driver_id
 
     def validate_recovery_consistency(self):
         c=self.ledger.conn

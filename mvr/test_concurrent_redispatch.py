@@ -74,7 +74,7 @@ class ConcurrentRedispatchTests(unittest.TestCase):
         t1 = threading.Thread(target=worker, args=(self.a, 10))
         t2 = threading.Thread(target=worker, args=(self.b, 11))
         t1.start(); t2.start(); t1.join(); t2.join()
-        self.assertEqual(1, len(results))
+        self.assertEqual(1, len(results), f"concurrent redispatch errors={errors!r}")
         self.assertEqual(2, results[0].fence_token)
         self.assertEqual(1, len(errors))
         self.assertEqual("OPEN_PROPOSAL_EXISTS", str(errors[0]))
