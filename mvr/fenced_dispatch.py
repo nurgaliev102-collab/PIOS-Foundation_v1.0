@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import List
 
 from concurrent_dispatch import ConcurrentDispatchService
+from persistent_ledger import PersistentEventLedger
 from stateful_dispatch import Assignment, DispatchConflict, Proposal, ProposalStatus, StatefulDispatchCore
 
 
@@ -24,20 +25,22 @@ class FencedDispatchService(ConcurrentDispatchService):
         """); self.ledger.conn.commit()
 
     def __init__(self,db_path):
-        super().__init__(db_path); self._ensure_fencing_schema(); self.fence_failpoint=None; self.terminal_failpoint=None
-        # Admission is denied if durable evidence is contradictory. No dispatch
-        # method becomes reachable on a successfully constructed service until
-        # the complete recovery consistency proof passes.
+        # Do not enter the legacy ConcurrentDispatchService constructor here:
+        # it performs assignment-guard recovery before fenced admission and can
+        # therefore either mask corruption with legacy errors or reject valid
+        # multi-generation fenced history. Establish only the durable substrate,
+        # create all schemas, prove bidirectional consistency, then recover using
+        # fenced-generation semantics.
+        self.db_path=db_path
+        self.ledger=PersistentEventLedger(db_path)
+        self.core=StatefulDispatchCore()
+        self._ensure_concurrency_schema()
+        self._ensure_fencing_schema()
+        self.failpoint=None; self.fence_failpoint=None; self.terminal_failpoint=None
         self.validate_recovery_consistency()
+        self._recover()
 
     def _recover(self):
-        """Replay durable state using fenced-generation semantics.
-
-        The legacy core forbids ever retrying the same driver for an order. Fenced
-        redispatch intentionally permits that after a terminal generation, so
-        recovery must preserve lifecycle invariants without applying that legacy
-        cross-generation uniqueness rule.
-        """
         self.core = StatefulDispatchCore()
         for event in self.ledger.replay():
             p = event.payload
@@ -46,44 +49,56 @@ class FencedDispatchService(ConcurrentDispatchService):
                 self.core.proposals[proposal.id] = proposal
                 self.core.proposal_ids_by_order.setdefault(proposal.order_id, []).append(proposal.id)
                 self.core._proposal_seq = max(self.core._proposal_seq, int(proposal.id[1:]))
-            elif event.event_type == 'ProposalDeclined':
-                self.core.proposals[p['proposal_id']].status = ProposalStatus.DECLINED
-            elif event.event_type == 'ProposalLapsed':
-                self.core.proposals[p['proposal_id']].status = ProposalStatus.LAPSED
+            elif event.event_type == 'ProposalDeclined': self.core.proposals[p['proposal_id']].status = ProposalStatus.DECLINED
+            elif event.event_type == 'ProposalLapsed': self.core.proposals[p['proposal_id']].status = ProposalStatus.LAPSED
             elif event.event_type == 'ProposalCommitted':
-                proposal = self.core.proposals[p['proposal_id']]
-                assignment = Assignment(p['assignment_id'], proposal.order_id, proposal.driver_id, proposal.id)
-                self.core.assignment_by_order[proposal.order_id] = assignment
-                proposal.status = ProposalStatus.COMMITTED
+                proposal = self.core.proposals[p['proposal_id']]; assignment = Assignment(p['assignment_id'], proposal.order_id, proposal.driver_id, proposal.id)
+                self.core.assignment_by_order[proposal.order_id] = assignment; proposal.status = ProposalStatus.COMMITTED
                 self.core._assignment_seq = max(self.core._assignment_seq, int(assignment.id[1:]))
         for order_id, proposal_ids in self.core.proposal_ids_by_order.items():
-            open_count = sum(self.core.proposals[pid].status == ProposalStatus.OPEN for pid in proposal_ids)
-            assert open_count <= 1, f'multiple OPEN proposals for order {order_id}'
+            assert sum(self.core.proposals[pid].status == ProposalStatus.OPEN for pid in proposal_ids) <= 1, f'multiple OPEN proposals for order {order_id}'
             committed = [self.core.proposals[pid] for pid in proposal_ids if self.core.proposals[pid].status == ProposalStatus.COMMITTED]
             assert len(committed) <= 1, f'multiple COMMITTED proposals for order {order_id}'
             for proposal in committed:
-                assignment = self.core.assignment_by_order.get(order_id)
-                assert assignment is not None, f'orphan COMMITTED proposal {proposal.id}'
-                assert assignment.proposal_id == proposal.id
-                assert assignment.driver_id == proposal.driver_id
+                assignment = self.core.assignment_by_order.get(order_id); assert assignment is not None, f'orphan COMMITTED proposal {proposal.id}'
+                assert assignment.proposal_id == proposal.id; assert assignment.driver_id == proposal.driver_id
 
     def validate_recovery_consistency(self):
         c=self.ledger.conn
         if not self.ledger.verify_chain(): raise DispatchConflict('EVENT_LEDGER_CHAIN_INVALID')
         for pf in c.execute('SELECT proposal_id,order_id,fence_token FROM proposal_fence').fetchall():
-            offered=c.execute("SELECT payload_json FROM event_ledger WHERE event_type='ProposalOffered' AND json_extract(payload_json,'$.proposal_id')=?",(pf['proposal_id'],)).fetchone()
-            if not offered: raise DispatchConflict('PROPOSAL_FENCE_WITHOUT_OFFER_EVIDENCE')
-            p=json.loads(offered['payload_json'])
+            offers=c.execute("SELECT payload_json FROM event_ledger WHERE event_type='ProposalOffered' AND json_extract(payload_json,'$.proposal_id')=?",(pf['proposal_id'],)).fetchall()
+            if len(offers)!=1: raise DispatchConflict('PROPOSAL_FENCE_WITHOUT_OFFER_EVIDENCE')
+            p=json.loads(offers[0]['payload_json'])
             if int(p['order_id'])!=pf['order_id'] or int(p.get('fence_token',-1))!=pf['fence_token']: raise DispatchConflict('PROPOSAL_FENCE_EVIDENCE_MISMATCH')
+        for offered in c.execute("SELECT payload_json FROM event_ledger WHERE event_type='ProposalOffered'").fetchall():
+            p=json.loads(offered['payload_json']); rows=c.execute('SELECT order_id,fence_token FROM proposal_fence WHERE proposal_id=?',(p['proposal_id'],)).fetchall()
+            if len(rows)!=1: raise DispatchConflict('OFFER_EVIDENCE_WITHOUT_PROPOSAL_FENCE')
+            if rows[0]['order_id']!=int(p['order_id']) or rows[0]['fence_token']!=int(p.get('fence_token',-1)): raise DispatchConflict('PROPOSAL_FENCE_EVIDENCE_MISMATCH')
         for of in c.execute('SELECT order_id,current_token FROM order_fence').fetchall():
             mx=c.execute('SELECT MAX(fence_token) m FROM proposal_fence WHERE order_id=?',(of['order_id'],)).fetchone()['m']
             if mx is None or mx!=of['current_token']: raise DispatchConflict('ORDER_FENCE_GENERATION_MISMATCH')
+        for pf_order in c.execute('SELECT DISTINCT order_id FROM proposal_fence').fetchall():
+            rows=c.execute('SELECT current_token FROM order_fence WHERE order_id=?',(pf_order['order_id'],)).fetchall()
+            if len(rows)!=1: raise DispatchConflict('PROPOSAL_FENCE_WITHOUT_ORDER_FENCE')
+        terminal_map={'COMMITTED':'ProposalCommitted','DECLINED':'ProposalDeclined','LAPSED':'ProposalLapsed'}
+        inverse_terminal={v:k for k,v in terminal_map.items()}
         for t in c.execute('SELECT proposal_id,terminal_type FROM proposal_terminal').fetchall():
             events=c.execute("SELECT event_type FROM event_ledger WHERE json_extract(payload_json,'$.proposal_id')=? AND event_type IN ('ProposalCommitted','ProposalDeclined','ProposalLapsed')",(t['proposal_id'],)).fetchall()
-            expected={'COMMITTED':'ProposalCommitted','DECLINED':'ProposalDeclined','LAPSED':'ProposalLapsed'}[t['terminal_type']]
-            if len(events)!=1 or events[0]['event_type']!=expected: raise DispatchConflict('TERMINAL_EVENT_MISMATCH')
+            if len(events)!=1 or events[0]['event_type']!=terminal_map[t['terminal_type']]: raise DispatchConflict('TERMINAL_EVENT_MISMATCH')
             assignment=c.execute('SELECT 1 FROM assignment_guard WHERE proposal_id=?',(t['proposal_id'],)).fetchone()
             if (t['terminal_type']=='COMMITTED') != bool(assignment): raise DispatchConflict('TERMINAL_ASSIGNMENT_MISMATCH')
+        terminal_events=c.execute("SELECT event_type,payload_json FROM event_ledger WHERE event_type IN ('ProposalCommitted','ProposalDeclined','ProposalLapsed')").fetchall()
+        for event in terminal_events:
+            p=json.loads(event['payload_json']); markers=c.execute('SELECT terminal_type FROM proposal_terminal WHERE proposal_id=?',(p['proposal_id'],)).fetchall()
+            if len(markers)!=1: raise DispatchConflict('TERMINAL_EVENT_WITHOUT_MARKER')
+            if markers[0]['terminal_type']!=inverse_terminal[event['event_type']]: raise DispatchConflict('TERMINAL_EVENT_MISMATCH')
+        for a in c.execute('SELECT order_id,assignment_id,proposal_id,driver_id,idempotency_key FROM assignment_guard').fetchall():
+            events=c.execute("SELECT payload_json FROM event_ledger WHERE event_type='ProposalCommitted' AND json_extract(payload_json,'$.proposal_id')=?",(a['proposal_id'],)).fetchall()
+            marker=c.execute("SELECT terminal_type FROM proposal_terminal WHERE proposal_id=?",(a['proposal_id'],)).fetchone()
+            if len(events)!=1 or marker is None or marker['terminal_type']!='COMMITTED': raise DispatchConflict('ASSIGNMENT_WITHOUT_COMMITTED_EVIDENCE')
+            p=json.loads(events[0]['payload_json'])
+            if int(p['order_id'])!=a['order_id'] or int(p['driver_id'])!=a['driver_id'] or p['assignment_id']!=a['assignment_id'] or p.get('idempotency_key')!=a['idempotency_key']: raise DispatchConflict('ASSIGNMENT_EVIDENCE_MISMATCH')
         return True
 
     @staticmethod
