@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import List
 
 from concurrent_dispatch import ConcurrentDispatchService
+from persistent_ledger import PersistentEventLedger
 from stateful_dispatch import Assignment, DispatchConflict, Proposal, ProposalStatus, StatefulDispatchCore
 
 
@@ -24,8 +25,20 @@ class FencedDispatchService(ConcurrentDispatchService):
         """); self.ledger.conn.commit()
 
     def __init__(self,db_path):
-        super().__init__(db_path); self._ensure_fencing_schema(); self.fence_failpoint=None; self.terminal_failpoint=None
+        # Do not enter the legacy ConcurrentDispatchService constructor here:
+        # it performs assignment-guard recovery before fenced admission and can
+        # therefore either mask corruption with legacy errors or reject valid
+        # multi-generation fenced history. Establish only the durable substrate,
+        # create all schemas, prove bidirectional consistency, then recover using
+        # fenced-generation semantics.
+        self.db_path=db_path
+        self.ledger=PersistentEventLedger(db_path)
+        self.core=StatefulDispatchCore()
+        self._ensure_concurrency_schema()
+        self._ensure_fencing_schema()
+        self.failpoint=None; self.fence_failpoint=None; self.terminal_failpoint=None
         self.validate_recovery_consistency()
+        self._recover()
 
     def _recover(self):
         self.core = StatefulDispatchCore()
