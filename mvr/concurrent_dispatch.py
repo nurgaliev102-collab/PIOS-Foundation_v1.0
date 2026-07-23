@@ -15,14 +15,14 @@ class ConcurrentDispatchService(TransactionalDispatchService):
     """
 
     def _ensure_concurrency_schema(self) -> None:
-        self.ledger.conn.executescript("""
+        self.ledger.conn.execute("""
         CREATE TABLE IF NOT EXISTS assignment_guard (
             order_id INTEGER PRIMARY KEY,
             assignment_id TEXT NOT NULL UNIQUE,
             proposal_id TEXT NOT NULL UNIQUE,
             driver_id INTEGER NOT NULL,
             idempotency_key TEXT NOT NULL
-        );
+        )
         """)
         self.ledger.conn.commit()
 
@@ -53,8 +53,9 @@ class ConcurrentDispatchService(TransactionalDispatchService):
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def accept(self, proposal_id: str, idempotency_key: str) -> Assignment:
+        # Refresh projection first. Schema is created only during service init;
+        # never run DDL/commit helpers inside the ACCEPT transaction path.
         self._recover()
-        self._ensure_concurrency_schema()
         self._recover_assignment_guards()
         proposal = self.core.proposals[proposal_id]
         conn = self.ledger.conn
