@@ -14,7 +14,7 @@ class FencedProposal:
 
 
 class FencedDispatchService(ConcurrentDispatchService):
-    """Persistent temporal fencing with atomic proposal-generation creation."""
+    """Persistent temporal fencing with atomic multi-instance proposal generation."""
 
     def _ensure_fencing_schema(self) -> None:
         self.ledger.conn.executescript("""
@@ -35,6 +35,14 @@ class FencedDispatchService(ConcurrentDispatchService):
         super().__init__(db_path)
         self._ensure_fencing_schema()
         self.fence_failpoint = None
+
+    @staticmethod
+    def _next_proposal_id(conn) -> str:
+        # Process-local _proposal_seq is stale across service instances. Allocate
+        # identity from durable state while holding BEGIN IMMEDIATE.
+        rows = conn.execute("SELECT proposal_id FROM proposal_fence").fetchall()
+        max_seq = max((int(row["proposal_id"][1:]) for row in rows), default=0)
+        return f"P{max_seq + 1}"
 
     def propose_fenced(self, order_id: int, driver_id: int, eligible_driver_ids: List[int], reason: str = "fairness") -> FencedProposal:
         self._recover()
@@ -57,7 +65,7 @@ class FencedDispatchService(ConcurrentDispatchService):
 
             row = conn.execute("SELECT current_token FROM order_fence WHERE order_id=?", (order_id,)).fetchone()
             token = (row["current_token"] + 1) if row else 1
-            proposal_id = f"P{self.core._proposal_seq + 1}"
+            proposal_id = self._next_proposal_id(conn)
             decision_id = f"DR-{order_id}-G{token}"
 
             conn.execute(
