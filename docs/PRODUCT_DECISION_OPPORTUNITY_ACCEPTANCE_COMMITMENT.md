@@ -107,7 +107,7 @@ Per this task's own instruction, none of the following is designed here:
 
 ## Unresolved Decisions
 
-1. Whether an Opportunity concept is ever formally designed as a domain aggregate/event, and if so, its exact shape — deliberately deferred (Sections 1, 2, Explicitly Out of Scope).
+1. Whether an Opportunity concept is ever formally designed as a domain aggregate/event, and if so, its exact shape — deliberately deferred (Sections 1, 2, Explicitly Out of Scope). **Status update:** Product Decision: Opportunity Before Assignment v1.0 and ADR-035 have since ratified that this fact exists as a separate Aggregate Root within Dispatch; its exact shape (name, identity, states, invariants, commands, events, storage) remains exactly as open as stated above.
 2. Mechanisms for Decline, Expiration, and post-commitment Failure — meanings are defined here (Section 9); mechanisms are not.
 3. Eligibility and Fair Opportunity Policy — unchanged, remain open per their own source documents.
 4. Who owns the DIRECT-scope analogue of Opportunity (Driver Management vs. Passenger Experience vs. jointly) — depends on Personal Client Relationship's own still-unratified lifecycle (Product Decision Personal Client Relationship Part 3).
