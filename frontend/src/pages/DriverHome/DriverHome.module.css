@@ -1,0 +1,107 @@
+.screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
+  background: #f8fafc;
+}
+
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 2rem;
+  box-sizing: border-box;
+}
+
+.status {
+  font-size: 0.9375rem;
+  color: #64748b;
+  text-align: center;
+}
+
+.sectionTitle {
+  margin: 0.5rem 0 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.proposalRow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.875rem 1rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.proposalDetails {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.proposalOrderId {
+  font-size: 0.8125rem;
+  font-family: monospace;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.proposalStatus {
+  flex-shrink: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+}
+
+.proposalOpen {
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.proposalAccepted {
+  color: #15803d;
+  background: #f0fdf4;
+}
+
+.proposalResolved {
+  color: #64748b;
+  background: #f1f5f9;
+}
+
+.proposalActions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.error {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #dc2626;
+  text-align: center;
+}
+
+/* Mobile-first: the base rules above already target small screens.
+   Above phone width, give the content a little more breathing room
+   without ever growing wider than a comfortable single-column reading
+   width — this screen is designed to look like a mobile app, not a
+   desktop page stretched to fit. */
+@media (min-width: 640px) {
+  .content {
+    padding-top: 2rem;
+    gap: 1.25rem;
+  }
+}
