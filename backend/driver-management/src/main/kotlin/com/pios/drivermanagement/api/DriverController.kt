@@ -1,11 +1,15 @@
 package com.pios.drivermanagement.api
 
+import com.pios.drivermanagement.application.CreateDriverApplicationService
+import com.pios.drivermanagement.application.CreateDriverCommand
 import com.pios.drivermanagement.application.DeclareAvailabilityCommand
+import com.pios.drivermanagement.application.DriverAlreadyExistsException
 import com.pios.drivermanagement.application.DriverAvailabilityApplicationService
 import com.pios.drivermanagement.application.DriverNotFoundException
 import com.pios.drivermanagement.application.RetrieveDriverAvailabilityHandler
 import com.pios.drivermanagement.domain.Availability
 import com.pios.drivermanagement.domain.DriverId
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -45,13 +49,35 @@ import org.springframework.web.bind.annotation.RestController
  *
  * `listDrivers` returns every driver, unfiltered and unordered -- Sprint
  * FR-002 explicitly excludes filtering, search, and pagination.
+ *
+ * `createDriver` (Sprint 3A: MVR Pilot Enablement) is the first way to
+ * bring a new Driver record into existence at all -- `declareAvailability`
+ * has always required one to already exist. Delegates to
+ * [CreateDriverApplicationService.handle], adding no business logic of its
+ * own. Returns 201 Created with the new driver's id and its (unconditional)
+ * default availability; a [driverId] that already identifies a saved
+ * Driver surfaces as [DriverAlreadyExistsException], mapped to 409
+ * Conflict, the same status Dispatch's own `ProposalController` uses for
+ * its own conflicting-creation cases.
  */
 @RestController
 @RequestMapping("/v1/drivers")
 class DriverController(
     private val retrieveDriverAvailabilityHandler: RetrieveDriverAvailabilityHandler,
-    private val driverAvailabilityApplicationService: DriverAvailabilityApplicationService
+    private val driverAvailabilityApplicationService: DriverAvailabilityApplicationService,
+    private val createDriverApplicationService: CreateDriverApplicationService
 ) {
+
+    @PostMapping
+    fun createDriver(@RequestBody request: CreateDriverRequest): ResponseEntity<DriverResponse> =
+        try {
+            val driver = createDriverApplicationService.handle(CreateDriverCommand(DriverId(request.driverId)))
+            ResponseEntity.status(HttpStatus.CREATED).body(DriverResponse(driver.id.value, driver.availability.name))
+        } catch (ex: DriverAlreadyExistsException) {
+            ResponseEntity.status(HttpStatus.CONFLICT).build()
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        }
 
     @GetMapping("/{driverId}")
     fun getDriver(@PathVariable driverId: String): ResponseEntity<DriverResponse> =

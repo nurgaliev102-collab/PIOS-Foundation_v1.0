@@ -1,5 +1,6 @@
 package com.pios.drivermanagement.api
 
+import com.pios.drivermanagement.application.CreateDriverApplicationService
 import com.pios.drivermanagement.application.DriverAvailabilityApplicationService
 import com.pios.drivermanagement.application.RetrieveDriverAvailabilityHandler
 import com.pios.drivermanagement.domain.Availability
@@ -14,16 +15,46 @@ import kotlin.test.assertTrue
 
 /**
  * Constructs [DriverController] directly, with a real
- * [RetrieveDriverAvailabilityHandler]/[DriverAvailabilityApplicationService],
- * no Spring MVC context -- mirroring this project's own constructor-based
- * testing convention (Tranche 2: Passenger Experience REST Transport).
+ * [RetrieveDriverAvailabilityHandler]/[DriverAvailabilityApplicationService]/
+ * [CreateDriverApplicationService], no Spring MVC context -- mirroring
+ * this project's own constructor-based testing convention (Tranche 2:
+ * Passenger Experience REST Transport).
  */
 class DriverControllerTest {
 
     private val repository = InMemoryDriverRepository()
     private val handler = RetrieveDriverAvailabilityHandler(repository)
     private val availabilityService = DriverAvailabilityApplicationService(repository)
-    private val controller = DriverController(handler, availabilityService)
+    private val createDriverService = CreateDriverApplicationService(repository)
+    private val controller = DriverController(handler, availabilityService, createDriverService)
+
+    @Test
+    fun `creating a driver returns 201 with the new driver's id and default availability`() {
+        val response = controller.createDriver(CreateDriverRequest("new-driver-1"))
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        val body = assertNotNull(response.body)
+        assertEquals("new-driver-1", body.id)
+        assertEquals("UNAVAILABLE", body.availability)
+        assertEquals(Availability.UNAVAILABLE, repository.findById(DriverId("new-driver-1"))?.availability)
+    }
+
+    @Test
+    fun `creating a driver for an id that already exists returns 409`() {
+        repository.save(Driver(DriverId("existing-driver"), Availability.AVAILABLE))
+
+        val response = controller.createDriver(CreateDriverRequest("existing-driver"))
+
+        assertEquals(HttpStatus.CONFLICT, response.statusCode)
+        assertEquals(Availability.AVAILABLE, repository.findById(DriverId("existing-driver"))?.availability)
+    }
+
+    @Test
+    fun `creating a driver with a blank id returns 400`() {
+        val response = controller.createDriver(CreateDriverRequest(""))
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
 
     @Test
     fun `a known driver id returns 200 with id and availability`() {
