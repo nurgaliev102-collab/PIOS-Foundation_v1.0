@@ -36,6 +36,19 @@ interface ProposalListItem {
   status: 'OPEN' | 'ACCEPTED' | 'DECLINED' | 'LAPSED'
 }
 
+// Sprint 6A (Human Interface Polish): the raw status values above are this
+// screen's own wire format, not driver-facing wording -- MVR_DRIVER_ONBOARDING_GUIDE.md
+// promises a driver never has to read a technical term, so this maps each
+// one to the plain-language text actually shown. 'LAPSED' has no example in
+// that guide's own text; this wording follows the same plain-language
+// principle for it.
+const PROPOSAL_STATUS_LABEL: Record<ProposalListItem['status'], string> = {
+  OPEN: 'Ожидает вашего решения',
+  ACCEPTED: 'Вы приняли',
+  DECLINED: 'Отклонено',
+  LAPSED: 'Больше не активно',
+}
+
 interface OrderListItem {
   id: string
   destination: string | null
@@ -247,12 +260,12 @@ export function DriverHome() {
           </>
         )}
 
-        <h2 className={styles.sectionTitle}>Proposals</h2>
+        <h2 className={styles.sectionTitle}>Новые заказы</h2>
 
-        {proposalsStatus === 'loading' && <p className={styles.status}>Loading proposals…</p>}
-        {proposalsStatus === 'error' && <p className={styles.status}>Could not load proposals.</p>}
+        {proposalsStatus === 'loading' && <p className={styles.status}>Загрузка…</p>}
+        {proposalsStatus === 'error' && <p className={styles.status}>Не удалось загрузить заказы.</p>}
         {proposalsStatus === 'ready' && proposals.length === 0 && (
-          <p className={styles.status}>No proposals right now.</p>
+          <p className={styles.status}>Пока нет новых заказов.</p>
         )}
 
         {proposalsStatus === 'ready' &&
@@ -269,7 +282,7 @@ export function DriverHome() {
                         : styles.proposalResolved
                   }`}
                 >
-                  {proposal.status}
+                  {PROPOSAL_STATUS_LABEL[proposal.status]}
                 </span>
               </div>
 
