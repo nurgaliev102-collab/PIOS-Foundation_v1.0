@@ -55,6 +55,12 @@ import org.springframework.stereotype.Repository
  * performs no validation beyond what already-persisted, previously-valid
  * data satisfies by construction, and step 2 uses the aggregate's own
  * business logic unmodified.
+ *
+ * [findByOrder] (Sprint FR-004, Manual Assignment) reuses the same
+ * [reconstruct] helper as [findById], row by row, filtered by
+ * `order_reference` — no filtering by status, since [Assignment]'s own
+ * invariant treats every assignment as active regardless of status (see
+ * that class's own KDoc).
  */
 @Repository
 class PostgreSQLAssignmentRepository(
@@ -90,6 +96,20 @@ class PostgreSQLAssignmentRepository(
         )
         return rows.firstOrNull()
     }
+
+    override fun findByOrder(order: OrderReference): List<Assignment> =
+        jdbcTemplate.query(
+            "SELECT id, order_reference, driver_reference, status FROM assignments WHERE order_reference = ?",
+            { rs, _ ->
+                reconstruct(
+                    id = rs.getString("id"),
+                    orderReference = rs.getString("order_reference"),
+                    driverReference = rs.getString("driver_reference"),
+                    status = AssignmentStatus.valueOf(rs.getString("status"))
+                )
+            },
+            order.orderId
+        )
 
     private fun reconstruct(id: String, orderReference: String, driverReference: String, status: AssignmentStatus): Assignment {
         val constructor = Assignment::class.java.getDeclaredConstructor(

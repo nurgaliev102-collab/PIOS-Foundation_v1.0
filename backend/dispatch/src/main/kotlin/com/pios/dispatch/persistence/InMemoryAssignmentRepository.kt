@@ -3,6 +3,7 @@ package com.pios.dispatch.persistence
 import com.pios.dispatch.application.AssignmentRepository
 import com.pios.dispatch.domain.Assignment
 import com.pios.dispatch.domain.AssignmentId
+import com.pios.dispatch.domain.OrderReference
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -26,4 +27,6 @@ class InMemoryAssignmentRepository : AssignmentRepository {
     }
 
     override fun findById(id: AssignmentId): Assignment? = store[id]
+
+    override fun findByOrder(order: OrderReference): List<Assignment> = store.values.filter { it.order == order }
 }

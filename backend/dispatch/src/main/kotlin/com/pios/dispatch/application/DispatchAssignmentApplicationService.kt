@@ -68,6 +68,43 @@ class DispatchAssignmentApplicationService(
     }
 
     /**
+     * Handles [command] by first restoring the order's own existing
+     * assignments through [assignmentRepository] itself, inside the same
+     * [transactionRunner] boundary as the rest of this method (Milestone
+     * 14A) — instead of requiring the caller to read them beforehand and
+     * pass the result in, as the other [handle] overload still does for
+     * callers that already have that collection on hand (for example,
+     * [com.pios.dispatch.api.AssignmentController.assignOrder]). Closes
+     * the window in which a caller's own pre-fetched read could become
+     * stale before this method's write.
+     */
+    fun handle(command: AssignOrderCommand): AssignmentCreated = transactionRunner.run {
+        handleWithinCallerTransaction(command)
+    }
+
+    /**
+     * Identical to [handle] (the single-argument, self-fetching overload)
+     * except that it does not open its own [transactionRunner] boundary —
+     * for [ProposalAssignmentOrchestrationService] to call from inside the
+     * one shared transaction it now owns for Accept Proposal (ADR-036).
+     * Calling this from outside an already-open transaction would leave
+     * the existing-assignments read, the [Assignment] write, and the
+     * outbox write uncommitted-atomic only by accident; every other caller
+     * must keep using [handle] instead.
+     */
+    fun handleWithinCallerTransaction(command: AssignOrderCommand): AssignmentCreated {
+        val existingAssignments = assignmentRepository.findByOrder(command.order)
+        val created = Assignment.create(
+            order = command.order,
+            driver = command.driver,
+            existingAssignments = existingAssignments
+        )
+        assignmentRepository.save(created.assignment)
+        outboxRepository.save(outboxRecordFor(created.assignment.id, created.event))
+        return created
+    }
+
+    /**
      * Confirms the given [assignment], per the Accept Assignment command.
      * [assignment] must be the one referenced by [command] — the caller
      * is responsible for finding it, since [AssignmentRepository] offers
