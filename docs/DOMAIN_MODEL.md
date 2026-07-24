@@ -2,7 +2,7 @@
 
 Status: Draft — Derived from Approved Foundation. This document is the technology-independent domain model of PIOS: the business concepts, their boundaries, and the rules that govern them, independent of any database, API, event schema, programming language, or deployment choice. It is intended to remain valid regardless of what technology later implements it.
 
-This document is derived exclusively from [PROJECT_CONSTITUTION.md](PROJECT_CONSTITUTION.md), [PRODUCT_FOUNDATION.md](PRODUCT_FOUNDATION.md), [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md), and the ADR Foundation (ADR-001 through ADR-020), in that order of authority. Where a concept would require a decision that no existing document makes, it is marked **Domain Decision Required** rather than resolved by invention, consistent with the Documentation Driven Development discipline in [ADR-006](ADR/ADR-006-Documentation-Driven-Development.md).
+This document is derived exclusively from [PROJECT_CONSTITUTION.md](PROJECT_CONSTITUTION.md), [PRODUCT_FOUNDATION.md](PRODUCT_FOUNDATION.md), [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md), and the ADR Foundation (ADR-001 through ADR-020), in that order of authority. Where a concept would require a decision that no existing document makes, it is marked **Domain Decision Required** rather than resolved by invention, consistent with the Documentation Driven Development discipline in [ADR-006](ADR/ADR-006-Documentation-Driven-Development.md). The Proposal aggregate (Section 4) additionally derives from [ADR-035](ADR/ADR-035-Pre-Commitment-Business-Fact-Aggregate-Boundary.md) and the Product Decision chain it implements — [Opportunity Before Assignment v1.0](PRODUCT_DECISION_OPPORTUNITY_BEFORE_ASSIGNMENT.md), [Opportunity, Acceptance & Commitment Semantics v1.0](PRODUCT_DECISION_OPPORTUNITY_ACCEPTANCE_COMMITMENT.md), and [Electronic Dispatcher MVP Blockers v1.0](PRODUCT_DECISION_ELECTRONIC_DISPATCHER_MVP_BLOCKERS.md) — each already cited at its point of use below, consistent with the Documentation Hierarchy in PROJECT_CONSTITUTION.md Section 5.
 
 ---
 
@@ -37,9 +37,15 @@ An aggregate is described here only where a purpose, an invariant, and a lifecyc
 - **Invariant.** An order has exactly one current status at any time, and originates from exactly one source — platform-aggregated demand, a corporate customer, or a driver's personal client relationship.
 - **Lifecycle.** An order is submitted; it may be assigned to a driver by Dispatch; an assigned order is subject to acceptance; an accepted order proceeds to the transportation itself (referred to as a ride once underway); and it is completed or, at any point before completion, cancelled.
 
+### Proposal (Dispatch)
+
+- **Purpose.** Represents that Dispatch has proposed a specific driver for a specific order, prior to that driver's own confirmation — ratified as existing, and as distinct from Assignment, by Product Decision: Opportunity Before Assignment v1.0 and by [ADR-035](ADR/ADR-035-Pre-Commitment-Business-Fact-Aggregate-Boundary.md). **Documentation sync note (Sprint 1 — Foundation Stabilization):** neither that Product Decision nor ADR-035 itself names this aggregate; the name **Proposal** used here is the name already established and consistently used across implementation since Sprint IMPLEMENTATION-002, recorded here to bring this document into agreement with that already-settled usage, not to originate a new naming decision.
+- **Invariant.** An order may have at most one open Proposal at any time — ratified by Product Decision: Electronic Dispatcher MVP Blockers v1.0 (Concurrent Proposal Policy: "strictly sequential, max one `OPEN` Proposal per order, no broadcast without a new decision"). The precise mechanism by which a Proposal's outcome is recognized — in particular, what triggers a lapse — remains **Domain Decision Required**: Product Decision: Electronic Dispatcher MVP Blockers v1.0 ratifies only that a single, configurable, non-adaptive timeout parameter exists (Proposal Timeout Policy), never its value or triggering mechanism.
+- **Lifecycle.** A Proposal is created open; it resolves, exactly once, to one of three outcomes — confirmed by the driver, refused by the driver, or lapsed for want of a timely response (Product Decision: Opportunity, Acceptance & Commitment Semantics v1.0 Section 9; Product Decision: Electronic Dispatcher MVP Blockers v1.0). Its positive resolution is a precondition for Assignment's own creation (see Assignment, below); it has no supported transition back to open once resolved.
+
 ### Assignment (Dispatch)
 
-- **Purpose.** Represents the outcome of Dispatch allocating a specific order to a specific driver.
+- **Purpose.** Represents the outcome of Dispatch allocating a specific order to a specific driver. Per ADR-035, this outcome exists only once the Proposal above has resolved positively; Assignment itself is not, and does not represent, that prior, unresolved proposal.
 - **Invariant.** An order cannot be connected to more than one active assignment at a time, and only Dispatch may create or change an assignment.
 - **Lifecycle.** An assignment is made by Dispatch in connection with an order; it is subject to acceptance; an accepted assignment stands until the order it is connected to is completed or cancelled.
 
@@ -88,11 +94,17 @@ The following responsibilities do not belong to a single aggregate and are descr
 The following are conceptual occurrences only; no payload or schema is defined for any of them, consistent with ADR-003:
 
 - **Order Submitted** — an order has been received by Order Management.
+- **Order Proposed** — Dispatch has proposed a specific driver for a specific order, prior to that driver's own confirmation (Section 4, Proposal).
+- **Proposal Accepted** — a proposed driver has confirmed the Proposal.
+- **Proposal Declined** — a proposed driver has refused the Proposal.
+- **Proposal Lapsed** — no response arrived to a Proposal while waiting remained appropriate.
 - **Order Assigned** — Dispatch has connected an order to a driver.
 - **Assignment Accepted** — a proposed assignment has been confirmed.
 - **Order Cancelled** — an order or its assignment has been terminated before completion.
 - **Order Completed** — an order, having proceeded through its ride, has reached completion.
 - **Driver Availability Changed** — a driver's declared readiness has changed.
+
+The four Proposal events above are Dispatch-internal domain events only — no other domain currently relies on any of them, so none is a business event under ADR-003, and none is currently published outside Dispatch's own boundary (Section 9's Cross-Domain Events equivalent in EVENT_CATALOG.md records this explicitly, mirroring the same treatment already given to Order Submitted/Cancelled/Completed, which are likewise domain-internal today).
 
 Each of these is a domain event within the domain where it occurs and becomes a business event, per ADR-003, wherever another domain relies on it — for example, Dispatch depending on Driver Availability Changed, or Order Management depending on Assignment Accepted.
 
@@ -101,6 +113,10 @@ Each of these is a domain event within the domain where it occurs and becomes a 
 The following are conceptual requests for a domain to act within its own boundary, consistent with the Communication Model in SYSTEM_ARCHITECTURE.md Section 8; no mechanism is defined for any of them:
 
 - **Submit Order** — directed at Order Management.
+- **Propose Driver** — directed at Dispatch.
+- **Accept Proposal** — directed at Dispatch.
+- **Decline Proposal** — directed at Dispatch.
+- **Lapse Proposal** — directed at Dispatch.
 - **Assign Order** — directed at Dispatch.
 - **Accept Assignment** — directed at Dispatch.
 - **Cancel Order** — directed at Order Management.
@@ -122,6 +138,7 @@ The following are conceptual requests for information, consistent with the Commu
 These are structural invariants derivable from approved documentation, not business rules governing how a decision is made:
 
 - An order has exactly one current status at any time.
+- An order may have at most one open Proposal at any time.
 - An order cannot be connected to more than one active assignment at a time.
 - A driver has exactly one current availability state at any time.
 - A completed order cannot return to an active state.
@@ -136,6 +153,7 @@ These are structural invariants derivable from approved documentation, not busin
 Described in prose, conceptually, without workflow diagrams:
 
 - **Order.** Submitted, then either assigned by Dispatch and carried through acceptance, the ride itself, and completion, or cancelled at any point before completion.
+- **Proposal.** Created open; resolves, exactly once, to confirmed, refused, or lapsed (Product Decision: Electronic Dispatcher MVP Blockers v1.0). Its precise resolution-recognition mechanism — in particular, what triggers a lapse — remains Domain Decision Required.
 - **Assignment.** Made by Dispatch in connection with an order, then accepted; it stands until its order is completed or cancelled.
 - **Driver Availability.** Declared by the driver and changed by the driver at will; it exists independently of any single order or assignment.
 
@@ -144,6 +162,7 @@ Described in prose, conceptually, without workflow diagrams:
 Described conceptually, with no cardinality or foreign-key semantics:
 
 - An Order becomes connected to an Assignment once Dispatch allocates it to a driver.
+- A Proposal precedes the Assignment its positive resolution produces, per ADR-035; a Proposal never becomes an Assignment, it only precedes one.
 - An Assignment connects an Order to a Driver.
 - An Order relates to a Passenger or a Corporate Customer, depending on its origin.
 - A Driver may hold a Personal Client Relationship with a Passenger or Corporate Customer, independent of any single Order.
@@ -164,7 +183,7 @@ Described conceptually, with no cardinality or foreign-key semantics:
 | 1. Purpose | Section 5 | — | ADR-006 | — |
 | 2. Domain Philosophy | Section 4 | — | ADR-001, ADR-009, ADR-016, ADR-017, ADR-018 | — |
 | 3. Core Domains | — | Section 9 | ADR-018 | Section 6 |
-| 4. Aggregates | — | Section 10 | ADR-002, ADR-005, ADR-019 | Section 9 |
+| 4. Aggregates | — | Section 10 | ADR-002, ADR-005, ADR-019, ADR-035 | Section 9 |
 | 5. Entities | — | Sections 6–7, 10 | ADR-018, ADR-019 | Section 3 |
 | 6. Value Objects | — | Section 10 | — | — |
 | 7. Domain Services | — | Section 9 | ADR-002, ADR-019 | Section 6 |
@@ -172,7 +191,7 @@ Described conceptually, with no cardinality or foreign-key semantics:
 | 9. Commands | — | Section 10 | — | Section 8 |
 | 10. Queries | — | Section 10 | — | Section 8 |
 | 11. Business Invariants | — | Section 10 | ADR-002, ADR-005, ADR-009, ADR-019 | Section 9 |
-| 12. State Lifecycles | — | Section 10 | ADR-002, ADR-003 | Section 9 |
+| 12. State Lifecycles | — | Section 10 | ADR-002, ADR-003, ADR-035 | Section 9 |
 | 13. Relationships | — | Sections 6, 10 | ADR-005, ADR-019 | Section 10 |
 | 14. Boundaries | Section 15 | Sections 8, 14 | ADR-002, ADR-020 | Section 11 |
 

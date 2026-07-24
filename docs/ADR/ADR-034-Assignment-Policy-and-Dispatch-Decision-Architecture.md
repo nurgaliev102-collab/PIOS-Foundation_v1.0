@@ -146,6 +146,8 @@ Anticipated follow-up decisions, none resolved here:
 
 Any change to the ownership boundary (Part 1), the input boundary (Part 2), or the abstraction shape (Part 3) itself requires a decision that explicitly supersedes this one, consistent with ADR-015.
 
+**Update:** Part 2's "Dispatch's own existing Assignment state" input and Part 3's diagram assumed Assignment Policy's output flows directly into `Assignment.create()`. [ADR-035: Pre-Commitment Business Fact — Aggregate Boundary](ADR-035-Pre-Commitment-Business-Fact-Aggregate-Boundary.md) clarifies this: a ratified pre-commitment business fact now sits between Assignment Policy's decision and `Assignment`'s own creation, per Product Decision: Opportunity Before Assignment v1.0. Part 1 (ownership), Part 4 (future strategies), Part 5 (product constraints), Part 6, and Part 7 remain unchanged and in full force.
+
 ## Related ADRs
 
 - [ADR-002: Dispatch Engine](ADR-002-Dispatch-Engine.md) — the standing ownership and algorithm-exclusion decision this ADR elaborates without reopening.

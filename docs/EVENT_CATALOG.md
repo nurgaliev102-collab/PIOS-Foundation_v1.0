@@ -37,14 +37,20 @@ Owner Domain: Order Management. These correspond to the Order lifecycle in DOMAI
 | OrderCancelled | Order Management | An order or its assignment has been terminated before completion. | Records that the order will not proceed to completion, consistent with the invariant that cancellation may occur only before completion. | Order |
 | OrderCompleted | Order Management | An order, having proceeded through its ride, has reached completion. | Marks the order's terminal state, after which it cannot return to an active state. | Order |
 
-## 6. Assignment Domain Events
+## 6. Dispatch Domain Events (Proposal and Assignment)
 
-Owner Domain: Dispatch. These correspond to the Assignment aggregate in DOMAIN_MODEL.md Section 4. No matching or assignment algorithm is described or implied; ADR-002 explicitly excludes that from every level of this documentation.
+Owner Domain: Dispatch. These correspond to the Proposal and Assignment aggregates in DOMAIN_MODEL.md Section 4. No matching, candidate-selection, or assignment algorithm is described or implied; ADR-002 explicitly excludes that from every level of this documentation. **Documentation sync note (Sprint 1 — Foundation Stabilization):** this section was retitled from "Assignment Domain Events" and the four Proposal rows below were added to bring this catalog into agreement with DOMAIN_MODEL.md Section 8 and the Proposal implementation already in place since Sprint IMPLEMENTATION-002; the section number is kept unchanged so existing cross-references to "EVENT_CATALOG.md Section 6" elsewhere in this repository remain valid.
 
 | Event Name | Owner Domain | Meaning | Why It Exists | Related Aggregate |
 | --- | --- | --- | --- | --- |
+| OrderProposed | Dispatch | Dispatch has proposed a specific driver for a specific order, prior to that driver's own confirmation. | Records the existence of the pre-commitment business fact ratified by Product Decision: Opportunity Before Assignment v1.0, distinct from the settled outcome Assignment represents. | Proposal |
+| ProposalAccepted | Dispatch | A proposed driver has confirmed the Proposal. | Marks the point at which the Proposal resolves positively, which is the precondition for Assignment's own creation, per ADR-035. | Proposal |
+| ProposalDeclined | Dispatch | A proposed driver has refused the Proposal. | Records a negative resolution before any obligation existed, per Product Decision: Opportunity, Acceptance & Commitment Semantics v1.0 Section 3 — frees the order for a new Proposal. | Proposal |
+| ProposalLapsed | Dispatch | No response arrived to a Proposal while waiting remained appropriate. | Records a non-response resolution, per Product Decision: Electronic Dispatcher MVP Blockers v1.0 (Proposal Timeout Policy) — frees the order for a new Proposal. | Proposal |
 | OrderAssigned | Dispatch | Dispatch has connected an order to a driver. | Records the outcome of the assignment decision that only Dispatch may make, per ADR-002. | Assignment |
 | AssignmentAccepted | Dispatch | A proposed assignment has been confirmed. | Marks the point at which an assignment is confirmed to proceed, which Order Management depends on to know the order will proceed toward a ride. | Assignment |
+
+The four Proposal events above are not currently business events under ADR-003 — no other domain relies on any of them, and none is published outside Dispatch's own process boundary today (no outbox record is written for them; see `ProposalApplicationService`'s own documented reasoning, unchanged by this sync). This mirrors the same treatment Section 5 already gives OrderSubmitted/OrderCancelled/OrderCompleted before Section 9 identifies which events actually cross a domain boundary.
 
 ## 7. Driver Domain Events
 
@@ -80,6 +86,10 @@ In addition, the Notification Delivery and Analytics Aggregation domain services
 | OrderSubmitted | Section 3 (Transparency) | ADR-005, ADR-009 | Section 10 (Order, Status) | Section 9 | Sections 4, 8 |
 | OrderCancelled | Section 3 (Transparency) | ADR-005, ADR-009 | Section 10 (Cancellation) | Section 9 | Sections 4, 11 |
 | OrderCompleted | Section 3 (Transparency) | ADR-005, ADR-009 | Section 10 (Status) | Section 9 | Sections 4, 11 |
+| OrderProposed | Section 3 (Fair Dispatch) | ADR-002, ADR-003, ADR-035 | Section 10 (Assignment) | Sections 6, 9 | Section 4 |
+| ProposalAccepted | Section 3 (Fair Dispatch) | ADR-002, ADR-003, ADR-035 | Section 10 (Acceptance) | Sections 6, 9 | Section 4 |
+| ProposalDeclined | Section 3 (Fair Dispatch) | ADR-002, ADR-003, ADR-035 | Section 10 (Acceptance) | Sections 6, 9 | Section 4 |
+| ProposalLapsed | Section 3 (Fair Dispatch) | ADR-002, ADR-003, ADR-035 | Section 10 (Acceptance) | Sections 6, 9 | Section 4 |
 | OrderAssigned | Section 3 (Fair Dispatch) | ADR-002, ADR-003 | Section 10 (Assignment) | Sections 6, 9 | Sections 4, 7 |
 | AssignmentAccepted | Section 3 (Fair Dispatch) | ADR-002, ADR-003 | Section 10 (Acceptance) | Sections 6, 9 | Sections 4, 8, 11 |
 | DriverAvailabilityChanged | Section 3 (Driver Ownership) | ADR-005, ADR-009 | Section 10 (Availability) | Sections 3, 9 | Sections 4, 8, 11 |

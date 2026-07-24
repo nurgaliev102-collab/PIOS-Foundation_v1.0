@@ -36,7 +36,7 @@ The [System Architecture](SYSTEM_ARCHITECTURE.md) describes how PIOS is organize
 
 ## ADR
 
-Architecture Decision Records. Every change to an architectural decision is recorded here before or alongside the change, per [PROJECT_CONSTITUTION.md](PROJECT_CONSTITUTION.md) Section 7. All ADRs listed below are Proposed and require explicit approval by the Human Architect, per [ADR-007](adr/ADR-007-AI-Development-Workflow.md), before they become Accepted.
+Architecture Decision Records. Every change to an architectural decision is recorded here before or alongside the change, per [PROJECT_CONSTITUTION.md](PROJECT_CONSTITUTION.md) Section 7. Each ADR remains Proposed and requires explicit approval by the Human Architect, per [ADR-007](adr/ADR-007-AI-Development-Workflow.md), before it becomes Accepted — ADR-036 is the first to have completed that review and reached Accepted status (2026-07-24).
 
 | ADR | Title | Status |
 | --- | --- | --- |
@@ -66,6 +66,10 @@ Architecture Decision Records. Every change to an architectural decision is reco
 | [ADR-024](adr/ADR-024-Frontend-Technology-Decision.md) | Frontend Technology Decision | Proposed |
 | [ADR-025](adr/ADR-025-Database-Technology-Decision.md) | Database Technology Decision | Proposed |
 | [ADR-026](adr/ADR-026-Deployment-Strategy.md) | Deployment Strategy | Proposed |
+| [ADR-035](adr/ADR-035-Pre-Commitment-Business-Fact-Aggregate-Boundary.md) | Pre-Commitment Business Fact — Aggregate Boundary | Proposed |
+| [ADR-036](adr/ADR-036-Proposal-Assignment-Shared-Transaction.md) | Proposal↔Assignment Shared Transaction | **Accepted** |
+
+Note (Sprint 1 — Foundation Stabilization): this table is also missing ADR-027 through ADR-034, which exist as real files under `docs/ADR/` but were never added here — a pre-existing indexing gap found during this sprint's own documentation-sync work, left uncorrected here since it is outside this sprint's authorized scope; recorded for Sprint 2.
 
 ## Domain
 
@@ -135,6 +139,10 @@ The [Initial Implementation Plan](INITIAL_IMPLEMENTATION_PLAN.md) converts the a
 
 The [Repository Initialization Plan](REPOSITORY_INITIALIZATION_PLAN.md) defines the controlled transition from architecture documentation to the first real software repository: initial repository and module scope, deferred modules, first commit definition, and the transition to implementation. It creates no repository, folder, file, or source code.
 
+The [Launch Checklist](LAUNCH_CHECKLIST.md) (Sprint VALIDATION-001) is the operational, tick-box runbook for actually starting every module locally and proving the current end-to-end dispatch flow works — required software, database/broker setup, startup order, and the scenario steps themselves. Purely operational; it creates no architecture, domain, or product decision.
+
+The [Implementation Strategy](IMPLEMENTATION_STRATEGY.md) sequences already-ratified decisions and already-existing code into a phased roadmap from the repository's current state through a first MVR and onward toward a mature platform, comparing sequencing options where more than one exists. It authorizes no Product Decision, ADR, or business rule, and commissions no milestone by itself.
+
 ## Product
 
 Product scope and requirements.
@@ -176,3 +184,9 @@ The [Implementation Plan: Production Outbox Relay Trigger v1.0](IMPLEMENTATION_P
 The [PIOS Vertical Slice Verification v1.0](PIOS_VERTICAL_SLICE_VERIFICATION_V1.md) confirms every segment of the Submit-Order-through-Assignment-Acceptance chain is independently proven against real PostgreSQL/RabbitMQ/HTTP, finds no single test proves the composed whole, and concludes the technical foundation is sufficient to begin the (entirely manual) Network Pilot regardless of that gap.
 
 The [Network Pilot Launch Kit v1.0](NETWORK_PILOT_LAUNCH_KIT_V1.md) consolidates the Network Pilot experiment, execution plan, and operations checklist into one practical, run-it-from-this-document kit — objective, participant profile, roles, rules, recruitment script, interview framework, case log, qualitative success signals, stop conditions, post-pilot decision categories, and a first-30-days operational sequence — introducing no new pilot mechanic.
+
+The [Product Decision: Opportunity Before Assignment v1.0](PRODUCT_DECISION_OPPORTUNITY_BEFORE_ASSIGNMENT.md) ratifies that a self-contained business fact exists between Dispatch's own driver selection and a driver's own confirmation, distinct from Assignment, while deliberately deferring its architectural form — resolved separately by [ADR-035](adr/ADR-035-Pre-Commitment-Business-Fact-Aggregate-Boundary.md).
+
+The [Electronic Dispatcher — Product & Domain Design v1.0](ELECTRONIC_DISPATCHER_DOMAIN_DESIGN_V1.md) is a **Proposed design blueprint, not yet a Product Decision or ADR** — it designs the automatic replacement for today's manual Coordinator-driven candidate selection (Dispatch Lifecycle, Eligibility, Candidate Selection, Fair Opportunity Policy factors, Proposal Queue continuation, Timeout Strategy, Failure Handling, Personal Client Relationship decision points, Referral Origin placement, and future policy extension points), consolidating every open question it touches rather than resolving any of them, pending Product Owner review before any implementation or formal ratification.
+
+The [Product Decision: Electronic Dispatcher MVP Blockers v1.0](PRODUCT_DECISION_ELECTRONIC_DISPATCHER_MVP_BLOCKERS.md) ratifies the three decisions Sprint PRODUCT-DECISION-RESOLUTION-001 identified as blocking Automatic Dispatch implementation — Cycle-Exhausted Behavior (limited automatic retry, then honest customer outcome; Coordinator as exceptional tool only, never the normal fallback), Proposal Timeout Policy (a single, non-adaptive, configurable parameter), and Concurrent Proposal Policy (strictly sequential, one `OPEN` Proposal per order, no broadcast) — while explicitly leaving every other open question from the design blueprint exactly as open as it found them.

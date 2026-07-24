@@ -33,9 +33,9 @@ Module Structure exists to give each of the eight already-ratified architectural
 
 - **Purpose.** The software organization unit responsible for the assignment decision.
 - **Responsibility.** Connecting a transportation request to a driver, exclusively (ADR-002).
-- **Owned capabilities.** Assign Order and Accept Assignment (APPLICATION_ARCHITECTURE.md Section 6); Retrieve Assignment (Section 7); OrderAssigned and AssignmentAccepted (EVENT_CATALOG.md Section 6).
-- **Boundary.** No other module determines or changes an assignment; the specific assignment criteria are excluded from this document as from every other (ADR-002).
-- **Assignment decision architecture.** [ADR-034: Assignment Policy and Dispatch Decision Architecture](ADR/ADR-034-Assignment-Policy-and-Dispatch-Decision-Architecture.md) defines the input boundary (what Dispatch's eventual assignment decision may and must never use) and the Assignment Policy abstraction the decision will sit behind, without choosing or authorizing any algorithm.
+- **Owned capabilities.** Assign Order and Accept Assignment (APPLICATION_ARCHITECTURE.md Section 6); Retrieve Assignment (Section 7); OrderAssigned and AssignmentAccepted (EVENT_CATALOG.md Section 6). Per ADR-035, Dispatch also owns a second, not-yet-named aggregate capability representing the pre-commitment business fact preceding Assignment; its own commands, queries, and events are not yet named by any approved document.
+- **Boundary.** No other module determines or changes an assignment; the specific assignment criteria are excluded from this document as from every other (ADR-002). The same exclusive-ownership boundary applies to the new pre-commitment aggregate named by ADR-035.
+- **Assignment decision architecture.** [ADR-034: Assignment Policy and Dispatch Decision Architecture](ADR/ADR-034-Assignment-Policy-and-Dispatch-Decision-Architecture.md) defines the input boundary (what Dispatch's eventual assignment decision may and must never use) and the Assignment Policy abstraction the decision will sit behind, without choosing or authorizing any algorithm. [ADR-035: Pre-Commitment Business Fact — Aggregate Boundary](ADR/ADR-035-Pre-Commitment-Business-Fact-Aggregate-Boundary.md) establishes that Assignment Policy's output targets this new aggregate, not `Assignment` directly, without deciding the new aggregate's own shape.
 
 ### Driver Management Module
 
@@ -114,7 +114,7 @@ A new module is added only when a new bounded context is ratified through a deci
 | --- | --- | --- | --- | --- | --- |
 | 1. Purpose | ADR-016, ADR-018 | Section 5 | Section 3 | Section 1 | Section 1 |
 | 2. Module Design Principles | ADR-001, ADR-003, ADR-004, ADR-009, ADR-018 | — | — | Section 2 | — |
-| 3. Core Modules | ADR-002, ADR-005, ADR-018, ADR-019, ADR-020, ADR-033 (Notifications) | Section 6 | Section 3 | Sections 5–7 | Sections 4–5 |
+| 3. Core Modules | ADR-002, ADR-005, ADR-018, ADR-019, ADR-020, ADR-033 (Notifications), ADR-035 (Dispatch) | Section 6 | Section 3 | Sections 5–7 | Sections 4–5 |
 | 4. Shared Capabilities | ADR-010, ADR-011, ADR-012 | Sections 14–15 | — | — | Sections 8–9 |
 | 5. Dependency Rules | ADR-003, ADR-004, ADR-005, ADR-009 | Section 8 | — | Section 8 | Section 6 |
 | 6. Application Coordination | — | Section 8 | Section 7 | Sections 2, 8 | — |

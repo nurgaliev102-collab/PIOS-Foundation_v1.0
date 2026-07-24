@@ -31,7 +31,7 @@ Each domain below persists exactly the information stated, consistent with ADR-0
 
 ### Dispatch
 
-- **Persistence responsibility.** Persists the Assignment logical entity.
+- **Persistence responsibility.** Persists the Assignment logical entity. Per ADR-035, Dispatch also persists a second, not-yet-named logical entity representing the pre-commitment business fact preceding Assignment; its own shape is Domain Decision Required.
 - **Persistence boundary.** Only Dispatch persists or changes Assignment information (ADR-002, ADR-005).
 - **Information authority.** Dispatch is the final authority on whether, and to whom, an order has been assigned.
 
@@ -92,6 +92,7 @@ Consistent with ADR-019:
 - **Lifecycle consistency.** A domain's persisted information reflects only the lifecycle states already established for it (DOMAIN_MODEL.md Section 12); a persisted state outside that lifecycle is not valid.
 - **Cross-domain consistency.** Consistency across more than one domain's persisted information is never assumed to be simultaneous; it is achieved only through the eventual consistency already established for the event mechanism (ADR-003; APPLICATION_ARCHITECTURE.md Section 10).
 - **Evolution consistency.** When a domain's persisted structure evolves, it remains consistent with that domain's own invariants throughout the transition, and any consumer depending on it is given the migration window already established in ADR-010 and ADR-015.
+- **Intra-domain cross-aggregate transactions (ratified exception).** This section does not, by itself, authorize a single transaction spanning more than one aggregate. [ADR-036](ADR/ADR-036-Proposal-Assignment-Shared-Transaction.md) is the first, narrow case where one was authorized — a single shared transaction across Dispatch's own Proposal and Assignment aggregates, for the Accept Proposal operation only — argued on that ADR's own specific facts (same bounded context, single synchronous operation, no compensating action available), not a general license. Any future cross-aggregate case requires its own ADR satisfying the same three conditions; none is granted by this bullet or by ADR-036 itself.
 
 No distributed transaction mechanism or other implementation detail is defined here.
 
@@ -103,7 +104,7 @@ Persistence responsibility, boundaries, and consistency principles change only t
 
 **Sufficiently defined for the next stage.** Domain ownership of persisted information (Section 3); the operational, derived, analytical, and historical distinction (Section 4); cross-domain reference and sharing principles (Section 5); the consistency philosophy (Section 6); and the per-domain technology evaluation framework (ADR-021). Together, these give a future Database Design everything needed to begin selecting technology and designing a schema for one domain at a time.
 
-**Intentionally undecided until Database Design.** The specific storage technology for each domain, deferred by ADR-021; any schema, table, column, key, or index; any caching, replication, sharding, or backup strategy; any specific consistency mechanism beyond the conceptual philosophy in Section 6; and the specific mechanism by which a cross-domain reference is technically resolved.
+**Intentionally undecided until Database Design.** The specific storage technology for each domain, deferred by ADR-021; any schema, table, column, key, or index; any caching, replication, sharding, or backup strategy; any specific consistency mechanism beyond the conceptual philosophy in Section 6 (Dispatch's own Proposal↔Assignment case is the one ratified exception — [ADR-036](ADR/ADR-036-Proposal-Assignment-Shared-Transaction.md) — not a general answer to this question); and the specific mechanism by which a cross-domain reference is technically resolved.
 
 ## 9. Traceability
 
@@ -114,8 +115,8 @@ Persistence responsibility, boundaries, and consistency principles change only t
 | 3. Persistence Boundaries | — | ADR-002, ADR-005, ADR-009, ADR-018, ADR-019, ADR-020 | — | — | Sections 3–4 | — |
 | 4. Operational vs Derived Persistence | — | ADR-019 | — | Section 7 | Sections 4, 9 | — |
 | 5. Cross-Domain Persistence | — | ADR-003, ADR-004, ADR-005, ADR-009 | — | — | Section 5 | — |
-| 6. Consistency Philosophy | — | ADR-003, ADR-010, ADR-015 | — | Sections 11–12 | Section 7 | Section 10 |
+| 6. Consistency Philosophy | — | ADR-003, ADR-010, ADR-015, ADR-036 | — | Sections 11–12 | Section 7 | Section 10 |
 | 7. Persistence Evolution | Section 7 (ADR Policy) | ADR-015, ADR-017, ADR-018, ADR-019, ADR-021 | — | — | Section 10 | — |
-| 8. Database Design Readiness | — | ADR-021 | — | — | — | — |
+| 8. Database Design Readiness | — | ADR-021, ADR-036 | — | — | — | — |
 
 Where this document is silent — including on any decision reserved for a future Database Design — no lower-priority document may fill that silence by invention; resolution requires the relevant higher-priority document to be extended first, per the authority order established in PROJECT_CONSTITUTION.md Section 5.
