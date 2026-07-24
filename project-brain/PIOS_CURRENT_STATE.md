@@ -25,7 +25,9 @@ Four Kotlin/Spring Boot modules, each independently buildable (`backend/settings
 
 ## REST Flows — **CURRENT CODE**
 
-Exactly one REST endpoint exists anywhere in this repository, verified by `grep -rl "@RestController"`:
+**Update (Sprint 5: First Backend Integration, not re-verified against the rest of this document — see that section's own claims for what was directly touched):** a second REST endpoint now exists — `GET /v1/drivers/{driverId}` on Driver Management (`com.pios.drivermanagement.api.DriverController`) — exposing the already-owned Retrieve Driver Availability query (APPLICATION_ARCHITECTURE.md Section 7) read-only: `{id, availability}` (200) or 404 for an unknown driver, 400 for a blank id. Delegates to a new `RetrieveDriverAvailabilityHandler` (application layer); no domain, database, or event changes accompany it. This is also, as of the same sprint, the frontend's first real backend call (Driver Home, `GET /v1/drivers/{driverId}` via `frontend/src/api/apiClient.ts`) — see `frontend/README.md`.
+
+Prior to Sprint 5, exactly one REST endpoint existed anywhere in this repository, verified by `grep -rl "@RestController"`:
 
 - `POST /v1/orders` on Order Management (`com.pios.ordermanagement.api.OrderSubmissionController`) — accepts `{passengerReference}`, delegates to the pre-existing `OrderSubmissionRequestHandler`, returns `{orderId}` (201) or 400 for a blank reference.
 - Passenger Experience has a real REST **client** (`RestClientOrderSubmissionClient`, Spring `RestClient`, 5000ms connect/read timeout, no automatic retry) calling the above — but **no production caller of that client exists yet**. It is wired and tested, but nothing in a running deployment currently invokes it; Passenger Experience gained no inbound endpoint of its own (an explicit, deliberate non-goal of Tranche 2).
