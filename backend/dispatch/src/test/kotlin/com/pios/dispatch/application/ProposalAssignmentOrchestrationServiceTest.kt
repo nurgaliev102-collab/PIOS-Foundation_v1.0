@@ -1,0 +1,136 @@
+package com.pios.dispatch.application
+
+import com.pios.dispatch.domain.Assignment
+import com.pios.dispatch.domain.AssignmentStatus
+import com.pios.dispatch.domain.DriverReference
+import com.pios.dispatch.domain.OrderReference
+import com.pios.dispatch.domain.ProposalId
+import com.pios.dispatch.domain.ProposalStatus
+import com.pios.dispatch.persistence.InMemoryAssignmentRepository
+import com.pios.dispatch.persistence.InMemoryProposalRepository
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
+
+/**
+ * Covers Sprint IMPLEMENTATION-004's own minimum required scenarios for
+ * [ProposalAssignmentOrchestrationService], entirely in memory, at the
+ * application layer directly (independent of REST -- [ProposalController]
+ * and its own tests exercise the same behavior one layer up).
+ */
+class ProposalAssignmentOrchestrationServiceTest {
+
+    private val proposalRepository = InMemoryProposalRepository()
+    private val proposalApplicationService = ProposalApplicationService(proposalRepository)
+    private val assignmentRepository = InMemoryAssignmentRepository()
+    private val dispatchAssignmentApplicationService = DispatchAssignmentApplicationService(assignmentRepository)
+    private val orchestrationService = ProposalAssignmentOrchestrationService(
+        proposalRepository,
+        proposalApplicationService,
+        dispatchAssignmentApplicationService
+    )
+
+    private val order = OrderReference("order-1")
+    private val driver = DriverReference("driver-1")
+
+    @Test
+    fun `accepting a proposal creates an Assignment automatically for the same order and driver`() {
+        val proposal = proposalApplicationService.handle(ProposeDriverCommand(order, driver)).proposal
+
+        val outcome = orchestrationService.acceptProposal(AcceptProposalCommand(proposal.id))
+
+        assertEquals(order, outcome.assignmentCreated.assignment.order)
+        assertEquals(driver, outcome.assignmentCreated.assignment.driver)
+        assertEquals(AssignmentStatus.CREATED, outcome.assignmentCreated.assignment.status)
+    }
+
+    @Test
+    fun `accepting a proposal marks it ACCEPTED and persists the Assignment through the repository`() {
+        val proposal = proposalApplicationService.handle(ProposeDriverCommand(order, driver)).proposal
+
+        val outcome = orchestrationService.acceptProposal(AcceptProposalCommand(proposal.id))
+
+        assertEquals(ProposalStatus.ACCEPTED, proposalRepository.findById(proposal.id)?.status)
+        assertEquals(order, assignmentRepository.findById(outcome.assignmentCreated.assignment.id)?.order)
+    }
+
+    @Test
+    fun `accepting an already-accepted proposal is rejected and does not create a second Assignment`() {
+        val proposal = proposalApplicationService.handle(ProposeDriverCommand(order, driver)).proposal
+        orchestrationService.acceptProposal(AcceptProposalCommand(proposal.id))
+
+        assertFailsWith<IllegalStateException> {
+            orchestrationService.acceptProposal(AcceptProposalCommand(proposal.id))
+        }
+
+        assertEquals(1, assignmentRepository.findByOrder(order).size)
+    }
+
+    @Test
+    fun `accepting a proposal twice never produces two assignments for the same order`() {
+        val first = proposalApplicationService.handle(ProposeDriverCommand(order, driver)).proposal
+        orchestrationService.acceptProposal(AcceptProposalCommand(first.id))
+
+        val second = proposalApplicationService.handle(ProposeDriverCommand(order, DriverReference("driver-2")))
+            .proposal
+        assertFailsWith<IllegalStateException> {
+            // The order already has an Assignment from the first proposal's acceptance,
+            // so a second proposal for the same order cannot itself be accepted into one.
+            orchestrationService.acceptProposal(AcceptProposalCommand(second.id))
+        }
+
+        assertEquals(1, assignmentRepository.findByOrder(order).size)
+    }
+
+    @Test
+    fun `a declined proposal never creates an Assignment`() {
+        val proposal = proposalApplicationService.handle(ProposeDriverCommand(order, driver)).proposal
+
+        proposalApplicationService.declineProposal(proposal, DeclineProposalCommand(proposal.id))
+
+        assertTrue(assignmentRepository.findByOrder(order).isEmpty())
+    }
+
+    @Test
+    fun `a lapsed proposal never creates an Assignment`() {
+        val proposal = proposalApplicationService.handle(ProposeDriverCommand(order, driver)).proposal
+
+        proposalApplicationService.lapseProposal(proposal, LapseProposalCommand(proposal.id))
+
+        assertTrue(assignmentRepository.findByOrder(order).isEmpty())
+    }
+
+    @Test
+    fun `an order that already has an Assignment blocks acceptance of a Proposal for it`() {
+        assignmentRepository.save(Assignment.create(order, DriverReference("driver-preexisting")).assignment)
+        // Proposal.propose's own Root Invariant only blocks another OPEN proposal for the
+        // same order, not a pre-existing Assignment -- the two invariants are independent
+        // (Domain Analysis -- Is Assignment the Correct Aggregate Before Driver Acceptance?),
+        // so creating this proposal itself succeeds; only its later acceptance is blocked.
+        val proposal = proposalApplicationService.handle(ProposeDriverCommand(order, driver)).proposal
+
+        assertFailsWith<IllegalStateException> {
+            orchestrationService.acceptProposal(AcceptProposalCommand(proposal.id))
+        }
+
+        // This class's own harness uses NoOpTransactionRunner (this test never
+        // supplies a real one), so it has no rollback mechanism at all -- the
+        // Proposal's in-memory save from before the throw simply stays applied.
+        // That is why this assertion still reads ACCEPTED here: it reflects what
+        // this in-memory harness is capable of showing, not ADR-036's actual
+        // guarantee. The real guarantee -- that a real transaction rolls the
+        // Proposal back to OPEN together with the rejected Assignment -- is
+        // proven against real PostgreSQL in
+        // ProposalAssignmentOrchestrationTransactionTest, not here.
+        assertEquals(ProposalStatus.ACCEPTED, proposalRepository.findById(proposal.id)?.status)
+        assertEquals(1, assignmentRepository.findByOrder(order).size)
+    }
+
+    @Test
+    fun `accepting a proposal for an unknown id throws ProposalNotFoundException`() {
+        assertFailsWith<ProposalNotFoundException> {
+            orchestrationService.acceptProposal(AcceptProposalCommand(ProposalId("never-created")))
+        }
+    }
+}

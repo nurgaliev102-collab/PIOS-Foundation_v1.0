@@ -9,6 +9,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Proves the save/load lifecycle described by [AssignmentRepository]
@@ -46,5 +47,15 @@ class PostgreSQLAssignmentRepositoryTest {
         repository.save(created.assignment)
 
         assertEquals(AssignmentStatus.ACCEPTED, repository.findById(created.assignment.id)?.status)
+    }
+
+    @Test
+    fun `findByOrder returns an assignment saved to PostgreSQL for that order`() {
+        val order = OrderReference("postgres-findbyorder-order-1")
+        val created = Assignment.create(order, DriverReference("postgres-findbyorder-driver-1"))
+
+        repository.save(created.assignment)
+
+        assertTrue(repository.findByOrder(order).any { it.id == created.assignment.id })
     }
 }
