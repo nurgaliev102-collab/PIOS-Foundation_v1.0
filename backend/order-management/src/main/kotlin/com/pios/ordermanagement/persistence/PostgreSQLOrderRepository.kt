@@ -66,10 +66,23 @@ import org.springframework.stereotype.Repository
  * way to change it afterward (see that class's own KDoc) — only `status`
  * is ever legitimately re-saved after the initial insert.
  *
- * A `destination` column was added and then dropped again within this
- * same sprint (backward-compatibility correction; see
- * `V5__revert_order_destination.sql`) — this class no longer reads or
- * writes it.
+ * A `destination` column was added and then dropped again within Sprint
+ * FND-006 (backward-compatibility correction; see
+ * `V5__revert_order_destination.sql`). Sprint 3B (MVR Pilot Enablement —
+ * Optional Destination) reintroduces it, this time nullable
+ * (`V6__add_optional_order_destination.sql`) — read and written below,
+ * excluded from `ON CONFLICT ... UPDATE` for the same reason `origin`
+ * is: [Order.destination] is set once, at submission, and never changes.
+ *
+ * [destination] is a plain, nullable `String` (see [Order]'s own KDoc for
+ * why it is not a `@JvmInline value class` the way `origin`/`id` are) —
+ * its JVM-erased type is already `java.lang.String`, identical to
+ * `origin`'s own erased type, so the reflected constructor below simply
+ * gains a fourth `String::class.java` parameter; `null` is a valid
+ * argument for a reference-typed reflective constructor parameter
+ * regardless of the Kotlin-level nullability annotation, and
+ * `ResultSet.getString` already returns `null` for a SQL `NULL` column,
+ * so no special-casing is needed here.
  *
  * [findAll] (Sprint FR-003, Order Query) reuses the same [reconstruct]
  * helper as [findById], row by row, over every order in the table — no
@@ -83,23 +96,25 @@ class PostgreSQLOrderRepository(
     override fun save(order: Order) {
         jdbcTemplate.update(
             """
-            INSERT INTO orders (id, status, origin) VALUES (?, ?, ?)
+            INSERT INTO orders (id, status, origin, destination) VALUES (?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status
             """.trimIndent(),
             order.id.value,
             order.status.name,
-            order.origin.reference
+            order.origin.reference,
+            order.destination
         )
     }
 
     override fun findById(id: OrderId): Order? {
         val rows = jdbcTemplate.query(
-            "SELECT id, status, origin FROM orders WHERE id = ?",
+            "SELECT id, status, origin, destination FROM orders WHERE id = ?",
             { rs, _ ->
                 reconstruct(
                     id = rs.getString("id"),
                     status = OrderStatus.valueOf(rs.getString("status")),
-                    origin = rs.getString("origin")
+                    origin = rs.getString("origin"),
+                    destination = rs.getString("destination")
                 )
             },
             id.value
@@ -109,22 +124,24 @@ class PostgreSQLOrderRepository(
 
     override fun findAll(): List<Order> =
         jdbcTemplate.query(
-            "SELECT id, status, origin FROM orders"
+            "SELECT id, status, origin, destination FROM orders"
         ) { rs, _ ->
             reconstruct(
                 id = rs.getString("id"),
                 status = OrderStatus.valueOf(rs.getString("status")),
-                origin = rs.getString("origin")
+                origin = rs.getString("origin"),
+                destination = rs.getString("destination")
             )
         }
 
-    private fun reconstruct(id: String, status: OrderStatus, origin: String): Order {
+    private fun reconstruct(id: String, status: OrderStatus, origin: String, destination: String?): Order {
         val constructor = Order::class.java.getDeclaredConstructor(
             String::class.java,
             OrderStatus::class.java,
+            String::class.java,
             String::class.java
         )
         constructor.isAccessible = true
-        return constructor.newInstance(id, status, origin)
+        return constructor.newInstance(id, status, origin, destination)
     }
 }

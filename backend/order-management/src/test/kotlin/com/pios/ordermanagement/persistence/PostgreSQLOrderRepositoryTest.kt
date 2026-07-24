@@ -46,6 +46,28 @@ class PostgreSQLOrderRepositoryTest {
         assertNull(repository.findById(OrderId("postgres-repository-test-never-saved")))
     }
 
+    // --- Destination (Sprint 3B: MVR Pilot Enablement -- Optional Destination) ---
+
+    @Test
+    fun `an order saved to PostgreSQL with a destination can be loaded back with it preserved`() {
+        val submitted = Order.submit(origin, "Аэропорт")
+
+        repository.save(submitted.order)
+        val loaded = repository.findById(submitted.order.id)
+
+        assertEquals("Аэропорт", loaded?.destination)
+    }
+
+    @Test
+    fun `an order saved to PostgreSQL without a destination loads back with a null destination`() {
+        val submitted = Order.submit(origin)
+
+        repository.save(submitted.order)
+        val loaded = repository.findById(submitted.order.id)
+
+        assertNull(loaded?.destination)
+    }
+
     @Test
     fun `saving again after a status change overwrites the previously persisted row`() {
         val submitted = Order.submit(origin)

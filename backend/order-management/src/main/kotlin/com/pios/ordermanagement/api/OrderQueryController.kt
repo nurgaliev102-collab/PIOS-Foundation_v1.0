@@ -35,6 +35,6 @@ class OrderQueryController(
     fun listOrders(): ResponseEntity<List<OrderResponse>> =
         ResponseEntity.ok(
             retrieveOrdersHandler.handleAll()
-                .map { OrderResponse(it.id.value, it.status.name, it.origin.reference) }
+                .map { OrderResponse(it.id.value, it.status.name, it.origin.reference, it.destination) }
         )
 }

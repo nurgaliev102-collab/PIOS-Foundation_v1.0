@@ -26,10 +26,22 @@ import java.util.UUID
  * (`passenger-experience`'s `RestClientOrderSubmissionClient`), which
  * never sent one, and — per ADR-026's independent-deployability
  * guarantee — a caller cannot be assumed to upgrade in lockstep with
- * this module. Destination is deliberately not represented here for now;
- * a future sprint's own design proposal (not this file) describes
- * introducing it through a versioned endpoint instead, per ADR-010's
- * Versioning Strategy and ADR-015's Evolution Strategy.
+ * this module.
+ *
+ * Sprint 3B (MVR Pilot Enablement — Optional Destination) reintroduces
+ * [destination] the way Sprint FND-006's own revert said it should be
+ * reintroduced: **optional**, not mandatory, so the existing contract's
+ * one real caller keeps working unmodified. [destination] is optional
+ * passenger-provided trip context for pilot usage — a plain, unvalidated
+ * `String?`, deliberately not wrapped in a value object the way [origin]
+ * is: [origin] enforces a ratified domain invariant
+ * (non-blank, DOMAIN_MODEL.md Section 4), while nothing in ratified
+ * documentation says anything about the shape or presence of a
+ * destination yet, so this class asserts nothing about it beyond
+ * carrying whatever the passenger typed, or nothing at all. Set once, at
+ * submission, and never changes for the rest of the order's lifecycle —
+ * neither [complete] nor [cancel] touches it, mirroring [origin]'s own
+ * immutability exactly.
  *
  * Invariant (DOMAIN_MODEL.md Section 11): an order has exactly one current
  * status at any time — enforced by holding a single [status] property
@@ -41,7 +53,8 @@ import java.util.UUID
 class Order private constructor(
     val id: OrderId,
     status: OrderStatus,
-    val origin: OrderOrigin
+    val origin: OrderOrigin,
+    val destination: String?
 ) {
     var status: OrderStatus = status
         private set
@@ -82,13 +95,17 @@ class Order private constructor(
          * not a transition on an existing order, so this is a factory
          * function rather than an instance method. The order's identifier
          * is generated as part of submission, since no order exists prior
-         * to it. [origin] is required at this point.
+         * to it. [origin] is required at this point; [destination]
+         * defaults to `null` so every existing call site (this class's
+         * own tests, [com.pios.ordermanagement.application.OrderLifecycleApplicationService])
+         * continues to compile and behave unchanged.
          */
-        fun submit(origin: OrderOrigin): SubmittedOrder {
+        fun submit(origin: OrderOrigin, destination: String? = null): SubmittedOrder {
             val order = Order(
                 id = OrderId(UUID.randomUUID().toString()),
                 status = OrderStatus.SUBMITTED,
-                origin = origin
+                origin = origin,
+                destination = destination
             )
             return SubmittedOrder(order = order, event = OrderSubmitted(orderId = order.id))
         }

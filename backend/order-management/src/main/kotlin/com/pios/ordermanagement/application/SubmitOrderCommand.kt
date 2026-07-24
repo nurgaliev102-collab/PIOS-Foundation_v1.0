@@ -12,8 +12,10 @@ import com.pios.ordermanagement.domain.OrderOrigin
  * not itself validate its content, only carries what
  * [com.pios.ordermanagement.domain.Order.submit] already requires.
  *
- * `destination` was added and then reverted within the same sprint
- * (backward-compatibility correction) — see [com.pios.ordermanagement.domain.Order]'s
- * own KDoc. A future, versioned endpoint reintroduces it.
+ * Carries [destination] (Sprint 3B: MVR Pilot Enablement — Optional
+ * Destination), defaulting to `null` — see
+ * [com.pios.ordermanagement.domain.Order]'s own KDoc for why it is a
+ * plain, optional, unvalidated `String?` rather than a typed domain
+ * value like [origin].
  */
-class SubmitOrderCommand(val origin: OrderOrigin)
+class SubmitOrderCommand(val origin: OrderOrigin, val destination: String? = null)

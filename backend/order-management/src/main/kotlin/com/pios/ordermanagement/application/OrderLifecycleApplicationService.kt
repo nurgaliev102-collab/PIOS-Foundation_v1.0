@@ -60,7 +60,7 @@ class OrderLifecycleApplicationService(
      * persisting the new order and its outbox record together.
      */
     fun submitOrder(command: SubmitOrderCommand): SubmittedOrder = transactionRunner.run {
-        val submitted = Order.submit(command.origin)
+        val submitted = Order.submit(command.origin, command.destination)
         orderRepository.save(submitted.order)
         outboxRepository.save(outboxRecordFor(submitted.event))
         submitted

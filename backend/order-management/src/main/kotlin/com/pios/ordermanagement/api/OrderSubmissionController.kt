@@ -37,7 +37,10 @@ import org.springframework.web.bind.annotation.RestController
  *
  * Sprint FND-006 briefly required a `destination` field on this
  * contract, then reverted it within the same sprint (backward-
- * compatibility correction): see [SubmitOrderRequest]'s own KDoc.
+ * compatibility correction): see [SubmitOrderRequest]'s own KDoc. Sprint
+ * 3B (MVR Pilot Enablement) reintroduces it as optional -- passed through
+ * unchanged to [OrderSubmissionRequestHandler.handle] alongside
+ * [request]'s passenger reference.
  */
 @RestController
 @RequestMapping("/v1/orders")
@@ -48,7 +51,7 @@ class OrderSubmissionController(
     @PostMapping
     fun submitOrder(@RequestBody request: SubmitOrderRequest): ResponseEntity<SubmitOrderResponse> =
         try {
-            val orderId = orderSubmissionRequestHandler.handle(request.passengerReference)
+            val orderId = orderSubmissionRequestHandler.handle(request.passengerReference, request.destination)
             ResponseEntity.status(HttpStatus.CREATED).body(SubmitOrderResponse(orderId))
         } catch (ex: IllegalArgumentException) {
             ResponseEntity.badRequest().build()

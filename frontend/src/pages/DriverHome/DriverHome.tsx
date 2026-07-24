@@ -15,6 +15,12 @@ const FEEDBACK_DURATION_MS = 2000
 // Driver Proposal MVP).
 const DISPATCH_BASE_URL = import.meta.env.VITE_DISPATCH_BASE_URL ?? 'http://localhost:8084'
 
+// Order Management's own local port (INTERFACE_CONTRACTS.md) — same
+// constant as `Coordinator.tsx`/`RideRequest.tsx` (Sprint 3B: MVR Pilot
+// Enablement -- Optional Destination): this page now also calls Order
+// Management directly, to read each open proposal's own order destination.
+const ORDER_MANAGEMENT_BASE_URL = import.meta.env.VITE_ORDER_MANAGEMENT_BASE_URL ?? 'http://localhost:8083'
+
 type Status = 'loading' | 'error' | 'ready'
 type ProposalActionStatus = 'idle' | 'submitting' | 'error'
 
@@ -28,6 +34,11 @@ interface ProposalListItem {
   orderId: string
   driverId: string
   status: 'OPEN' | 'ACCEPTED' | 'DECLINED' | 'LAPSED'
+}
+
+interface OrderListItem {
+  id: string
+  destination: string | null
 }
 
 /**
@@ -58,6 +69,16 @@ interface ProposalListItem {
  * "which driver's proposals to list" — the same placeholder already
  * standing in for real driver authentication everywhere else on this
  * page.
+ *
+ * Sprint 3B (MVR Pilot Enablement — Optional Destination) adds each
+ * proposal's own order destination, read through Order Management's
+ * already-existing `GET /v1/orders` (the same endpoint `Coordinator.tsx`
+ * already calls), matched to a proposal by `orderId` client-side — no
+ * change to Dispatch, `Proposal`, or `Assignment` at all; this page
+ * simply reads a second module directly, exactly as `Coordinator.tsx`
+ * already does for three. Destination lookup is best-effort: a failure
+ * loading orders leaves proposals visible and actionable without a
+ * destination shown, rather than blocking the section they came from.
  */
 export function DriverHome() {
   const [status, setStatus] = useState<Status>('loading')
@@ -68,6 +89,7 @@ export function DriverHome() {
   const [proposalsStatus, setProposalsStatus] = useState<Status>('loading')
   const [proposals, setProposals] = useState<ProposalListItem[]>([])
   const [proposalActions, setProposalActions] = useState<Record<string, ProposalActionStatus>>({})
+  const [orderDestinations, setOrderDestinations] = useState<Record<string, string | null>>({})
 
   useEffect(() => {
     let active = true
@@ -93,6 +115,24 @@ export function DriverHome() {
   useEffect(() => {
     let active = true
     loadProposals(active)
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    request<OrderListItem[]>('/v1/orders', { baseUrl: ORDER_MANAGEMENT_BASE_URL })
+      .then((orders) => {
+        if (!active) {
+          return
+        }
+        setOrderDestinations(Object.fromEntries(orders.map((order) => [order.id, order.destination])))
+      })
+      .catch(() => {
+        // Best-effort: proposals remain visible and actionable without a
+        // destination shown (see this component's own KDoc).
+      })
     return () => {
       active = false
     }
@@ -232,6 +272,10 @@ export function DriverHome() {
                   {proposal.status}
                 </span>
               </div>
+
+              {orderDestinations[proposal.orderId] && (
+                <p className={styles.status}>Destination: {orderDestinations[proposal.orderId]}</p>
+              )}
 
               {proposal.status === 'OPEN' && (
                 <div className={styles.proposalActions}>

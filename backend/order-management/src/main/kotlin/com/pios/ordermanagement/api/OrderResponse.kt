@@ -8,8 +8,13 @@ package com.pios.ordermanagement.api
  * these orders before and needs enough to tell them apart —
  * [status] (DOMAIN_MODEL.md Section 6) and [origin] (the fact
  * [com.pios.ordermanagement.domain.OrderOrigin] already carries on the
- * aggregate). No other Order field is exposed: Sprint FR-003 excludes
- * filtering, search, and pagination, and nothing this sprint's own scope
- * requires depends on more than these three.
+ * aggregate).
+ *
+ * [destination] (Sprint 3B: MVR Pilot Enablement — Optional Destination)
+ * carries [com.pios.ordermanagement.domain.Order.destination] unchanged
+ * — nullable, since the order it came from may never have had one. This
+ * is what lets a driver, reading Order Management's own order list by
+ * [id], learn a pending trip's destination without any change to
+ * Dispatch's `Proposal`/`Assignment`.
  */
-data class OrderResponse(val id: String, val status: String, val origin: String)
+data class OrderResponse(val id: String, val status: String, val origin: String, val destination: String?)

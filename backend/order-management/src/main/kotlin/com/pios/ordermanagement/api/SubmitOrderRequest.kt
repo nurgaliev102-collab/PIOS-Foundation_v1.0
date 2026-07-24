@@ -7,16 +7,19 @@ package com.pios.ordermanagement.api
  * already accepts — no field is introduced here that the handler does
  * not itself require.
  *
- * This is the existing, public v1 shape of this contract. A `destination`
- * field was added by Sprint FND-006 (Minimal Order Model) and then
- * reverted within the same sprint: it made an existing, already-deployed
- * contract's request body require a field its one real caller
- * (`passenger-experience`'s `RestClientOrderSubmissionClient`) never
- * sent — a breaking change to a live contract, given ADR-026's
- * independent-deployability guarantee. `destination` will be
- * (re)introduced through a separate, versioned endpoint in a future
- * sprint, per ADR-010's Versioning Strategy and ADR-015's Evolution
- * Strategy — never by silently changing what this existing version
- * requires.
+ * A `destination` field was added by Sprint FND-006 (Minimal Order Model)
+ * and then reverted within the same sprint: it made an existing,
+ * already-deployed contract's request body *require* a field its one
+ * real caller (`passenger-experience`'s `RestClientOrderSubmissionClient`)
+ * never sent — a breaking change to a live contract, given ADR-026's
+ * independent-deployability guarantee.
+ *
+ * Sprint 3B (MVR Pilot Enablement — Optional Destination) reintroduces
+ * [destination] the way that revert said it should be reintroduced:
+ * **optional**, defaulting to `null`, so a request body carrying only
+ * `passengerReference` — exactly what `RestClientOrderSubmissionClient`
+ * still sends — remains valid and unaffected. See
+ * [com.pios.ordermanagement.domain.Order]'s own KDoc for why
+ * [destination] is a plain, unvalidated `String?`.
  */
-data class SubmitOrderRequest(val passengerReference: String)
+data class SubmitOrderRequest(val passengerReference: String, val destination: String? = null)

@@ -51,6 +51,31 @@ class OrderTest {
         assertEquals(origin, order.origin)
     }
 
+    // --- Destination (Sprint 3B: MVR Pilot Enablement -- Optional Destination) ---
+
+    @Test
+    fun `a submitted order carries the destination it was submitted with`() {
+        val submitted = Order.submit(origin, "Аэропорт")
+
+        assertEquals("Аэропорт", submitted.order.destination)
+    }
+
+    @Test
+    fun `a submitted order without a destination has a null destination`() {
+        val submitted = Order.submit(origin)
+
+        assertEquals(null, submitted.order.destination)
+    }
+
+    @Test
+    fun `destination survives completion unchanged`() {
+        val order = Order.submit(origin, "Аэропорт").order
+
+        order.complete()
+
+        assertEquals("Аэропорт", order.destination)
+    }
+
     // --- Completion ---
 
     @Test

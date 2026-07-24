@@ -24,8 +24,11 @@ import org.springframework.stereotype.Service
  *
  * A `destination` parameter was added here and then reverted within the
  * same sprint (backward-compatibility correction) — see
- * [com.pios.ordermanagement.domain.Order]'s own KDoc for why. This
- * handler's signature is unchanged from before that sprint.
+ * [com.pios.ordermanagement.domain.Order]'s own KDoc for why. Sprint 3B
+ * (MVR Pilot Enablement) reintroduces it as [destination], an optional
+ * parameter defaulting to `null` — every existing caller of [handle] that
+ * supplies only [passengerReference] continues to compile and behave
+ * unchanged.
  *
  * This handler makes no call into any other module (ADR-027); its
  * compatibility with Passenger Experience's provider representation
@@ -36,9 +39,9 @@ import org.springframework.stereotype.Service
 class OrderSubmissionRequestHandler(
     private val orderLifecycleApplicationService: OrderLifecycleApplicationService
 ) {
-    fun handle(passengerReference: String): String {
+    fun handle(passengerReference: String, destination: String? = null): String {
         val submitted = orderLifecycleApplicationService.submitOrder(
-            SubmitOrderCommand(origin = OrderOrigin(passengerReference))
+            SubmitOrderCommand(origin = OrderOrigin(passengerReference), destination = destination)
         )
         return submitted.order.id.value
     }

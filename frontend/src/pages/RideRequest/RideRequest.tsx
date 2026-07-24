@@ -29,15 +29,14 @@ interface SubmitOrderResponse {
  *
  * Sprint FR-001 (Connect RideRequest): submitting now calls the real,
  * existing `POST /v1/orders` (Order Management) directly, mirroring
- * Driver Home's own direct-module-call precedent (Sprint 5). The real
- * backend contract accepts only `{ passengerReference }` (see
- * `backend/order-management/.../api/SubmitOrderRequest.kt`) — it has no
- * field for `destination` or `notes` (Sprint FND-006 added and then
- * reverted a `destination` field specifically to avoid breaking this
- * contract; see that sprint's own report). Those two inputs are still
- * collected by this form but are not sent anywhere — see
- * `frontend/README.md` for why this is disclosed as a known limitation,
- * not silently hidden.
+ * Driver Home's own direct-module-call precedent (Sprint 5).
+ *
+ * Sprint 3B (MVR Pilot Enablement — Optional Destination): the real
+ * backend contract now also accepts an optional `destination` (see
+ * `backend/order-management/.../api/SubmitOrderRequest.kt`), sent here as
+ * plain text — no geocoding, no coordinates. `notes` is still collected
+ * by this form but still not sent anywhere; that remains a known,
+ * disclosed limitation (`frontend/README.md`), not silently hidden.
  *
  * Submission is guarded against double-clicks
  * (`isSubmitting`): Order Management's own docs flag Submit Order as not
@@ -101,7 +100,7 @@ export function RideRequest() {
       const response = await request<SubmitOrderResponse>('/v1/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ passengerReference: passengerId }),
+        body: JSON.stringify({ passengerReference: passengerId, destination: trimmedDestination }),
         baseUrl: ORDER_MANAGEMENT_BASE_URL,
       })
       setOrderId(response.orderId)
