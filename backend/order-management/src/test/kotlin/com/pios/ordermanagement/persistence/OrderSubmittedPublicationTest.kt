@@ -3,6 +3,7 @@ package com.pios.ordermanagement.persistence
 import com.pios.ordermanagement.application.OrderLifecycleApplicationService
 import com.pios.ordermanagement.application.OutboxRelay
 import com.pios.ordermanagement.application.SubmitOrderCommand
+import com.pios.ordermanagement.domain.OrderOrigin
 import org.springframework.amqp.rabbit.core.RabbitTemplate
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
@@ -26,12 +27,13 @@ class OrderSubmittedPublicationTest {
     private val eventPublisher = RabbitMQEventPublisher(RabbitTemplate(RabbitMQTestConnection.connectionFactory))
     private val service = OrderLifecycleApplicationService(orderRepository, outboxRepository, transactionRunner)
     private val relay = OutboxRelay(outboxRepository, eventPublisher)
+    private val origin = OrderOrigin("origin-1")
 
     @Test
     fun `submitting an order eventually publishes OrderSubmitted to Order Management's own exchange`() {
         val observer = RabbitMQTestObserverQueue(RabbitMQTestConnection.connectionFactory)
 
-        val submitted = service.submitOrder(SubmitOrderCommand())
+        val submitted = service.submitOrder(SubmitOrderCommand(origin))
         relay.relay()
 
         val received = observer.receiveMessageContaining(submitted.order.id.value)

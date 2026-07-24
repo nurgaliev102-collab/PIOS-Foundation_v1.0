@@ -25,11 +25,15 @@ No module depends on another module's code. There is no shared library module. C
 
 ## Building
 
-This project uses the Gradle Wrapper; a JDK 21 is the only prerequisite.
+This project uses the Gradle Wrapper; a JDK 21 is the only prerequisite for compiling and testing:
 
 ```
 ./gradlew build
 ```
+
+## Running
+
+Compiling (`./gradlew build`) needs only a JDK. **Actually starting** `driver-management`, `order-management`, or `dispatch` additionally needs a running local PostgreSQL (one database per module: `pios_driver_management`, `pios_order_management`, `pios_dispatch` — Flyway creates the schema inside each automatically on startup, but not the database itself) and a running local RabbitMQ (default port, `guest`/`guest`) — each module's own `src/main/resources/application.yml` names the exact connection details it expects. `passenger-experience` needs neither (no datasource, no AMQP dependency). See [../README.md](../README.md)'s own "Running Locally" section for the full setup sequence, including the three `CREATE DATABASE` statements and the one manual Driver-seeding step the current REST API has no other way to satisfy.
 
 Each module can be run independently, consistent with its independent deployability (ADR-026):
 

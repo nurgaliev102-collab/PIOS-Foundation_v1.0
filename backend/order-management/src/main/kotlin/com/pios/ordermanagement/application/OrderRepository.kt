@@ -17,8 +17,14 @@ import com.pios.ordermanagement.domain.OrderId
  * Order Management is the final authority on an order's persisted state
  * (PERSISTENCE_ARCHITECTURE.md Section 3); no other module implements or
  * depends on this interface.
+ *
+ * [findAll] added by Sprint FR-003 (Order Query) for the coordinator's own
+ * list-of-orders view — the same broadening [DriverRepository.findAll]
+ * already added to Driver Management in Sprint FR-002, for the same
+ * reason. No filtering, sorting, or pagination.
  */
 interface OrderRepository {
     fun save(order: Order)
     fun findById(id: OrderId): Order?
+    fun findAll(): List<Order>
 }

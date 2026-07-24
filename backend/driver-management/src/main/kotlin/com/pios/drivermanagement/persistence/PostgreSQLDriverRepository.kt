@@ -55,4 +55,14 @@ class PostgreSQLDriverRepository(
         )
         return rows.firstOrNull()
     }
+
+    override fun findAll(): List<Driver> =
+        jdbcTemplate.query(
+            "SELECT id, availability FROM drivers"
+        ) { rs, _ ->
+            Driver(
+                id = DriverId(rs.getString("id")),
+                availability = Availability.valueOf(rs.getString("availability"))
+            )
+        }
 }

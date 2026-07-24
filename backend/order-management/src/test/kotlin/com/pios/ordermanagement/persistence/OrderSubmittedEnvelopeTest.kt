@@ -5,6 +5,7 @@ import com.pios.ordermanagement.application.EventPublisher
 import com.pios.ordermanagement.application.OrderLifecycleApplicationService
 import com.pios.ordermanagement.application.OutboxRelay
 import com.pios.ordermanagement.application.SubmitOrderCommand
+import com.pios.ordermanagement.domain.OrderOrigin
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -29,10 +30,11 @@ class OrderSubmittedEnvelopeTest {
     private val outboxRepository = PostgreSQLOutboxRepository(JdbcTemplate(dataSource))
     private val transactionRunner = SpringTransactionRunner(TransactionTemplate(DataSourceTransactionManager(dataSource)))
     private val service = OrderLifecycleApplicationService(orderRepository, outboxRepository, transactionRunner, objectMapper)
+    private val origin = OrderOrigin("origin-1")
 
     @Test
     fun `the persisted envelope carries a stable eventId, an explicit eventVersion, and a business occurredAt distinct from outbox bookkeeping`() {
-        val submitted = service.submitOrder(SubmitOrderCommand())
+        val submitted = service.submitOrder(SubmitOrderCommand(origin))
 
         val record = outboxRepository.findUnpublished().single { it.aggregateId == submitted.order.id.value }
         val envelope = objectMapper.readTree(record.payload)
@@ -52,8 +54,8 @@ class OrderSubmittedEnvelopeTest {
 
     @Test
     fun `two distinct submissions never share an eventId`() {
-        val first = service.submitOrder(SubmitOrderCommand())
-        val second = service.submitOrder(SubmitOrderCommand())
+        val first = service.submitOrder(SubmitOrderCommand(origin))
+        val second = service.submitOrder(SubmitOrderCommand(origin))
 
         val firstEventId = objectMapper.readTree(
             outboxRepository.findUnpublished().single { it.aggregateId == first.order.id.value }.payload
@@ -67,7 +69,7 @@ class OrderSubmittedEnvelopeTest {
 
     @Test
     fun `a failed publish leaves the record pending and a retried publish carries the identical eventId`() {
-        val submitted = service.submitOrder(SubmitOrderCommand())
+        val submitted = service.submitOrder(SubmitOrderCommand(origin))
         val marker = submitted.order.id.value
         val originalPayload = outboxRepository.findUnpublished()
             .single { it.aggregateId == marker }.payload

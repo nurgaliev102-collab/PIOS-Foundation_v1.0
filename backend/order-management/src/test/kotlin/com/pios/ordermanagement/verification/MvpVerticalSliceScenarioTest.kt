@@ -22,6 +22,7 @@ import com.pios.ordermanagement.application.OrderLifecycleApplicationService
 import com.pios.ordermanagement.application.OrderSubmissionRequestHandler
 import com.pios.ordermanagement.application.SubmitOrderCommand
 import com.pios.ordermanagement.domain.OrderId
+import com.pios.ordermanagement.domain.OrderOrigin
 import com.pios.ordermanagement.domain.OrderStatus
 import com.pios.ordermanagement.persistence.InMemoryOrderRepository
 import com.pios.passengerexperience.application.OrderSubmissionRequestedPublisher
@@ -105,7 +106,7 @@ class MvpVerticalSliceScenarioTest {
         // The order this scenario carries through Steps 4-6 (see class
         // KDoc for why it is a separate instance from the one just above).
         val orderLifecycleApplicationService = OrderLifecycleApplicationService(orderRepository)
-        val submittedOrder = orderLifecycleApplicationService.submitOrder(SubmitOrderCommand())
+        val submittedOrder = orderLifecycleApplicationService.submitOrder(SubmitOrderCommand(OrderOrigin("passenger-1")))
         val orderReference = submittedOrder.order.id.value
         assertEquals(OrderStatus.SUBMITTED, orderRepository.findById(submittedOrder.order.id)?.status)
 

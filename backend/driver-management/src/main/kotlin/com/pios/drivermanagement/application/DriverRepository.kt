@@ -17,8 +17,13 @@ import com.pios.drivermanagement.domain.DriverId
  * Only Driver Management persists a driver's availability state
  * (PERSISTENCE_ARCHITECTURE.md Section 3); no other module implements or
  * depends on this interface.
+ *
+ * [findAll] added by Sprint FR-002 (Driver Availability), for the
+ * coordinator's own list-of-drivers view — no filtering or ordering is
+ * named here, consistent with that sprint's own scope.
  */
 interface DriverRepository {
     fun save(driver: Driver)
     fun findById(id: DriverId): Driver?
+    fun findAll(): List<Driver>
 }

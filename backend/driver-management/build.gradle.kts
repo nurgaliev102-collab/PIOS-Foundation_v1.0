@@ -1,5 +1,6 @@
-// Driver Management module. Implements the Driver Availability capability
-// (domain + application layers only — no database model, no API endpoint).
+// Driver Management module. Implements the Declare Availability command and
+// the Retrieve Driver Availability query, the latter exposed read-only over
+// REST (GET /v1/drivers/{driverId}) as of Sprint 5: First Backend Integration.
 // Responsibility and boundary: docs/MODULE_STRUCTURE.md, "Driver Management Module".
 // Interaction contracts: docs/INTERFACE_CONTRACTS.md.
 

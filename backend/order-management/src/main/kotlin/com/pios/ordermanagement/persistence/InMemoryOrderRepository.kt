@@ -26,4 +26,6 @@ class InMemoryOrderRepository : OrderRepository {
     }
 
     override fun findById(id: OrderId): Order? = store[id]
+
+    override fun findAll(): List<Order> = store.values.toList()
 }

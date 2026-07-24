@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Proves the save/load lifecycle described by [DriverRepository] against
@@ -42,5 +43,14 @@ class PostgreSQLDriverRepositoryTest {
         repository.save(driver)
 
         assertEquals(Availability.AVAILABLE, repository.findById(driver.id)?.availability)
+    }
+
+    @Test
+    fun `findAll includes a driver saved to PostgreSQL`() {
+        val driver = Driver(DriverId("postgres-driver-list-1"), availability = Availability.AVAILABLE)
+
+        repository.save(driver)
+
+        assertTrue(repository.findAll().any { it.id == driver.id && it.availability == Availability.AVAILABLE })
     }
 }

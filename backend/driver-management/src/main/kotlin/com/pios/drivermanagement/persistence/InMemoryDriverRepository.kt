@@ -26,4 +26,6 @@ class InMemoryDriverRepository : DriverRepository {
     }
 
     override fun findById(id: DriverId): Driver? = store[id]
+
+    override fun findAll(): List<Driver> = store.values.toList()
 }

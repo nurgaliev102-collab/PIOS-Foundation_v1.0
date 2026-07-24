@@ -2,6 +2,7 @@ package com.pios.ordermanagement.application
 
 import com.pios.ordermanagement.domain.Order
 import com.pios.ordermanagement.domain.OrderId
+import com.pios.ordermanagement.domain.OrderOrigin
 import com.pios.ordermanagement.domain.OrderStatus
 import com.pios.ordermanagement.persistence.InMemoryOrderRepository
 import kotlin.test.Test
@@ -12,10 +13,11 @@ class OrderLifecycleApplicationServiceTest {
 
     private val repository = InMemoryOrderRepository()
     private val service = OrderLifecycleApplicationService(repository)
+    private val origin = OrderOrigin("origin-1")
 
     @Test
     fun `submitting an order through the application service returns a new submitted order`() {
-        val submitted = service.submitOrder(SubmitOrderCommand())
+        val submitted = service.submitOrder(SubmitOrderCommand(origin))
 
         assertEquals(OrderStatus.SUBMITTED, submitted.order.status)
         assertEquals(submitted.order.id, submitted.event.orderId)
@@ -23,14 +25,14 @@ class OrderLifecycleApplicationServiceTest {
 
     @Test
     fun `submitting an order persists it through the repository`() {
-        val submitted = service.submitOrder(SubmitOrderCommand())
+        val submitted = service.submitOrder(SubmitOrderCommand(origin))
 
         assertEquals(OrderStatus.SUBMITTED, repository.findById(submitted.order.id)?.status)
     }
 
     @Test
     fun `completing an order through the application service delegates to the domain`() {
-        val order = Order.submit().order
+        val order = Order.submit(origin).order
         val command = CompleteOrderCommand(order.id)
 
         val event = service.completeOrder(order, command)
@@ -41,7 +43,7 @@ class OrderLifecycleApplicationServiceTest {
 
     @Test
     fun `completing an order persists its new status through the repository`() {
-        val order = Order.submit().order
+        val order = Order.submit(origin).order
         val command = CompleteOrderCommand(order.id)
 
         service.completeOrder(order, command)
@@ -51,7 +53,7 @@ class OrderLifecycleApplicationServiceTest {
 
     @Test
     fun `completing rejects a command targeting a different order`() {
-        val order = Order.submit().order
+        val order = Order.submit(origin).order
         val command = CompleteOrderCommand(OrderId("some-other-order"))
 
         assertFailsWith<IllegalArgumentException> {
@@ -61,7 +63,7 @@ class OrderLifecycleApplicationServiceTest {
 
     @Test
     fun `cancelling an order through the application service delegates to the domain`() {
-        val order = Order.submit().order
+        val order = Order.submit(origin).order
         val command = CancelOrderCommand(order.id)
 
         val event = service.cancelOrder(order, command)
@@ -72,7 +74,7 @@ class OrderLifecycleApplicationServiceTest {
 
     @Test
     fun `cancelling an order persists its new status through the repository`() {
-        val order = Order.submit().order
+        val order = Order.submit(origin).order
         val command = CancelOrderCommand(order.id)
 
         service.cancelOrder(order, command)
@@ -82,7 +84,7 @@ class OrderLifecycleApplicationServiceTest {
 
     @Test
     fun `cancelling rejects a command targeting a different order`() {
-        val order = Order.submit().order
+        val order = Order.submit(origin).order
         val command = CancelOrderCommand(OrderId("some-other-order"))
 
         assertFailsWith<IllegalArgumentException> {

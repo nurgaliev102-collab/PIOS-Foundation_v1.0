@@ -50,7 +50,30 @@ import org.springframework.stereotype.Repository
  * position (constructors are not name-mangled the way regular functions
  * are), so the reflectively-invoked constructor's declared parameter
  * type is `String`, not `OrderId` — confirmed empirically against the
- * compiled class before writing this adapter.
+ * compiled class before writing this adapter. Sprint FND-006 (Minimal
+ * Order Model) adds [Order]'s `origin` constructor parameter, likewise a
+ * `@JvmInline value class` wrapper around a single `String`; the same
+ * unboxing/no-mangling behavior applies to it for the same reason, so
+ * the reflected constructor's three parameter types are
+ * `(String, OrderStatus, String)`, in that declared order — matching
+ * [Order]'s own primary constructor exactly. This must be re-verified
+ * against a real compiled build before this change is merged (no local
+ * JDK was available to compile-check it while writing this adapter —
+ * see this sprint's own report).
+ *
+ * `origin` is never included in the `ON CONFLICT ... UPDATE` clause
+ * below: it is set once, at submission, and [Order] itself exposes no
+ * way to change it afterward (see that class's own KDoc) — only `status`
+ * is ever legitimately re-saved after the initial insert.
+ *
+ * A `destination` column was added and then dropped again within this
+ * same sprint (backward-compatibility correction; see
+ * `V5__revert_order_destination.sql`) — this class no longer reads or
+ * writes it.
+ *
+ * [findAll] (Sprint FR-003, Order Query) reuses the same [reconstruct]
+ * helper as [findById], row by row, over every order in the table — no
+ * filtering, sorting, or pagination.
  */
 @Repository
 class PostgreSQLOrderRepository(
@@ -60,26 +83,48 @@ class PostgreSQLOrderRepository(
     override fun save(order: Order) {
         jdbcTemplate.update(
             """
-            INSERT INTO orders (id, status) VALUES (?, ?)
+            INSERT INTO orders (id, status, origin) VALUES (?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status
             """.trimIndent(),
             order.id.value,
-            order.status.name
+            order.status.name,
+            order.origin.reference
         )
     }
 
     override fun findById(id: OrderId): Order? {
         val rows = jdbcTemplate.query(
-            "SELECT id, status FROM orders WHERE id = ?",
-            { rs, _ -> reconstruct(rs.getString("id"), OrderStatus.valueOf(rs.getString("status"))) },
+            "SELECT id, status, origin FROM orders WHERE id = ?",
+            { rs, _ ->
+                reconstruct(
+                    id = rs.getString("id"),
+                    status = OrderStatus.valueOf(rs.getString("status")),
+                    origin = rs.getString("origin")
+                )
+            },
             id.value
         )
         return rows.firstOrNull()
     }
 
-    private fun reconstruct(id: String, status: OrderStatus): Order {
-        val constructor = Order::class.java.getDeclaredConstructor(String::class.java, OrderStatus::class.java)
+    override fun findAll(): List<Order> =
+        jdbcTemplate.query(
+            "SELECT id, status, origin FROM orders"
+        ) { rs, _ ->
+            reconstruct(
+                id = rs.getString("id"),
+                status = OrderStatus.valueOf(rs.getString("status")),
+                origin = rs.getString("origin")
+            )
+        }
+
+    private fun reconstruct(id: String, status: OrderStatus, origin: String): Order {
+        val constructor = Order::class.java.getDeclaredConstructor(
+            String::class.java,
+            OrderStatus::class.java,
+            String::class.java
+        )
         constructor.isAccessible = true
-        return constructor.newInstance(id, status)
+        return constructor.newInstance(id, status, origin)
     }
 }

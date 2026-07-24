@@ -7,11 +7,15 @@ import org.springframework.scheduling.annotation.EnableScheduling
 /**
  * Structural boundary for the Order Management module.
  *
- * This is an architectural placeholder only. It contains no business logic,
- * no domain entity, no database model, and no API endpoint. Its sole purpose
- * is to prove that this module can be built and started as its own,
- * independently deployable unit, consistent with MODULE_STRUCTURE.md and
- * ADR-023/ADR-026.
+ * Originally an architectural placeholder proving only that this module
+ * can be built and started as its own, independently deployable unit
+ * (MODULE_STRUCTURE.md, ADR-023/ADR-026). It now also exposes REST
+ * endpoints: `com.pios.ordermanagement.api.OrderSubmissionController`'s
+ * `POST /v1/orders` (Submit Order, Tranche 2: Passenger Experience REST
+ * Transport), and `com.pios.ordermanagement.api.OrderQueryController`'s
+ * `GET /v1/orders` (Retrieve Orders, Sprint FR-003 — Order Query). No
+ * command, query, or database model beyond what was already owned by
+ * this module is added.
  *
  * [EnableScheduling] activates the periodic production trigger
  * (`com.pios.ordermanagement.application.OutboxRelayScheduler`) for the

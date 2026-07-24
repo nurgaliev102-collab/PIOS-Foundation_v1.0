@@ -6,6 +6,7 @@ import com.pios.drivermanagement.domain.DriverId
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class InMemoryDriverRepositoryTest {
 
@@ -36,5 +37,23 @@ class InMemoryDriverRepositoryTest {
         repository.save(driver)
 
         assertEquals(Availability.AVAILABLE, repository.findById(DriverId("driver-2"))?.availability)
+    }
+
+    @Test
+    fun `findAll returns every saved driver`() {
+        val first = Driver(DriverId("driver-list-1"), availability = Availability.AVAILABLE)
+        val second = Driver(DriverId("driver-list-2"), availability = Availability.UNAVAILABLE)
+        repository.save(first)
+        repository.save(second)
+
+        val all = repository.findAll()
+
+        assertTrue(all.any { it.id == first.id })
+        assertTrue(all.any { it.id == second.id })
+    }
+
+    @Test
+    fun `findAll on an empty repository returns an empty list`() {
+        assertEquals(emptyList(), InMemoryDriverRepository().findAll())
     }
 }

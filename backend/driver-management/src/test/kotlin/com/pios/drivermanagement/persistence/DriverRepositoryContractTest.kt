@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * A shared behavioral contract every [DriverRepository] implementation
@@ -49,6 +50,20 @@ abstract class DriverRepositoryContractTest {
         repository.save(driver)
 
         assertEquals(Availability.AVAILABLE, repository.findById(driver.id)?.availability)
+    }
+
+    @Test
+    fun `findAll includes every saved driver`() {
+        val repository = createRepository()
+        val first = Driver(DriverId("contract-test-findall-1"), availability = Availability.AVAILABLE)
+        val second = Driver(DriverId("contract-test-findall-2"), availability = Availability.UNAVAILABLE)
+        repository.save(first)
+        repository.save(second)
+
+        val all = repository.findAll()
+
+        assertTrue(all.any { it.id == first.id && it.availability == Availability.AVAILABLE })
+        assertTrue(all.any { it.id == second.id && it.availability == Availability.UNAVAILABLE })
     }
 }
 

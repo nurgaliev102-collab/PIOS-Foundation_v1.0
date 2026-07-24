@@ -22,18 +22,22 @@ import org.springframework.web.bind.annotation.RestController
  * Kotlin's non-nullable [SubmitOrderRequest.passengerReference] already
  * gives for free at deserialization; the sole authority over whether a
  * passenger reference is acceptable remains
- * [OrderSubmissionRequestHandler]'s own existing `require` check
+ * [com.pios.ordermanagement.domain.OrderOrigin]'s own construction check
  * (APPLICATION_ARCHITECTURE.md Section 2, "No Business Logic
  * Duplication").
  *
  * A blank passenger reference surfaces as the [IllegalArgumentException]
- * the handler already throws, mapped here to HTTP 400 -- the first
- * document to fix a concrete status code for this contract
+ * the domain value type already throws, mapped here to HTTP 400 -- the
+ * first document to fix a concrete status code for this contract
  * (API_SPECIFICATION.md Section 10 leaves the choice to the
  * implementation). The mapping is done directly in this method, not
  * through a `@ControllerAdvice`, so it remains visible and testable
  * without a Spring MVC test context -- consistent with this project's own
  * constructor-based, no-Spring-context testing convention.
+ *
+ * Sprint FND-006 briefly required a `destination` field on this
+ * contract, then reverted it within the same sprint (backward-
+ * compatibility correction): see [SubmitOrderRequest]'s own KDoc.
  */
 @RestController
 @RequestMapping("/v1/orders")

@@ -6,6 +6,7 @@ import com.pios.ordermanagement.application.OrderLifecycleApplicationService
 import com.pios.ordermanagement.application.OrderNotFoundException
 import com.pios.ordermanagement.application.SubmitOrderCommand
 import com.pios.ordermanagement.domain.OrderId
+import com.pios.ordermanagement.domain.OrderOrigin
 import com.pios.ordermanagement.domain.OrderStatus
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -25,10 +26,11 @@ class OrderRepositoryLifecycleTest {
 
     private val repository = InMemoryOrderRepository()
     private val service = OrderLifecycleApplicationService(repository)
+    private val origin = OrderOrigin("origin-1")
 
     @Test
     fun `an order submitted and saved can be restored by id and continue to completion`() {
-        val submitted = service.submitOrder(SubmitOrderCommand())
+        val submitted = service.submitOrder(SubmitOrderCommand(origin))
 
         val event = service.completeOrder(CompleteOrderCommand(submitted.order.id))
 
@@ -38,7 +40,7 @@ class OrderRepositoryLifecycleTest {
 
     @Test
     fun `an order submitted and saved can be restored by id and continue to cancellation`() {
-        val submitted = service.submitOrder(SubmitOrderCommand())
+        val submitted = service.submitOrder(SubmitOrderCommand(origin))
 
         val event = service.cancelOrder(CancelOrderCommand(submitted.order.id))
 

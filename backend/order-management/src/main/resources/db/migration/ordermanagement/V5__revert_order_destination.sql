@@ -1,0 +1,20 @@
+-- Reverts the `destination` column V4 added, within the same sprint
+-- that added it (Sprint FND-006: Minimal Order Model,
+-- backward-compatibility correction). Making `destination` mandatory on
+-- the existing POST /v1/orders contract broke that contract's one real
+-- caller (passenger-experience's RestClientOrderSubmissionClient), which
+-- never sent one -- a breaking change to an already-public contract,
+-- given ADR-026's independent-deployability guarantee.
+--
+-- `origin` (also added by V4) is kept -- it required no contract change,
+-- since `passengerReference` was already a mandatory field of the
+-- existing contract; only its handling inside Order Management changed
+-- (no longer discarded).
+--
+-- V4 itself is not edited or deleted, per this project's own migration
+-- discipline of never rewriting a migration already recorded in Flyway's
+-- history (mirroring Constitution Section 7's "ADRs are never deleted"
+-- for schema history). `destination` will be reintroduced by a future,
+-- separately versioned endpoint (see this sprint's own report) with its
+-- own migration, not by resurrecting this column.
+ALTER TABLE orders DROP COLUMN destination;
