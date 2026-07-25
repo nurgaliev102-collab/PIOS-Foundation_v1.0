@@ -12,7 +12,16 @@ import styles from './RideRequest.module.css'
 // is the second backend module this frontend now genuinely calls.
 const ORDER_MANAGEMENT_BASE_URL = import.meta.env.VITE_ORDER_MANAGEMENT_BASE_URL ?? 'http://localhost:8083'
 
+// Dispatch's own local port (INTERFACE_CONTRACTS.md) — Sprint 7B (Personal
+// Network Flow MVP): once the order exists, this page proposes it directly
+// to the driver whose link the passenger arrived through, reusing
+// Dispatch's already-existing `POST /v1/proposals` exactly as
+// `Coordinator.tsx` already does for the general queue -- no Coordinator
+// step for this, invited-passenger path.
+const DISPATCH_BASE_URL = import.meta.env.VITE_DISPATCH_BASE_URL ?? 'http://localhost:8084'
+
 type Step = 'loading' | 'not-found' | 'form' | 'confirmed'
+type ProposalStatus = 'proposing' | 'proposed' | 'error'
 
 interface SubmitOrderResponse {
   orderId: string
@@ -52,6 +61,7 @@ export function RideRequest() {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [orderId, setOrderId] = useState<string | null>(null)
+  const [proposalStatus, setProposalStatus] = useState<ProposalStatus | null>(null)
 
   useEffect(() => {
     let active = true
@@ -105,10 +115,39 @@ export function RideRequest() {
       })
       setOrderId(response.orderId)
       setStep('confirmed')
+      void attemptProposal(response.orderId)
     } catch {
       setSubmitError('Could not submit your ride request. Please try again.')
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  /**
+   * Sprint 7B (Personal Network Flow MVP): proposes the just-created order
+   * to the driver whose link the passenger arrived through. The order
+   * itself already exists and is confirmed regardless of what happens
+   * here — a failure never deletes it or blocks the confirmation screen,
+   * per this sprint's own explicit requirement; it only offers a Retry.
+   */
+  async function attemptProposal(forOrderId: string) {
+    setProposalStatus('proposing')
+    try {
+      await request('/v1/proposals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: forOrderId, driverId: driverCode ?? '' }),
+        baseUrl: DISPATCH_BASE_URL,
+      })
+      setProposalStatus('proposed')
+    } catch {
+      setProposalStatus('error')
+    }
+  }
+
+  function handleRetryProposal() {
+    if (orderId && proposalStatus !== 'proposing') {
+      void attemptProposal(orderId)
     }
   }
 
@@ -173,6 +212,19 @@ export function RideRequest() {
             <p className={styles.confirmed}>Ride request submitted.</p>
             <p className={styles.invitedBy}>Order ID:</p>
             <p className={styles.driverName}>{orderId}</p>
+
+            {proposalStatus === 'proposing' && <p className={styles.status}>Notifying your driver…</p>}
+            {proposalStatus === 'proposed' && <p className={styles.status}>Your driver has been notified.</p>}
+            {proposalStatus === 'error' && (
+              <>
+                <p className={styles.error} role="alert">
+                  Could not notify your driver. Your ride request is still saved.
+                </p>
+                <div className={styles.actionRow}>
+                  <ActionButton label="Retry" variant="secondary" onClick={handleRetryProposal} />
+                </div>
+              </>
+            )}
           </>
         )}
       </main>

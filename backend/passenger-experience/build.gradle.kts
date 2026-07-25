@@ -25,6 +25,15 @@ dependencies {
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
 
+    // Sprint 7B: Personal Network Flow MVP. This module's first-ever
+    // persisted concept (Connection) needs its own database -- plain JDBC
+    // via JdbcTemplate, no ORM, mirroring every other module's own
+    // persistence style (ADR-025; PERSISTENCE_ARCHITECTURE.md Section 3).
+    implementation("org.springframework.boot:spring-boot-starter-jdbc")
+    implementation("org.postgresql:postgresql")
+    implementation("org.flywaydb:flyway-core")
+    implementation("org.flywaydb:flyway-database-postgresql")
+
     testImplementation(kotlin("test"))
 
     // Test-scoped only, per ADR-027 (MVP Integration Mechanism): used

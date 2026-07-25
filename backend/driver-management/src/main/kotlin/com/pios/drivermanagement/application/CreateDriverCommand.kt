@@ -11,8 +11,9 @@ import com.pios.drivermanagement.domain.DriverId
  * [DriverNotFoundException]) but that, until this command, nothing in this
  * module actually provided.
  *
- * Carries only [driverId]: [com.pios.drivermanagement.domain.Driver]'s own
- * public constructor accepts no other field, and this sprint's own scope
- * deliberately introduces none (no name, phone, or vehicle information).
+ * Carries [driverId] and, since Sprint 7B (Personal Network Flow MVP),
+ * [displayName] -- the only other field
+ * [com.pios.drivermanagement.domain.Driver]'s own public constructor
+ * accepts.
  */
-data class CreateDriverCommand(val driverId: DriverId)
+data class CreateDriverCommand(val driverId: DriverId, val displayName: String? = null)

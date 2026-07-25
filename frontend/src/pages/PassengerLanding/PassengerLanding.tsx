@@ -6,9 +6,16 @@ import { getInvitationByDriverCode } from './invitationSource'
 import type { InvitationInfo } from './invitationSource'
 import { getPassengerIdentity, savePassengerIdentity } from '../../persistence/localPassengerIdentity'
 import type { PassengerIdentity } from '../../persistence/localPassengerIdentity'
+import { request } from '../../api/apiClient'
 import styles from './PassengerLanding.module.css'
 
 const MAX_NAME_LENGTH = 50
+
+// Passenger Experience's own local port (INTERFACE_CONTRACTS.md) — Sprint
+// 7B (Personal Network Flow MVP): this page now also calls that module
+// directly, to record that this passenger reached PIOS through this
+// driver's own invitation link.
+const PASSENGER_EXPERIENCE_BASE_URL = import.meta.env.VITE_PASSENGER_EXPERIENCE_BASE_URL ?? 'http://localhost:8082'
 
 type Step = 'loading' | 'not-found' | 'invited' | 'onboarding' | 'greeting'
 
@@ -72,7 +79,7 @@ export function PassengerLanding() {
     }
   }
 
-  function handleNameSubmit() {
+  async function handleNameSubmit() {
     const trimmed = name.trim()
     if (!trimmed) {
       setNameError('Please enter a name.')
@@ -85,6 +92,25 @@ export function PassengerLanding() {
     const saved = savePassengerIdentity(trimmed)
     setIdentity(saved)
     setStep('greeting')
+
+    // Sprint 7B (Personal Network Flow MVP): records the connection this
+    // invitation just created. Idempotent on the backend (opening the same
+    // link again returns 200, not a duplicate), so no local guard against
+    // calling this more than once is needed. Deliberately not blocking or
+    // surfaced to the passenger on failure: this is bookkeeping for a
+    // feature (Ride Request auto-proposing to this driver) the passenger
+    // has not reached yet, not something their own onboarding should stall
+    // on.
+    try {
+      await request('/v1/connections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driverId: driverCode ?? '', passengerReference: saved.id }),
+        baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
+      })
+    } catch {
+      // Known, accepted limitation — see comment above.
+    }
   }
 
   function handleRequestRide() {
@@ -103,7 +129,6 @@ export function PassengerLanding() {
           <>
             <p className={styles.invitedBy}>You were invited by</p>
             <h1 className={styles.driverName}>{invitation.driverName}</h1>
-            <p className={styles.driverType}>{invitation.driverType}</p>
             <div className={styles.actionRow}>
               <ActionButton label="Continue" variant="primary" onClick={handleContinue} />
             </div>

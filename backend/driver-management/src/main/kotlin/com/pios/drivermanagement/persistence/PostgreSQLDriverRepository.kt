@@ -34,21 +34,23 @@ class PostgreSQLDriverRepository(
     override fun save(driver: Driver) {
         jdbcTemplate.update(
             """
-            INSERT INTO drivers (id, availability) VALUES (?, ?)
+            INSERT INTO drivers (id, availability, display_name) VALUES (?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET availability = EXCLUDED.availability
             """.trimIndent(),
             driver.id.value,
-            driver.availability.name
+            driver.availability.name,
+            driver.displayName
         )
     }
 
     override fun findById(id: DriverId): Driver? {
         val rows = jdbcTemplate.query(
-            "SELECT id, availability FROM drivers WHERE id = ?",
+            "SELECT id, availability, display_name FROM drivers WHERE id = ?",
             { rs, _ ->
                 Driver(
                     id = DriverId(rs.getString("id")),
-                    availability = Availability.valueOf(rs.getString("availability"))
+                    availability = Availability.valueOf(rs.getString("availability")),
+                    displayName = rs.getString("display_name")
                 )
             },
             id.value
@@ -58,11 +60,12 @@ class PostgreSQLDriverRepository(
 
     override fun findAll(): List<Driver> =
         jdbcTemplate.query(
-            "SELECT id, availability FROM drivers"
+            "SELECT id, availability, display_name FROM drivers"
         ) { rs, _ ->
             Driver(
                 id = DriverId(rs.getString("id")),
-                availability = Availability.valueOf(rs.getString("availability"))
+                availability = Availability.valueOf(rs.getString("availability")),
+                displayName = rs.getString("display_name")
             )
         }
 }

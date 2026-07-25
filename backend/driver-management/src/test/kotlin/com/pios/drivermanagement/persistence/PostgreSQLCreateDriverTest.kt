@@ -36,6 +36,16 @@ class PostgreSQLCreateDriverTest {
     }
 
     @Test
+    fun `a driver created with a displayName through PostgreSQL can be loaded back with it`() {
+        val driverId = DriverId("create-driver-${UUID.randomUUID()}")
+
+        val created = service.handle(CreateDriverCommand(driverId, "Артур"))
+
+        assertEquals("Артур", created.displayName)
+        assertEquals("Артур", repository.findById(driverId)?.displayName)
+    }
+
+    @Test
     fun `creating a driver twice for the same id raises DriverAlreadyExistsException and does not overwrite it`() {
         val driverId = DriverId("create-driver-${UUID.randomUUID()}")
         service.handle(CreateDriverCommand(driverId))

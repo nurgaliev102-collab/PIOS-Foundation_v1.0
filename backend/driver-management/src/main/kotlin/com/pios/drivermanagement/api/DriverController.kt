@@ -71,8 +71,11 @@ class DriverController(
     @PostMapping
     fun createDriver(@RequestBody request: CreateDriverRequest): ResponseEntity<DriverResponse> =
         try {
-            val driver = createDriverApplicationService.handle(CreateDriverCommand(DriverId(request.driverId)))
-            ResponseEntity.status(HttpStatus.CREATED).body(DriverResponse(driver.id.value, driver.availability.name))
+            val driver = createDriverApplicationService.handle(
+                CreateDriverCommand(DriverId(request.driverId), request.displayName)
+            )
+            ResponseEntity.status(HttpStatus.CREATED)
+                .body(DriverResponse(driver.id.value, driver.availability.name, driver.displayName))
         } catch (ex: DriverAlreadyExistsException) {
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         } catch (ex: IllegalArgumentException) {
@@ -83,7 +86,7 @@ class DriverController(
     fun getDriver(@PathVariable driverId: String): ResponseEntity<DriverResponse> =
         try {
             val driver = retrieveDriverAvailabilityHandler.handle(DriverId(driverId))
-            ResponseEntity.ok(DriverResponse(driver.id.value, driver.availability.name))
+            ResponseEntity.ok(DriverResponse(driver.id.value, driver.availability.name, driver.displayName))
         } catch (ex: DriverNotFoundException) {
             ResponseEntity.notFound().build()
         } catch (ex: IllegalArgumentException) {
@@ -94,7 +97,7 @@ class DriverController(
     fun listDrivers(): ResponseEntity<List<DriverResponse>> =
         ResponseEntity.ok(
             retrieveDriverAvailabilityHandler.handleAll()
-                .map { DriverResponse(it.id.value, it.availability.name) }
+                .map { DriverResponse(it.id.value, it.availability.name, it.displayName) }
         )
 
     @PostMapping("/{driverId}/availability")

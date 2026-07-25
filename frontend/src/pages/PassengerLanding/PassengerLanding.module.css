@@ -38,12 +38,6 @@
   color: #0f172a;
 }
 
-.driverType {
-  margin: 0 0 1rem;
-  font-size: 0.9375rem;
-  color: #64748b;
-}
-
 .actionRow {
   display: flex;
   width: 100%;

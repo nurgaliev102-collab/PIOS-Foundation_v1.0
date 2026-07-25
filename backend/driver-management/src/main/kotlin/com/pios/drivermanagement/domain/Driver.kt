@@ -11,10 +11,17 @@ package com.pios.drivermanagement.domain
  * Invariant (DOMAIN_MODEL.md Section 11): a driver has exactly one current
  * availability state at any time — enforced by holding a single
  * [availability] property that is replaced, never appended to.
+ *
+ * [displayName] (Sprint 7B: Personal Network Flow MVP) is the plain-text
+ * name shown to a passenger who was invited through this driver's own
+ * link ("Вас пригласил Артур") — optional and immutable once set, the
+ * same "plain nullable field, no new Value Object" precedent
+ * `Order.destination` already established (Sprint 3B).
  */
 class Driver(
     val id: DriverId,
-    availability: Availability = Availability.UNAVAILABLE
+    availability: Availability = Availability.UNAVAILABLE,
+    val displayName: String? = null
 ) {
     var availability: Availability = availability
         private set

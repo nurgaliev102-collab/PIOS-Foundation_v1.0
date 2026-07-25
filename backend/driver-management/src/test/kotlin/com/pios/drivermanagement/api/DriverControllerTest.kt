@@ -57,6 +57,18 @@ class DriverControllerTest {
     }
 
     @Test
+    fun `creating a driver with a displayName returns 201 with that displayName, and it is retrievable`() {
+        val response = controller.createDriver(CreateDriverRequest("driver-with-name", "Артур"))
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        assertEquals("Артур", assertNotNull(response.body).displayName)
+        assertEquals("Артур", repository.findById(DriverId("driver-with-name"))?.displayName)
+
+        val getResponse = controller.getDriver("driver-with-name")
+        assertEquals("Артур", assertNotNull(getResponse.body).displayName)
+    }
+
+    @Test
     fun `a known driver id returns 200 with id and availability`() {
         repository.save(Driver(DriverId("driver-1"), Availability.AVAILABLE))
 
