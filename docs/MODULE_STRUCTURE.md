@@ -80,6 +80,13 @@ Module Structure exists to give each of the eight already-ratified architectural
 - **Owned capabilities.** Record Payment; Retrieve Payment Record (APPLICATION_ARCHITECTURE.md Sections 6–7); no use case currently attributes these to a specific actor's goal, consistent with USE_CASE_CATALOG.md.
 - **Boundary.** Never owns external settlement information (ADR-020).
 
+### Network Management Module
+
+- **Purpose.** The software organization unit responsible for a person's identity independent of any single role, and for the connections between people (ADR-037).
+- **Responsibility.** Person, Profile (a person's roles), Connection, and Invitation — the Personal Network foundation authorized by `PRODUCT_DECISION_PERSONAL_NETWORK_MVP_TRANSITION.md` and placed here by ADR-037, not a merger of Driver Management's or Passenger Experience's own existing responsibilities.
+- **Owned capabilities.** Create Person, Retrieve Person; Create Profile, Retrieve Profiles for Person; Create Connection, Retrieve Connections for Person; Create Invitation, Accept Invitation (`IMPLEMENTATION_PLAN_SPRINT_7_PERSONAL_NETWORK_MVP.md`'s successor, Sprint 7A).
+- **Boundary.** No other module owns Person, Profile, Connection, or Invitation data. This module owns none of Driver Management's or Passenger Experience's own data, and references either only by a plain string id, never through shared storage (ADR-037). As of Sprint 7A, no other module depends on this one, and this module depends on no other.
+
 ## 4. Shared Capabilities
 
 No module shares business ownership with another; this section describes only uniform principles that every module implements independently, never a shared owning module and never shared business data:
@@ -114,7 +121,7 @@ A new module is added only when a new bounded context is ratified through a deci
 | --- | --- | --- | --- | --- | --- |
 | 1. Purpose | ADR-016, ADR-018 | Section 5 | Section 3 | Section 1 | Section 1 |
 | 2. Module Design Principles | ADR-001, ADR-003, ADR-004, ADR-009, ADR-018 | — | — | Section 2 | — |
-| 3. Core Modules | ADR-002, ADR-005, ADR-018, ADR-019, ADR-020, ADR-033 (Notifications), ADR-035 (Dispatch) | Section 6 | Section 3 | Sections 5–7 | Sections 4–5 |
+| 3. Core Modules | ADR-002, ADR-005, ADR-018, ADR-019, ADR-020, ADR-033 (Notifications), ADR-035 (Dispatch), ADR-037 (Network Management) | Section 6 | Section 3 | Sections 5–7 | Sections 4–5 |
 | 4. Shared Capabilities | ADR-010, ADR-011, ADR-012 | Sections 14–15 | — | — | Sections 8–9 |
 | 5. Dependency Rules | ADR-003, ADR-004, ADR-005, ADR-009 | Section 8 | — | Section 8 | Section 6 |
 | 6. Application Coordination | — | Section 8 | Section 7 | Sections 2, 8 | — |

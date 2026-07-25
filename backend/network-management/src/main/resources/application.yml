@@ -1,0 +1,13 @@
+spring:
+  application:
+    name: network-management
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:5432/pios_network_management
+    username: postgres
+    password:
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/networkmanagement
+
+server:
+  port: 8085

@@ -3,6 +3,7 @@ import { DriverHome } from '../pages/DriverHome'
 import { PassengerLanding } from '../pages/PassengerLanding'
 import { RideRequest } from '../pages/RideRequest'
 import { Coordinator } from '../pages/Coordinator'
+import { NetworkTest } from '../pages/NetworkTest'
 
 /**
  * Route table — Sprint FR-002: Driver Availability.
@@ -27,5 +28,9 @@ export const routes: RouteObject[] = [
   {
     path: '/coordinator',
     element: <Coordinator />,
+  },
+  {
+    path: '/network-test',
+    element: <NetworkTest />,
   },
 ]
