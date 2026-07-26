@@ -22,12 +22,18 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
  * one origin this project's own frontend actually runs on locally — not
  * an architectural decision, a minimal operational necessity for the
  * already-built frontend to reach the already-built backend at all.
+ *
+ * Sprint 8.5 (Pilot Deployment Preparation): an additional origin read
+ * from `PIOS_PILOT_FRONTEND_ORIGIN`, when set, is allowed alongside the
+ * local dev origin — see `com.pios.drivermanagement.api.WebCorsConfiguration`'s
+ * own KDoc for the reasoning.
  */
 @Configuration
 class WebCorsConfiguration : WebMvcConfigurer {
     override fun addCorsMappings(registry: CorsRegistry) {
+        val origins = listOfNotNull(FRONTEND_DEV_ORIGIN, System.getenv("PIOS_PILOT_FRONTEND_ORIGIN"))
         registry.addMapping("/v1/**")
-            .allowedOrigins(FRONTEND_DEV_ORIGIN)
+            .allowedOrigins(*origins.toTypedArray())
             .allowedMethods("GET", "POST")
             .allowedHeaders("*")
     }

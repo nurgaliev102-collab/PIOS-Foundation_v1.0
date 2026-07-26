@@ -4,6 +4,15 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Sprint 8.5 (Pilot Deployment Preparation): `vite preview` rejects
+  // requests whose Host header it doesn't recognize (DNS-rebinding
+  // protection). A Cloudflare Tunnel puts a `*.trycloudflare.com` host on
+  // every request reaching this server from the public internet, so that
+  // suffix is allowed here -- this is a deployment-only change, it does
+  // not affect `vite dev` or the production build's own behavior.
+  preview: {
+    allowedHosts: ['.trycloudflare.com'],
+  },
   plugins: [
     react(),
     VitePWA({

@@ -21,12 +21,20 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
  * frontend actually runs on locally — not an architectural decision, a
  * minimal operational necessity for the already-built frontend to reach
  * the already-built backend at all.
+ *
+ * Sprint 8.5 (Pilot Deployment Preparation): the local dev origin above
+ * is always allowed, unchanged; an additional origin read from the
+ * `PIOS_PILOT_FRONTEND_ORIGIN` environment variable is allowed alongside
+ * it when set, so a temporary pilot deployment (for example, a
+ * Cloudflare Tunnel URL) can reach this API without changing the default
+ * for anyone still running the frontend locally.
  */
 @Configuration
 class WebCorsConfiguration : WebMvcConfigurer {
     override fun addCorsMappings(registry: CorsRegistry) {
+        val origins = listOfNotNull(FRONTEND_DEV_ORIGIN, System.getenv("PIOS_PILOT_FRONTEND_ORIGIN"))
         registry.addMapping("/v1/**")
-            .allowedOrigins(FRONTEND_DEV_ORIGIN)
+            .allowedOrigins(*origins.toTypedArray())
             .allowedMethods("GET", "POST")
             .allowedHeaders("*")
     }
