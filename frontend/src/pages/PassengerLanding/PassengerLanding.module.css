@@ -25,17 +25,31 @@
   color: #64748b;
 }
 
-.invitedBy {
-  margin: 0;
-  font-size: 0.9375rem;
+.heroAvatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 88px;
+  height: 88px;
+  margin-top: 0.5rem;
+  border-radius: 50%;
+  background: #111827;
+  color: #ffffff;
+  font-size: 2.25rem;
+  font-weight: 700;
+}
+
+.heroCaption {
+  margin: 0.5rem 0 0;
+  font-size: 0.875rem;
+  font-weight: 600;
   color: #64748b;
 }
 
-.driverName {
+.subtitle {
   margin: 0;
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: #0f172a;
+  font-size: 0.9375rem;
+  color: #64748b;
 }
 
 .actionRow {
@@ -79,9 +93,112 @@
 }
 
 .greeting {
-  margin: 0 0 0.5rem;
+  margin: 0.5rem 0 0;
   font-size: 1.75rem;
   font-weight: 700;
+  color: #0f172a;
+}
+
+.title {
+  margin: 0.5rem 0 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.stepsCard {
+  width: 100%;
+  margin-top: 1rem;
+  padding: 1rem 1.125rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.stepsTitle {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.stepRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+}
+
+.stepEmoji {
+  flex-shrink: 0;
+  font-size: 1.375rem;
+  line-height: 1.5rem;
+}
+
+.stepTitle {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.stepDescription {
+  margin: 0.125rem 0 0;
+  font-size: 0.8125rem;
+  color: #64748b;
+}
+
+.faqSection {
+  width: 100%;
+  margin-top: 1rem;
+  text-align: left;
+}
+
+.faqItem {
+  padding: 0.625rem 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.faqItem:last-child {
+  border-bottom: none;
+}
+
+.faqQuestion {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.faqAnswer {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  color: #64748b;
+}
+
+.checklist {
+  width: 100%;
+  margin-top: 0.75rem;
+  padding: 1rem 1.125rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.checklistTitle {
+  margin: 0 0 0.5rem;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.checklistItem {
+  margin: 0.375rem 0;
+  font-size: 0.9375rem;
   color: #0f172a;
 }
 

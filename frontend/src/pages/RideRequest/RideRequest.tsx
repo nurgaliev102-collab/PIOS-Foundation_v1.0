@@ -100,7 +100,7 @@ export function RideRequest() {
     }
     const trimmedDestination = destination.trim()
     if (!trimmedDestination) {
-      setDestinationError('Destination is required.')
+      setDestinationError('Пожалуйста, укажите адрес.')
       return
     }
 
@@ -117,7 +117,7 @@ export function RideRequest() {
       setStep('confirmed')
       void attemptProposal(response.orderId)
     } catch {
-      setSubmitError('Could not submit your ride request. Please try again.')
+      setSubmitError('Не удалось связаться с сервером. Попробуйте ещё раз через несколько секунд.')
     } finally {
       setIsSubmitting(false)
     }
@@ -155,23 +155,25 @@ export function RideRequest() {
     <div className={styles.screen}>
       <Header />
       <main className={styles.content}>
-        {step === 'loading' && <p className={styles.status}>Loading…</p>}
+        {step === 'loading' && <p className={styles.status}>Загрузка…</p>}
 
-        {step === 'not-found' && <p className={styles.status}>This invitation could not be found.</p>}
+        {step === 'not-found' && (
+          <p className={styles.status}>Ссылка недействительна или водитель ещё не зарегистрирован.</p>
+        )}
 
         {step === 'form' && (
           <>
-            <h1 className={styles.title}>Request a Ride</h1>
+            <h1 className={styles.title}>Заказать поездку</h1>
 
             <label className={styles.label} htmlFor="destination">
-              Destination
+              Куда
             </label>
             <input
               id="destination"
               className={styles.input}
               type="text"
               value={destination}
-              placeholder="Where are you going?"
+              placeholder="Укажите адрес"
               onChange={(event) => handleDestinationChange(event.target.value)}
             />
             {destinationError && (
@@ -181,13 +183,13 @@ export function RideRequest() {
             )}
 
             <label className={styles.label} htmlFor="notes">
-              Notes (optional)
+              Комментарий (необязательно)
             </label>
             <textarea
               id="notes"
               className={styles.textarea}
               value={notes}
-              placeholder="Anything your driver should know?"
+              placeholder="Что-то важное для водителя?"
               onChange={(event) => setNotes(event.target.value)}
             />
 
@@ -199,7 +201,7 @@ export function RideRequest() {
 
             <div className={styles.actionRow}>
               <ActionButton
-                label={isSubmitting ? 'Submitting…' : 'Request a Ride'}
+                label={isSubmitting ? 'Отправляем…' : 'Заказать поездку'}
                 variant="primary"
                 onClick={handleSubmit}
               />
@@ -209,19 +211,17 @@ export function RideRequest() {
 
         {step === 'confirmed' && orderId && (
           <>
-            <p className={styles.confirmed}>Ride request submitted.</p>
-            <p className={styles.invitedBy}>Order ID:</p>
-            <p className={styles.driverName}>{orderId}</p>
+            <p className={styles.confirmed}>Заказ оформлен.</p>
 
-            {proposalStatus === 'proposing' && <p className={styles.status}>Notifying your driver…</p>}
-            {proposalStatus === 'proposed' && <p className={styles.status}>Your driver has been notified.</p>}
+            {proposalStatus === 'proposing' && <p className={styles.status}>Сообщаем водителю…</p>}
+            {proposalStatus === 'proposed' && <p className={styles.status}>Водитель уведомлён о заказе.</p>}
             {proposalStatus === 'error' && (
               <>
                 <p className={styles.error} role="alert">
-                  Could not notify your driver. Your ride request is still saved.
+                  Не удалось передать заказ водителю. Заказ сохранён — можно попробовать ещё раз.
                 </p>
                 <div className={styles.actionRow}>
-                  <ActionButton label="Retry" variant="secondary" onClick={handleRetryProposal} />
+                  <ActionButton label="Повторить" variant="secondary" onClick={handleRetryProposal} />
                 </div>
               </>
             )}

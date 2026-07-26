@@ -5,6 +5,7 @@ import { QRCard } from '../../components/QRCard'
 import { ActionButton } from '../../components/ActionButton'
 import { ApiError, request } from '../../api/apiClient'
 import { CURRENT_DRIVER_ID, invitationLinkFor } from './currentDriver'
+import { hasSeenDriverOnboarding, markDriverOnboardingSeen } from '../../persistence/localDriverOnboarding'
 import styles from './DriverHome.module.css'
 
 const FEEDBACK_DURATION_MS = 2000
@@ -94,6 +95,7 @@ interface OrderListItem {
  * destination shown, rather than blocking the section they came from.
  */
 export function DriverHome() {
+  const [showOnboarding, setShowOnboarding] = useState(() => !hasSeenDriverOnboarding())
   const [status, setStatus] = useState<Status>('loading')
   const [driver, setDriver] = useState<DriverInfo | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
@@ -237,6 +239,41 @@ export function DriverHome() {
     } catch {
       showFeedback('Could not share')
     }
+  }
+
+  function handleGetLink() {
+    markDriverOnboardingSeen()
+    setShowOnboarding(false)
+  }
+
+  if (showOnboarding) {
+    return (
+      <div className={styles.screen}>
+        <Header />
+        <main className={styles.content}>
+          <h1 className={styles.welcomeTitle}>Добро пожаловать!</h1>
+          <p className={styles.welcomeText}>PIOS помогает вам строить собственную клиентскую сеть.</p>
+
+          <section className={styles.welcomeCard}>
+            <p className={styles.welcomeCardTitle}>Ваши постоянные клиенты смогут:</p>
+            <p className={styles.welcomeCardItem}>• быстро находить вас;</p>
+            <p className={styles.welcomeCardItem}>• заказывать поездки через вашу ссылку;</p>
+            <p className={styles.welcomeCardItem}>• оставаться вашими клиентами.</p>
+          </section>
+
+          <section className={styles.welcomeCard}>
+            <p className={styles.welcomeCardTitle}>Что нужно сделать</p>
+            <p className={styles.welcomeCardItem}>1. Получите свою ссылку.</p>
+            <p className={styles.welcomeCardItem}>2. Отправьте её своим постоянным клиентам.</p>
+            <p className={styles.welcomeCardItem}>3. Принимайте новые заказы.</p>
+          </section>
+
+          <div className={styles.actionRow}>
+            <ActionButton label="Получить ссылку" variant="primary" onClick={handleGetLink} />
+          </div>
+        </main>
+      </div>
+    )
   }
 
   return (
