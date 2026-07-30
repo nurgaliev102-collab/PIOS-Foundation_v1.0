@@ -17,5 +17,9 @@ import com.pios.ordermanagement.domain.OrderOrigin
  * [com.pios.ordermanagement.domain.Order]'s own KDoc for why it is a
  * plain, optional, unvalidated `String?` rather than a typed domain
  * value like [origin].
+ *
+ * Carries [passengerName] (first-pilot feedback), defaulting to `null` for
+ * the same reason [destination] does — see [com.pios.ordermanagement.domain.Order]'s
+ * own KDoc.
  */
-class SubmitOrderCommand(val origin: OrderOrigin, val destination: String? = null)
+class SubmitOrderCommand(val origin: OrderOrigin, val destination: String? = null, val passengerName: String? = null)

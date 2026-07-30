@@ -36,6 +36,25 @@
   color: #64748b;
 }
 
+.driverCodeInput {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 0.5rem;
+  padding: 0.625rem 0.875rem;
+  font-size: 1rem;
+  font-family: inherit;
+  color: #0f172a;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
+.driverCodeInput:focus {
+  outline: none;
+  border-color: #2563eb;
+}
+
 .welcomeCard {
   padding: 1rem 1.125rem;
   background: #ffffff;
@@ -63,8 +82,23 @@
   margin-top: 0.25rem;
 }
 
+.hint {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
 .sectionTitle {
-  margin: 0.5rem 0 0;
+  margin: 0;
   font-size: 1.125rem;
   font-weight: 700;
   color: #0f172a;
@@ -88,8 +122,8 @@
 }
 
 .proposalOrderId {
-  font-size: 0.8125rem;
-  font-family: monospace;
+  font-size: 0.875rem;
+  font-weight: 600;
   color: #0f172a;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -131,6 +165,18 @@
   font-size: 0.8125rem;
   font-weight: 600;
   color: #dc2626;
+  text-align: center;
+}
+
+.errorBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem 0;
+}
+
+.errorBlock .error {
   text-align: center;
 }
 

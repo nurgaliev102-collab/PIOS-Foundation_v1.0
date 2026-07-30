@@ -87,6 +87,16 @@ import org.springframework.stereotype.Repository
  * [findAll] (Sprint FR-003, Order Query) reuses the same [reconstruct]
  * helper as [findById], row by row, over every order in the table — no
  * filtering, sorting, or pagination.
+ *
+ * First-pilot feedback adds `passenger_name`/`created_at`, read and
+ * written below exactly like `destination` — excluded from
+ * `ON CONFLICT ... UPDATE` since [Order.passengerName]/[Order.createdAt]
+ * are likewise set once, at submission, and never change. `created_at` is
+ * stored as `TIMESTAMPTZ`; [java.sql.Timestamp.toInstant] converts the
+ * driver's own representation to [java.time.Instant], the reflected
+ * constructor's declared type for that parameter (a regular class, not a
+ * `@JvmInline value class`, so no unboxing subtlety applies the way it
+ * does for `origin`/`id`).
  */
 @Repository
 class PostgreSQLOrderRepository(
@@ -96,25 +106,29 @@ class PostgreSQLOrderRepository(
     override fun save(order: Order) {
         jdbcTemplate.update(
             """
-            INSERT INTO orders (id, status, origin, destination) VALUES (?, ?, ?, ?)
+            INSERT INTO orders (id, status, origin, destination, passenger_name, created_at) VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status
             """.trimIndent(),
             order.id.value,
             order.status.name,
             order.origin.reference,
-            order.destination
+            order.destination,
+            order.passengerName,
+            order.createdAt?.let { java.sql.Timestamp.from(it) }
         )
     }
 
     override fun findById(id: OrderId): Order? {
         val rows = jdbcTemplate.query(
-            "SELECT id, status, origin, destination FROM orders WHERE id = ?",
+            "SELECT id, status, origin, destination, passenger_name, created_at FROM orders WHERE id = ?",
             { rs, _ ->
                 reconstruct(
                     id = rs.getString("id"),
                     status = OrderStatus.valueOf(rs.getString("status")),
                     origin = rs.getString("origin"),
-                    destination = rs.getString("destination")
+                    destination = rs.getString("destination"),
+                    passengerName = rs.getString("passenger_name"),
+                    createdAt = rs.getTimestamp("created_at")
                 )
             },
             id.value
@@ -124,24 +138,35 @@ class PostgreSQLOrderRepository(
 
     override fun findAll(): List<Order> =
         jdbcTemplate.query(
-            "SELECT id, status, origin, destination FROM orders"
+            "SELECT id, status, origin, destination, passenger_name, created_at FROM orders"
         ) { rs, _ ->
             reconstruct(
                 id = rs.getString("id"),
                 status = OrderStatus.valueOf(rs.getString("status")),
                 origin = rs.getString("origin"),
-                destination = rs.getString("destination")
+                destination = rs.getString("destination"),
+                passengerName = rs.getString("passenger_name"),
+                createdAt = rs.getTimestamp("created_at")
             )
         }
 
-    private fun reconstruct(id: String, status: OrderStatus, origin: String, destination: String?): Order {
+    private fun reconstruct(
+        id: String,
+        status: OrderStatus,
+        origin: String,
+        destination: String?,
+        passengerName: String?,
+        createdAt: java.sql.Timestamp?
+    ): Order {
         val constructor = Order::class.java.getDeclaredConstructor(
             String::class.java,
             OrderStatus::class.java,
             String::class.java,
-            String::class.java
+            String::class.java,
+            String::class.java,
+            java.time.Instant::class.java
         )
         constructor.isAccessible = true
-        return constructor.newInstance(id, status, origin, destination)
+        return constructor.newInstance(id, status, origin, destination, passengerName, createdAt?.toInstant())
     }
 }

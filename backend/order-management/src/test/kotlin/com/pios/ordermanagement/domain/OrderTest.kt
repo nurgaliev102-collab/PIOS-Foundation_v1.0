@@ -76,6 +76,29 @@ class OrderTest {
         assertEquals("Аэропорт", order.destination)
     }
 
+    // --- Passenger name / created at (first-pilot feedback) ---
+
+    @Test
+    fun `a submitted order carries the passenger name it was submitted with`() {
+        val submitted = Order.submit(origin, passengerName = "Мария")
+
+        assertEquals("Мария", submitted.order.passengerName)
+    }
+
+    @Test
+    fun `a submitted order without a passenger name has a null passenger name`() {
+        val submitted = Order.submit(origin)
+
+        assertEquals(null, submitted.order.passengerName)
+    }
+
+    @Test
+    fun `a submitted order has a non-null createdAt`() {
+        val submitted = Order.submit(origin)
+
+        assertNotEquals(null, submitted.order.createdAt)
+    }
+
     // --- Completion ---
 
     @Test

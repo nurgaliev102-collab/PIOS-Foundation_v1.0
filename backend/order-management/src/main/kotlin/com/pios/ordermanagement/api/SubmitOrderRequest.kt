@@ -21,5 +21,8 @@ package com.pios.ordermanagement.api
  * still sends — remains valid and unaffected. See
  * [com.pios.ordermanagement.domain.Order]'s own KDoc for why
  * [destination] is a plain, unvalidated `String?`.
+ *
+ * [passengerName] (first-pilot feedback) follows the same optional,
+ * defaulting-to-`null` shape for the same backward-compatibility reason.
  */
-data class SubmitOrderRequest(val passengerReference: String, val destination: String? = null)
+data class SubmitOrderRequest(val passengerReference: String, val destination: String? = null, val passengerName: String? = null)

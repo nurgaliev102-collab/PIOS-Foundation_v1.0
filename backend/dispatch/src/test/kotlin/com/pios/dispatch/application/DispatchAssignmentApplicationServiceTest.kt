@@ -96,4 +96,49 @@ class DispatchAssignmentApplicationServiceTest {
 
         assertEquals(AssignmentStatus.ACCEPTED, repository.findById(assignment.id)?.status)
     }
+
+    // --- Ride lifecycle (ADR-040: Assignment Ride Lifecycle) ---
+
+    @Test
+    fun `arriving a saved assignment produces an AssignmentArrived event and persists ARRIVED`() {
+        val created = service.handle(AssignOrderCommand(order, driver))
+
+        val event = service.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
+
+        assertEquals(order, event.orderId)
+        assertEquals(driver, event.driverId)
+        assertEquals(AssignmentStatus.ARRIVED, repository.findById(created.assignment.id)?.status)
+    }
+
+    @Test
+    fun `starting a saved, arrived assignment produces an AssignmentStarted event and persists IN_PROGRESS`() {
+        val created = service.handle(AssignOrderCommand(order, driver))
+        service.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
+
+        val event = service.startAssignment(StartAssignmentCommand(created.assignment.id))
+
+        assertEquals(order, event.orderId)
+        assertEquals(AssignmentStatus.IN_PROGRESS, repository.findById(created.assignment.id)?.status)
+    }
+
+    @Test
+    fun `completing a saved, in-progress assignment produces an AssignmentCompleted event and persists COMPLETED`() {
+        val created = service.handle(AssignOrderCommand(order, driver))
+        service.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
+        service.startAssignment(StartAssignmentCommand(created.assignment.id))
+
+        val event = service.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
+
+        assertEquals(order, event.orderId)
+        assertEquals(AssignmentStatus.COMPLETED, repository.findById(created.assignment.id)?.status)
+    }
+
+    @Test
+    fun `starting an assignment that never arrived is rejected`() {
+        val created = service.handle(AssignOrderCommand(order, driver))
+
+        assertFailsWith<IllegalStateException> {
+            service.startAssignment(StartAssignmentCommand(created.assignment.id))
+        }
+    }
 }

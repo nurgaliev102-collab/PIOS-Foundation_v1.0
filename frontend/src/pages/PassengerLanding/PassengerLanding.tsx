@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Header } from '../../components/Header'
 import { ActionButton } from '../../components/ActionButton'
+import { Spinner } from '../../components/Spinner'
 import { getInvitationByDriverCode } from './invitationSource'
 import type { InvitationInfo } from './invitationSource'
 import { getPassengerIdentity, savePassengerIdentity } from '../../persistence/localPassengerIdentity'
@@ -140,7 +141,7 @@ export function PassengerLanding() {
     <div className={styles.screen}>
       <Header />
       <main className={styles.content}>
-        {step === 'loading' && <p className={styles.status}>Загрузка…</p>}
+        {step === 'loading' && <Spinner label="Загрузка…" />}
 
         {step === 'not-found' && (
           <p className={styles.status}>Ссылка недействительна или водитель ещё не зарегистрирован.</p>

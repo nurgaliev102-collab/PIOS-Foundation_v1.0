@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import QRCode from 'qrcode'
 import { ActionButton } from '../ActionButton'
 import styles from './QRCard.module.css'
 
@@ -26,20 +28,44 @@ export interface QRCardProps {
 /**
  * Displays an invitation QR code and link, with Copy/Share actions.
  *
- * The QR graphic rendered here is a **static, decorative placeholder** —
- * not a real, scannable QR code encoding [invitationLink]. No QR
- * generation library is used, consistent with Sprint 1's own "QR:
- * placeholder only" scope. Swapping in a real, generated QR code later
- * only touches this component's own markup, not its props or any caller.
+ * Pilot readiness fix: the QR graphic used to be a static, decorative
+ * placeholder that encoded nothing (Sprint 1's own "QR: placeholder only"
+ * scope) — a real defect once this screen became the thing a driver hands
+ * a real client. It now renders a real, scannable code for [invitationLink]
+ * itself, generated client-side (`qrcode` package, SVG-to-data-URL, no
+ * network call — nothing about the invitation ever leaves the device to
+ * produce it). Regenerates whenever [invitationLink] changes.
  */
 export function QRCard({ invitationLink, linkTo, onCopy, onShare, feedback }: QRCardProps) {
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    QRCode.toDataURL(invitationLink, { margin: 1, width: 336, color: { dark: '#111827', light: '#ffffff' } })
+      .then((url) => {
+        if (active) {
+          setQrDataUrl(url)
+        }
+      })
+      .catch(() => {
+        // Best-effort: the link itself (Copy/Share, and the text below)
+        // remains fully usable even if QR generation fails for some reason.
+        if (active) {
+          setQrDataUrl(null)
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [invitationLink])
+
   return (
     <section className={styles.card}>
-      <div className={styles.qrPlaceholder} role="img" aria-label="Invitation QR code placeholder">
-        <PlaceholderQrGraphic />
+      <div className={styles.qrPlaceholder} role="img" aria-label="QR-код ссылки-приглашения">
+        {qrDataUrl && <img src={qrDataUrl} alt="" className={styles.qrImage} />}
       </div>
 
-      <p className={styles.linkLabel}>Invitation link</p>
+      <p className={styles.linkLabel}>Ссылка для клиентов</p>
       {linkTo ? (
         <Link to={linkTo} className={styles.link}>
           {invitationLink}
@@ -49,8 +75,8 @@ export function QRCard({ invitationLink, linkTo, onCopy, onShare, feedback }: QR
       )}
 
       <div className={styles.actions}>
-        <ActionButton label="Copy" onClick={onCopy} variant="secondary" />
-        <ActionButton label="Share" onClick={onShare} variant="primary" />
+        <ActionButton label="Копировать" onClick={onCopy} variant="secondary" />
+        <ActionButton label="Поделиться" onClick={onShare} variant="primary" />
       </div>
 
       {feedback && (
@@ -59,37 +85,5 @@ export function QRCard({ invitationLink, linkTo, onCopy, onShare, feedback }: QR
         </p>
       )}
     </section>
-  )
-}
-
-/**
- * A fixed, hand-authored pattern resembling a QR code's finder squares
- * and module grid — purely visual, deterministic (same on every render),
- * encodes nothing.
- */
-function PlaceholderQrGraphic() {
-  return (
-    <svg viewBox="0 0 100 100" width="100%" height="100%" aria-hidden="true">
-      <rect width="100" height="100" fill="#ffffff" />
-      {[
-        [4, 4],
-        [72, 4],
-        [4, 72],
-      ].map(([x, y]) => (
-        <g key={`${x}-${y}`} transform={`translate(${x} ${y})`}>
-          <rect width="24" height="24" fill="#111827" />
-          <rect x="4" y="4" width="16" height="16" fill="#ffffff" />
-          <rect x="8" y="8" width="8" height="8" fill="#111827" />
-        </g>
-      ))}
-      {[
-        36, 44, 52, 60, 68, 4, 12, 20, 28, 36, 44, 52, 60, 68, 76, 84, 92,
-      ].map((x, index) => (
-        <rect key={`h-${x}-${index}`} x={x} y={36 + (index % 3) * 8} width="6" height="6" fill="#111827" />
-      ))}
-      {[36, 44, 52, 60, 68, 76, 84, 92].map((y, index) => (
-        <rect key={`v-${y}-${index}`} x={36 + (index % 3) * 8} y={y} width="6" height="6" fill="#111827" />
-      ))}
-    </svg>
   )
 }

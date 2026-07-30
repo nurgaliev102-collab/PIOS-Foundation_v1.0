@@ -56,6 +56,24 @@ abstract class OrderRepositoryContractTest {
     }
 
     @Test
+    fun `a saved order's passenger name and createdAt survive a round trip`() {
+        val repository = createRepository()
+        val submitted = Order.submit(contractOrigin, passengerName = "Мария")
+
+        repository.save(submitted.order)
+        val reloaded = repository.findById(submitted.order.id)
+
+        assertEquals("Мария", reloaded?.passengerName)
+        // Truncated to millis: PostgreSQL's TIMESTAMPTZ stores microsecond
+        // precision, Java's Instant nanosecond -- comparing the raw values
+        // would be flaky on the PostgreSQL variant of this contract test.
+        assertEquals(
+            submitted.order.createdAt?.truncatedTo(java.time.temporal.ChronoUnit.MILLIS),
+            reloaded?.createdAt?.truncatedTo(java.time.temporal.ChronoUnit.MILLIS)
+        )
+    }
+
+    @Test
     fun `findAll includes every saved order`() {
         val repository = createRepository()
         val first = Order.submit(OrderOrigin("contract-test-findall-1"))

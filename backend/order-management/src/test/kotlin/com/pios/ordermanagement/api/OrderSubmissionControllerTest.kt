@@ -57,4 +57,24 @@ class OrderSubmissionControllerTest {
         val orderId = assertNotNull(response.body).orderId
         assertEquals("Аэропорт", repository.findById(OrderId(orderId))?.destination)
     }
+
+    // --- Passenger name (first-pilot feedback) ---
+
+    @Test
+    fun `a request with a passenger name persists it`() {
+        val response = controller.submitOrder(SubmitOrderRequest("passenger-named", "Аэропорт", "Мария"))
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        val orderId = assertNotNull(response.body).orderId
+        assertEquals("Мария", repository.findById(OrderId(orderId))?.passengerName)
+    }
+
+    @Test
+    fun `a request without a passenger name still succeeds -- regression for the existing contract`() {
+        val response = controller.submitOrder(SubmitOrderRequest("passenger-unnamed"))
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        val orderId = assertNotNull(response.body).orderId
+        assertNull(repository.findById(OrderId(orderId))?.passengerName)
+    }
 }

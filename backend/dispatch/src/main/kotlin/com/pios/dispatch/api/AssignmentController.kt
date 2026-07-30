@@ -1,14 +1,24 @@
 package com.pios.dispatch.api
 
+import com.pios.dispatch.application.ArriveAssignmentCommand
 import com.pios.dispatch.application.AssignOrderCommand
+import com.pios.dispatch.application.AssignmentNotFoundException
+import com.pios.dispatch.application.AssignmentRepository
+import com.pios.dispatch.application.CompleteAssignmentCommand
 import com.pios.dispatch.application.DispatchAssignmentApplicationService
+import com.pios.dispatch.application.StartAssignmentCommand
+import com.pios.dispatch.domain.Assignment
+import com.pios.dispatch.domain.AssignmentId
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
 /**
@@ -64,11 +74,32 @@ import org.springframework.web.bind.annotation.RestController
  * window); no ratified decision yet retires manual assignment as a
  * capability outright. Still fully functional; not otherwise touched by
  * this sprint.
+ *
+ * ## Ride lifecycle (ADR-040, Assignment Ride Lifecycle)
+ *
+ * `listAssignments`/`arrive`/`start`/`complete` are this ADR's own REST
+ * surface — deliberately on `dispatch`'s `/v1/assignments`, not
+ * `order-management`'s `/v1/orders`, per that ADR's own placement
+ * decision. `listAssignments` reads [assignmentRepository] directly,
+ * mirroring [ProposalController.listProposals]'s own precedent of a
+ * controller-direct repository query for a plain, unfiltered-beyond-one-
+ * parameter listing — no dedicated query handler class exists for this
+ * for the same reason none exists there. `orderId` is required (unlike
+ * Proposal's own `orderId`-or-`driverId` choice): every known caller of
+ * this endpoint (a driver's own screen, a passenger's own screen) already
+ * has an order id on hand and nothing else Assignment could be queried by
+ * yet.
+ *
+ * Each transition endpoint maps [AssignmentNotFoundException] to 404 and
+ * an aggregate-rejected transition (wrong current status) to 409 — the
+ * same two-status convention [ProposalController]'s own `accept`/`decline`
+ * endpoints already established for the identical shape of failure.
  */
 @RestController
 @RequestMapping("/v1/assignments")
 class AssignmentController(
-    private val dispatchAssignmentApplicationService: DispatchAssignmentApplicationService
+    private val dispatchAssignmentApplicationService: DispatchAssignmentApplicationService,
+    private val assignmentRepository: AssignmentRepository
 ) {
 
     @Deprecated(
@@ -89,4 +120,58 @@ class AssignmentController(
         } catch (ex: IllegalStateException) {
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         }
+
+    @GetMapping
+    fun listAssignments(@RequestParam(required = false) orderId: String?): ResponseEntity<List<AssignmentResponse>> =
+        try {
+            if (orderId == null) {
+                ResponseEntity.badRequest().build()
+            } else {
+                ResponseEntity.ok(assignmentRepository.findByOrder(OrderReference(orderId)).map { it.toResponse() })
+            }
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        }
+
+    @PostMapping("/{assignmentId}/arrive")
+    fun arrive(@PathVariable assignmentId: String): ResponseEntity<AssignmentResponse> =
+        try {
+            dispatchAssignmentApplicationService.arriveAssignment(ArriveAssignmentCommand(AssignmentId(assignmentId)))
+            ResponseEntity.ok(assignmentRepository.findById(AssignmentId(assignmentId))!!.toResponse())
+        } catch (ex: AssignmentNotFoundException) {
+            ResponseEntity.notFound().build()
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        } catch (ex: IllegalStateException) {
+            ResponseEntity.status(HttpStatus.CONFLICT).build()
+        }
+
+    @PostMapping("/{assignmentId}/start")
+    fun start(@PathVariable assignmentId: String): ResponseEntity<AssignmentResponse> =
+        try {
+            dispatchAssignmentApplicationService.startAssignment(StartAssignmentCommand(AssignmentId(assignmentId)))
+            ResponseEntity.ok(assignmentRepository.findById(AssignmentId(assignmentId))!!.toResponse())
+        } catch (ex: AssignmentNotFoundException) {
+            ResponseEntity.notFound().build()
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        } catch (ex: IllegalStateException) {
+            ResponseEntity.status(HttpStatus.CONFLICT).build()
+        }
+
+    @PostMapping("/{assignmentId}/complete")
+    fun complete(@PathVariable assignmentId: String): ResponseEntity<AssignmentResponse> =
+        try {
+            dispatchAssignmentApplicationService.completeAssignment(CompleteAssignmentCommand(AssignmentId(assignmentId)))
+            ResponseEntity.ok(assignmentRepository.findById(AssignmentId(assignmentId))!!.toResponse())
+        } catch (ex: AssignmentNotFoundException) {
+            ResponseEntity.notFound().build()
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        } catch (ex: IllegalStateException) {
+            ResponseEntity.status(HttpStatus.CONFLICT).build()
+        }
+
+    private fun Assignment.toResponse() =
+        AssignmentResponse(id.value, order.orderId, driver.driverId, status.name, statusChangedAt?.toString())
 }

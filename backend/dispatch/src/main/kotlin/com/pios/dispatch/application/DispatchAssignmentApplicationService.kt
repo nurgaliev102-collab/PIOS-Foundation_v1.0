@@ -3,8 +3,11 @@ package com.pios.dispatch.application
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.dispatch.domain.Assignment
 import com.pios.dispatch.domain.AssignmentAccepted
+import com.pios.dispatch.domain.AssignmentArrived
+import com.pios.dispatch.domain.AssignmentCompleted
 import com.pios.dispatch.domain.AssignmentCreated
 import com.pios.dispatch.domain.AssignmentId
+import com.pios.dispatch.domain.AssignmentStarted
 import com.pios.dispatch.domain.OrderAssigned
 import org.springframework.stereotype.Service
 import java.util.UUID
@@ -136,6 +139,79 @@ class DispatchAssignmentApplicationService(
             ?: throw AssignmentNotFoundException(command.assignmentId)
         acceptAssignment(assignment, command)
     }
+
+    /**
+     * Records that the driver has reached the passenger (ADR-040, Assignment
+     * Ride Lifecycle), by first restoring the targeted Assignment through
+     * [assignmentRepository]. Throws [AssignmentNotFoundException] if none
+     * is saved under [ArriveAssignmentCommand.assignmentId]. Mirrors
+     * [acceptAssignment]'s own self-fetching shape exactly; no separate
+     * caller-supplies-the-instance overload exists for this or the two
+     * transitions below, since — unlike acceptance, which
+     * [ProposalAssignmentOrchestrationService] calls from inside its own
+     * shared transaction — nothing in this sprint's scope needs one.
+     */
+    fun arriveAssignment(command: ArriveAssignmentCommand): AssignmentArrived = transactionRunner.run {
+        val assignment = assignmentRepository.findById(command.assignmentId)
+            ?: throw AssignmentNotFoundException(command.assignmentId)
+        val event = assignment.arrive()
+        assignmentRepository.save(assignment)
+        outboxRepository.save(outboxRecordFor(assignment.id, event))
+        event
+    }
+
+    /** Records that the ride itself has begun (ADR-040). See [arriveAssignment]'s own KDoc for shape. */
+    fun startAssignment(command: StartAssignmentCommand): AssignmentStarted = transactionRunner.run {
+        val assignment = assignmentRepository.findById(command.assignmentId)
+            ?: throw AssignmentNotFoundException(command.assignmentId)
+        val event = assignment.start()
+        assignmentRepository.save(assignment)
+        outboxRepository.save(outboxRecordFor(assignment.id, event))
+        event
+    }
+
+    /** Records that the ride has finished (ADR-040). See [arriveAssignment]'s own KDoc for shape. */
+    fun completeAssignment(command: CompleteAssignmentCommand): AssignmentCompleted = transactionRunner.run {
+        val assignment = assignmentRepository.findById(command.assignmentId)
+            ?: throw AssignmentNotFoundException(command.assignmentId)
+        val event = assignment.complete()
+        assignmentRepository.save(assignment)
+        outboxRepository.save(outboxRecordFor(assignment.id, event))
+        event
+    }
+
+    private fun outboxRecordFor(assignmentId: AssignmentId, event: AssignmentArrived): OutboxRecord = OutboxRecord(
+        aggregateId = assignmentId.value,
+        eventType = "AssignmentArrived",
+        routingKey = "assignment.arrived",
+        payload = envelopeFor(
+            eventType = "AssignmentArrived",
+            occurredAt = event.occurredAt.toString(),
+            payload = mapOf("orderId" to event.orderId.orderId, "driverId" to event.driverId.driverId)
+        )
+    )
+
+    private fun outboxRecordFor(assignmentId: AssignmentId, event: AssignmentStarted): OutboxRecord = OutboxRecord(
+        aggregateId = assignmentId.value,
+        eventType = "AssignmentStarted",
+        routingKey = "assignment.started",
+        payload = envelopeFor(
+            eventType = "AssignmentStarted",
+            occurredAt = event.occurredAt.toString(),
+            payload = mapOf("orderId" to event.orderId.orderId, "driverId" to event.driverId.driverId)
+        )
+    )
+
+    private fun outboxRecordFor(assignmentId: AssignmentId, event: AssignmentCompleted): OutboxRecord = OutboxRecord(
+        aggregateId = assignmentId.value,
+        eventType = "AssignmentCompleted",
+        routingKey = "assignment.completed",
+        payload = envelopeFor(
+            eventType = "AssignmentCompleted",
+            occurredAt = event.occurredAt.toString(),
+            payload = mapOf("orderId" to event.orderId.orderId, "driverId" to event.driverId.driverId)
+        )
+    )
 
     private fun outboxRecordFor(assignmentId: AssignmentId, event: OrderAssigned): OutboxRecord = OutboxRecord(
         aggregateId = assignmentId.value,

@@ -16,5 +16,22 @@ package com.pios.ordermanagement.api
  * is what lets a driver, reading Order Management's own order list by
  * [id], learn a pending trip's destination without any change to
  * Dispatch's `Proposal`/`Assignment`.
+ *
+ * [passengerName] and [createdAt] (first-pilot feedback) carry
+ * [com.pios.ordermanagement.domain.Order.passengerName]/[com.pios.ordermanagement.domain.Order.createdAt]
+ * unchanged — both nullable for the same reason [destination] is: an
+ * order submitted before this pilot fix, or by a passenger with no local
+ * display name set, has neither. [createdAt] is rendered as its own
+ * `Instant.toString()` (ISO-8601), the same explicit-`.toString()`
+ * convention [com.pios.ordermanagement.application.OrderLifecycleApplicationService.envelopeFor]
+ * already uses for a domain event's own `occurredAt`, rather than
+ * depending on Jackson's automatic `Instant` (de)serialization.
  */
-data class OrderResponse(val id: String, val status: String, val origin: String, val destination: String?)
+data class OrderResponse(
+    val id: String,
+    val status: String,
+    val origin: String,
+    val destination: String?,
+    val passengerName: String?,
+    val createdAt: String?
+)

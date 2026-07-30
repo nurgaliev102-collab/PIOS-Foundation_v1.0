@@ -1,5 +1,6 @@
 package com.pios.dispatch.domain
 
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -39,17 +40,80 @@ class Assignment private constructor(
         private set
 
     /**
+     * The time of this assignment's most recent status transition
+     * (ADR-040, Assignment Ride Lifecycle) — `null` until the first one
+     * happens, since a freshly-created assignment has not transitioned
+     * yet. Every transition method below sets it; none of them read it.
+     */
+    var statusChangedAt: Instant? = null
+        private set
+
+    /**
      * Confirms this assignment, per the Accept Assignment command
      * (DOMAIN_MODEL.md Section 9). Only a [AssignmentStatus.CREATED]
      * assignment may be accepted; an already-accepted assignment cannot
      * be accepted again.
+     *
+     * [at] defaults to the current time for real callers; overridable so
+     * [com.pios.dispatch.persistence.PostgreSQLAssignmentRepository] can
+     * replay this transition during reconstruction with the originally
+     * persisted timestamp instead of the moment of the read (see that
+     * class's own KDoc). Every transition method below takes the same
+     * parameter for the same reason.
      */
-    fun accept(): AssignmentAccepted {
+    fun accept(at: Instant = Instant.now()): AssignmentAccepted {
         check(status == AssignmentStatus.CREATED) {
             "Assignment ${id.value} cannot be accepted from status $status"
         }
         status = AssignmentStatus.ACCEPTED
+        statusChangedAt = at
         return AssignmentAccepted(orderId = order, driverId = driver)
+    }
+
+    /**
+     * Records that the driver has reached the passenger (ADR-040).
+     * Accepts either [AssignmentStatus.CREATED] or [AssignmentStatus.ACCEPTED]
+     * as its precondition — not [AssignmentStatus.ACCEPTED] alone. See
+     * ADR-040's own "Decision" item 2 for why: the one real path that
+     * creates an Assignment today (accepting a Proposal) never separately
+     * calls [accept], so every Assignment reaching this point in practice
+     * is [AssignmentStatus.CREATED].
+     */
+    fun arrive(at: Instant = Instant.now()): AssignmentArrived {
+        check(status == AssignmentStatus.CREATED || status == AssignmentStatus.ACCEPTED) {
+            "Assignment ${id.value} cannot be marked arrived from status $status"
+        }
+        status = AssignmentStatus.ARRIVED
+        statusChangedAt = at
+        return AssignmentArrived(orderId = order, driverId = driver)
+    }
+
+    /**
+     * Records that the ride itself has begun (ADR-040). Only an
+     * [AssignmentStatus.ARRIVED] assignment may start.
+     */
+    fun start(at: Instant = Instant.now()): AssignmentStarted {
+        check(status == AssignmentStatus.ARRIVED) {
+            "Assignment ${id.value} cannot be started from status $status"
+        }
+        status = AssignmentStatus.IN_PROGRESS
+        statusChangedAt = at
+        return AssignmentStarted(orderId = order, driverId = driver)
+    }
+
+    /**
+     * Records that the ride has finished (ADR-040). Only an
+     * [AssignmentStatus.IN_PROGRESS] assignment may complete. Does not
+     * touch the connected Order's own status (ADR-040's own "Decision"
+     * item 5) — Dispatch does not own that information.
+     */
+    fun complete(at: Instant = Instant.now()): AssignmentCompleted {
+        check(status == AssignmentStatus.IN_PROGRESS) {
+            "Assignment ${id.value} cannot be completed from status $status"
+        }
+        status = AssignmentStatus.COMPLETED
+        statusChangedAt = at
+        return AssignmentCompleted(orderId = order, driverId = driver)
     }
 
     companion object {

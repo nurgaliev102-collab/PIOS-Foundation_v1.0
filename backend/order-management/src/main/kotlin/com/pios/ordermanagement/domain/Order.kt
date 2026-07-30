@@ -1,5 +1,6 @@
 package com.pios.ordermanagement.domain
 
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -49,12 +50,27 @@ import java.util.UUID
  * an active state, and a cancellation may occur only before an order is
  * completed — both enforced by [complete] and [cancel] rejecting any call
  * made outside the SUBMITTED status.
+ *
+ * Pilot readiness (first-pilot feedback: a driver's order card showed no
+ * passenger name and no submission time). [passengerName] follows
+ * [destination]'s own precedent exactly — optional, unvalidated passenger-
+ * provided context, not a typed domain value, since nothing in ratified
+ * documentation says anything about its shape or presence either. A
+ * passenger who has not set a local display name (or an older client that
+ * never sent one) simply produces `null`, same graceful-degradation
+ * already established for [destination]. [createdAt] is set once, by
+ * [submit], from the server's own clock — never passenger-supplied, so it
+ * needs no validation. Both are set once, at submission, and never change
+ * for the rest of the order's lifecycle, mirroring [origin]/[destination]'s
+ * own immutability.
  */
 class Order private constructor(
     val id: OrderId,
     status: OrderStatus,
     val origin: OrderOrigin,
-    val destination: String?
+    val destination: String?,
+    val passengerName: String?,
+    val createdAt: Instant?
 ) {
     var status: OrderStatus = status
         private set
@@ -95,17 +111,22 @@ class Order private constructor(
          * not a transition on an existing order, so this is a factory
          * function rather than an instance method. The order's identifier
          * is generated as part of submission, since no order exists prior
-         * to it. [origin] is required at this point; [destination]
-         * defaults to `null` so every existing call site (this class's
-         * own tests, [com.pios.ordermanagement.application.OrderLifecycleApplicationService])
-         * continues to compile and behave unchanged.
+         * to it. [origin] is required at this point; [destination] and
+         * [passengerName] default to `null` so every existing call site
+         * (this class's own tests,
+         * [com.pios.ordermanagement.application.OrderLifecycleApplicationService])
+         * continues to compile and behave unchanged. [createdAt] is not a
+         * parameter at all — always the server's own clock at the moment
+         * of submission, never caller-supplied.
          */
-        fun submit(origin: OrderOrigin, destination: String? = null): SubmittedOrder {
+        fun submit(origin: OrderOrigin, destination: String? = null, passengerName: String? = null): SubmittedOrder {
             val order = Order(
                 id = OrderId(UUID.randomUUID().toString()),
                 status = OrderStatus.SUBMITTED,
                 origin = origin,
-                destination = destination
+                destination = destination,
+                passengerName = passengerName,
+                createdAt = Instant.now()
             )
             return SubmittedOrder(order = order, event = OrderSubmitted(orderId = order.id))
         }

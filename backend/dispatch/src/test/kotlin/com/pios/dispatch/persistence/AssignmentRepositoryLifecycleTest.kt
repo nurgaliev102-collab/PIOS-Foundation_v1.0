@@ -1,9 +1,12 @@
 package com.pios.dispatch.persistence
 
 import com.pios.dispatch.application.AcceptAssignmentCommand
+import com.pios.dispatch.application.ArriveAssignmentCommand
 import com.pios.dispatch.application.AssignOrderCommand
 import com.pios.dispatch.application.AssignmentNotFoundException
+import com.pios.dispatch.application.CompleteAssignmentCommand
 import com.pios.dispatch.application.DispatchAssignmentApplicationService
+import com.pios.dispatch.application.StartAssignmentCommand
 import com.pios.dispatch.domain.AssignmentId
 import com.pios.dispatch.domain.AssignmentStatus
 import com.pios.dispatch.domain.DriverReference
@@ -44,5 +47,25 @@ class AssignmentRepositoryLifecycleTest {
             service.acceptAssignment(AcceptAssignmentCommand(AssignmentId("never-saved")))
         }
         assertEquals(AssignmentId("never-saved"), exception.assignmentId)
+    }
+
+    // --- Ride lifecycle (ADR-040: Assignment Ride Lifecycle) ---
+
+    @Test
+    fun `an assignment can be restored and carried through the full ride lifecycle`() {
+        val created = service.handle(AssignOrderCommand(OrderReference("order-2"), DriverReference("driver-2")))
+
+        service.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
+        service.startAssignment(StartAssignmentCommand(created.assignment.id))
+        service.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
+
+        assertEquals(AssignmentStatus.COMPLETED, repository.findById(created.assignment.id)?.status)
+    }
+
+    @Test
+    fun `arriving an assignment id that was never saved raises AssignmentNotFoundException`() {
+        assertFailsWith<AssignmentNotFoundException> {
+            service.arriveAssignment(ArriveAssignmentCommand(AssignmentId("never-saved-2")))
+        }
     }
 }

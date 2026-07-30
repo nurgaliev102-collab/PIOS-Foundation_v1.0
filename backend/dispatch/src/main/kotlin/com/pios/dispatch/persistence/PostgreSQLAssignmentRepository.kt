@@ -8,6 +8,8 @@ import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Repository
+import java.sql.Timestamp
+import java.time.Instant
 
 /**
  * The PostgreSQL-backed adapter for [AssignmentRepository] (ADR-025;
@@ -61,6 +63,17 @@ import org.springframework.stereotype.Repository
  * `order_reference` — no filtering by status, since [Assignment]'s own
  * invariant treats every assignment as active regardless of status (see
  * that class's own KDoc).
+ *
+ * ADR-040 (Assignment Ride Lifecycle) adds `status_changed_at`, read and
+ * written below alongside `status`, and extends [reconstruct] to replay
+ * however many transition methods are needed to reach a persisted
+ * [AssignmentStatus.ARRIVED]/[AssignmentStatus.IN_PROGRESS]/[AssignmentStatus.COMPLETED] —
+ * the same replay technique already established for [AssignmentStatus.ACCEPTED],
+ * extended along the same chain. Only the *last* replayed call is given
+ * the real persisted `status_changed_at`; every earlier one in the chain
+ * is immediately superseded by the next, so its own exact timestamp
+ * (necessarily `now()`, since [Assignment.accept]/[Assignment.arrive]/
+ * [Assignment.start] default that way) is never observed.
  */
 @Repository
 class PostgreSQLAssignmentRepository(
@@ -70,26 +83,28 @@ class PostgreSQLAssignmentRepository(
     override fun save(assignment: Assignment) {
         jdbcTemplate.update(
             """
-            INSERT INTO assignments (id, order_reference, driver_reference, status)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status
+            INSERT INTO assignments (id, order_reference, driver_reference, status, status_changed_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, status_changed_at = EXCLUDED.status_changed_at
             """.trimIndent(),
             assignment.id.value,
             assignment.order.orderId,
             assignment.driver.driverId,
-            assignment.status.name
+            assignment.status.name,
+            assignment.statusChangedAt?.let { Timestamp.from(it) }
         )
     }
 
     override fun findById(id: AssignmentId): Assignment? {
         val rows = jdbcTemplate.query(
-            "SELECT id, order_reference, driver_reference, status FROM assignments WHERE id = ?",
+            "SELECT id, order_reference, driver_reference, status, status_changed_at FROM assignments WHERE id = ?",
             { rs, _ ->
                 reconstruct(
                     id = rs.getString("id"),
                     orderReference = rs.getString("order_reference"),
                     driverReference = rs.getString("driver_reference"),
-                    status = AssignmentStatus.valueOf(rs.getString("status"))
+                    status = AssignmentStatus.valueOf(rs.getString("status")),
+                    statusChangedAt = rs.getTimestamp("status_changed_at")
                 )
             },
             id.value
@@ -99,19 +114,26 @@ class PostgreSQLAssignmentRepository(
 
     override fun findByOrder(order: OrderReference): List<Assignment> =
         jdbcTemplate.query(
-            "SELECT id, order_reference, driver_reference, status FROM assignments WHERE order_reference = ?",
+            "SELECT id, order_reference, driver_reference, status, status_changed_at FROM assignments WHERE order_reference = ?",
             { rs, _ ->
                 reconstruct(
                     id = rs.getString("id"),
                     orderReference = rs.getString("order_reference"),
                     driverReference = rs.getString("driver_reference"),
-                    status = AssignmentStatus.valueOf(rs.getString("status"))
+                    status = AssignmentStatus.valueOf(rs.getString("status")),
+                    statusChangedAt = rs.getTimestamp("status_changed_at")
                 )
             },
             order.orderId
         )
 
-    private fun reconstruct(id: String, orderReference: String, driverReference: String, status: AssignmentStatus): Assignment {
+    private fun reconstruct(
+        id: String,
+        orderReference: String,
+        driverReference: String,
+        status: AssignmentStatus,
+        statusChangedAt: Timestamp?
+    ): Assignment {
         val constructor = Assignment::class.java.getDeclaredConstructor(
             String::class.java,
             String::class.java,
@@ -119,8 +141,20 @@ class PostgreSQLAssignmentRepository(
         )
         constructor.isAccessible = true
         val assignment = constructor.newInstance(id, orderReference, driverReference)
-        if (status == AssignmentStatus.ACCEPTED) {
-            assignment.accept()
+        val at: Instant = statusChangedAt?.toInstant() ?: Instant.now()
+        when (status) {
+            AssignmentStatus.CREATED -> {}
+            AssignmentStatus.ACCEPTED -> assignment.accept(at)
+            AssignmentStatus.ARRIVED -> assignment.arrive(at)
+            AssignmentStatus.IN_PROGRESS -> {
+                assignment.arrive()
+                assignment.start(at)
+            }
+            AssignmentStatus.COMPLETED -> {
+                assignment.arrive()
+                assignment.start()
+                assignment.complete(at)
+            }
         }
         return assignment
     }

@@ -104,4 +104,117 @@ class AssignmentTest {
             assignment.accept()
         }
     }
+
+    // --- Ride lifecycle (ADR-040: Assignment Ride Lifecycle) ---
+
+    @Test
+    fun `a newly created assignment has no statusChangedAt yet`() {
+        val assignment = Assignment.create(order, driver).assignment
+
+        assertEquals(null, assignment.statusChangedAt)
+    }
+
+    @Test
+    fun `accepting sets statusChangedAt`() {
+        val assignment = Assignment.create(order, driver).assignment
+
+        assignment.accept()
+
+        assertNotEquals(null, assignment.statusChangedAt)
+    }
+
+    @Test
+    fun `arriving a created assignment transitions it to ARRIVED -- CREATED is a valid precondition, not just ACCEPTED`() {
+        val assignment = Assignment.create(order, driver).assignment
+
+        assignment.arrive()
+
+        assertEquals(AssignmentStatus.ARRIVED, assignment.status)
+    }
+
+    @Test
+    fun `arriving an accepted assignment transitions it to ARRIVED`() {
+        val assignment = Assignment.create(order, driver).assignment
+        assignment.accept()
+
+        assignment.arrive()
+
+        assertEquals(AssignmentStatus.ARRIVED, assignment.status)
+    }
+
+    @Test
+    fun `arriving produces an AssignmentArrived event for the same order and driver`() {
+        val assignment = Assignment.create(order, driver).assignment
+
+        val event = assignment.arrive()
+
+        assertEquals(order, event.orderId)
+        assertEquals(driver, event.driverId)
+    }
+
+    @Test
+    fun `arriving an already-arrived assignment is rejected`() {
+        val assignment = Assignment.create(order, driver).assignment
+        assignment.arrive()
+
+        assertFailsWith<IllegalStateException> {
+            assignment.arrive()
+        }
+    }
+
+    @Test
+    fun `starting requires ARRIVED -- a created assignment cannot start directly`() {
+        val assignment = Assignment.create(order, driver).assignment
+
+        assertFailsWith<IllegalStateException> {
+            assignment.start()
+        }
+    }
+
+    @Test
+    fun `starting an arrived assignment transitions it to IN_PROGRESS`() {
+        val assignment = Assignment.create(order, driver).assignment
+        assignment.arrive()
+
+        val event = assignment.start()
+
+        assertEquals(AssignmentStatus.IN_PROGRESS, assignment.status)
+        assertEquals(order, event.orderId)
+        assertEquals(driver, event.driverId)
+    }
+
+    @Test
+    fun `completing requires IN_PROGRESS -- an arrived assignment cannot complete directly`() {
+        val assignment = Assignment.create(order, driver).assignment
+        assignment.arrive()
+
+        assertFailsWith<IllegalStateException> {
+            assignment.complete()
+        }
+    }
+
+    @Test
+    fun `completing an in-progress assignment transitions it to COMPLETED`() {
+        val assignment = Assignment.create(order, driver).assignment
+        assignment.arrive()
+        assignment.start()
+
+        val event = assignment.complete()
+
+        assertEquals(AssignmentStatus.COMPLETED, assignment.status)
+        assertEquals(order, event.orderId)
+        assertEquals(driver, event.driverId)
+    }
+
+    @Test
+    fun `completing an already-completed assignment is rejected`() {
+        val assignment = Assignment.create(order, driver).assignment
+        assignment.arrive()
+        assignment.start()
+        assignment.complete()
+
+        assertFailsWith<IllegalStateException> {
+            assignment.complete()
+        }
+    }
 }

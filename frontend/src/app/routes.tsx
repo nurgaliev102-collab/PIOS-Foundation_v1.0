@@ -4,6 +4,7 @@ import { PassengerLanding } from '../pages/PassengerLanding'
 import { RideRequest } from '../pages/RideRequest'
 import { Coordinator } from '../pages/Coordinator'
 import { NetworkTest } from '../pages/NetworkTest'
+import { NotFound } from '../pages/NotFound'
 
 /**
  * Route table — Sprint FR-002: Driver Availability.
@@ -32,5 +33,9 @@ export const routes: RouteObject[] = [
   {
     path: '/network-test',
     element: <NetworkTest />,
+  },
+  {
+    path: '*',
+    element: <NotFound />,
   },
 ]

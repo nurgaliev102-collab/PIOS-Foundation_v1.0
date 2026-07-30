@@ -39,9 +39,9 @@ import org.springframework.stereotype.Service
 class OrderSubmissionRequestHandler(
     private val orderLifecycleApplicationService: OrderLifecycleApplicationService
 ) {
-    fun handle(passengerReference: String, destination: String? = null): String {
+    fun handle(passengerReference: String, destination: String? = null, passengerName: String? = null): String {
         val submitted = orderLifecycleApplicationService.submitOrder(
-            SubmitOrderCommand(origin = OrderOrigin(passengerReference), destination = destination)
+            SubmitOrderCommand(origin = OrderOrigin(passengerReference), destination = destination, passengerName = passengerName)
         )
         return submitted.order.id.value
     }
