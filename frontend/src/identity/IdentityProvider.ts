@@ -20,4 +20,18 @@ export interface IdentityProvider {
   createIdentity(): Promise<StoredIdentity>
   /** Associates a just-created driver profile with this device's identity. */
   attachDriver(driverId: string): Promise<StoredIdentity>
+  /**
+   * Sprint 2 (Identity MVP): re-enters using this device's stored pointer —
+   * re-fetches the Identity from the backend rather than trusting
+   * [getStoredIdentity]'s local cache indefinitely, so "повторный вход"
+   * reflects this Identity's real, current state (in particular its
+   * `driverId`) rather than whatever this device happened to cache last.
+   * Returns `null` if no pointer is stored, or if the backend no longer
+   * recognizes the stored identity (it was reset server-side) — either way
+   * the caller should fall back to first-run onboarding. A transient
+   * failure (network down, backend unreachable) does not clear the local
+   * pointer; it resolves with the cached value instead, so a person is not
+   * forced back into onboarding just because connectivity blipped.
+   */
+  restoreIdentity(): Promise<StoredIdentity | null>
 }

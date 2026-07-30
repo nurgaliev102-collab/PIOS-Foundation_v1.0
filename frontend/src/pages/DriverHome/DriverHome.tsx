@@ -148,10 +148,18 @@ function generateDriverId(): string {
  * silently → the person provides only their name → a Driver profile is
  * created and linked to that Identity → main app. Reopening the app
  * restores the same identity+driver from this device's own stored
- * pointer (`identityProvider.getStoredIdentity()`), not from a typed code.
- * This still is not authentication (ADR-038/ADR-039's own explicit scope
- * boundary) — it removes the single-driver ceiling and the technical
- * prompt, it does not prove anyone is who they claim to be.
+ * pointer, not from a typed code. This still is not authentication
+ * (ADR-038/ADR-039's own explicit scope boundary) — it removes the
+ * single-driver ceiling and the technical prompt, it does not prove
+ * anyone is who they claim to be.
+ *
+ * Sprint 2 (Identity MVP): re-entry now calls
+ * `identityProvider.restoreIdentity()`, not the synchronous
+ * `getStoredIdentity()` cache read alone — this device's own pointer is
+ * re-confirmed against the real Identity backend on every reopen (a brief
+ * [isRestoringIdentity] loading state covers the round trip), so a stale
+ * or server-reset pointer does not leave this screen stuck showing a
+ * driver profile the backend no longer recognizes.
  *
  * Sprint IMPLEMENTATION-005 (Driver Proposal MVP) adds this driver's own
  * open Proposals (`GET /v1/proposals?driverId=...`, Dispatch), each with
@@ -175,7 +183,12 @@ function generateDriverId(): string {
  * destination shown, rather than blocking the section they came from.
  */
 export function DriverHome() {
-  const [identity, setIdentity] = useState<StoredIdentity | null>(() => identityProvider.getStoredIdentity())
+  const [identity, setIdentity] = useState<StoredIdentity | null>(null)
+  // Sprint 2 (Identity MVP): true until the mount-time restoreIdentity()
+  // round trip resolves, so a returning driver never sees a flash of the
+  // welcome/onboarding screen before their real, backend-confirmed
+  // identity is known.
+  const [isRestoringIdentity, setIsRestoringIdentity] = useState(true)
   const [isCreatingIdentity, setIsCreatingIdentity] = useState(false)
   const [onboardingError, setOnboardingError] = useState<string | null>(null)
 
@@ -200,6 +213,23 @@ export function DriverHome() {
   const [assignmentActions, setAssignmentActions] = useState<Record<string, AssignmentActionStatus>>({})
 
   const driverId = identity?.driverId ?? null
+
+  // Sprint 2 (Identity MVP): runs once, on mount only — re-entry always
+  // re-confirms this device's own identity against the real backend
+  // instead of trusting `getStoredIdentity()`'s local cache indefinitely.
+  useEffect(() => {
+    let active = true
+    identityProvider.restoreIdentity().then((restored) => {
+      if (!active) {
+        return
+      }
+      setIdentity(restored)
+      setIsRestoringIdentity(false)
+    })
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     if (!driverId) {
@@ -447,6 +477,21 @@ export function DriverHome() {
         showFeedback('Не удалось поделиться')
       }
     }
+  }
+
+  // Sprint 2 (Identity MVP): covers the restoreIdentity() round trip on
+  // mount — shown before Phase 1's own check, so a returning driver never
+  // sees a flash of the welcome screen while their real identity is still
+  // being confirmed against the backend.
+  if (isRestoringIdentity) {
+    return (
+      <div className={styles.screen}>
+        <Header />
+        <main className={styles.content}>
+          <Spinner label="Загрузка…" />
+        </main>
+      </div>
+    )
   }
 
   // Phase 1: no Identity yet on this device — welcome, explain, and create

@@ -86,3 +86,41 @@ If architectural inconsistencies are found:
 
 Never replace documented architecture with assumptions.
 Always cite files when making architectural claims.
+
+## Development Workflow
+
+Every implementation task follows this workflow:
+
+### Stage 1 — Architect
+Required when:
+- domain model changes;
+- bounded context boundaries may change;
+- a new ADR may be required;
+- responsibilities between modules are affected.
+
+Architect either:
+- approves the direction,
+- requests an ADR,
+- or blocks the change with architectural justification.
+
+### Stage 2 — Developer
+Implements the approved solution.
+
+Rules:
+- minimal necessary change;
+- preserve architecture;
+- update tests when behaviour changes;
+- never invent execution results.
+
+### Stage 3 — QA Reviewer
+Verifies the completed work.
+
+Checks:
+- end-to-end user scenarios;
+- regressions;
+- test results;
+- limitations that could not be verified.
+
+A task is considered complete only after QA Reviewer reports it as passed or explicitly lists the remaining limitations. The Architect never modifies production code.
+
+The QA Reviewer never modifies production code.
