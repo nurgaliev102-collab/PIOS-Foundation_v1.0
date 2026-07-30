@@ -33,6 +33,20 @@ import org.springframework.context.annotation.Configuration
  * Dispatch's topology: Order Management never publishes to this
  * exchange, never redeclares it with different parameters, and never
  * administers it beyond its own binding.
+ *
+ * ADR-041 (Order Lifecycle Synchronization with Assignment Completion)
+ * adds a *second*, entirely independent queue/DLQ/binding for
+ * `assignment.completed` -- [assignmentCompletedQueue],
+ * [assignmentCompletedDeadLetterQueue], [assignmentCompletedBinding] --
+ * rather than a second binding on the existing
+ * [orderManagementFromDispatchQueue]. ADR-041 Decision item 5 explains
+ * why: [AssignmentAcceptedListener.onMessage] hard-requires
+ * `eventType == "AssignmentAccepted"` and throws on anything else, so
+ * sharing the queue would dead-letter every AssignmentCompleted message
+ * until that listener were rewritten into a type dispatcher -- a larger,
+ * unrelated change to a working, already-verified path. The two
+ * subscriptions stay independently observable and independently
+ * drainable as a result.
  */
 @Configuration
 class RabbitMQConsumerTopologyConfiguration {
@@ -75,10 +89,40 @@ class RabbitMQConsumerTopologyConfiguration {
             .to(dispatchEventsExchange)
             .with(ASSIGNMENT_ACCEPTED_ROUTING_KEY)
 
+    /** ADR-041's own dead-letter queue for AssignmentCompleted -- see this class's own KDoc. */
+    @Bean
+    fun assignmentCompletedDeadLetterQueue(): Queue =
+        QueueBuilder.durable(ASSIGNMENT_COMPLETED_DEAD_LETTER_QUEUE_NAME).build()
+
+    /**
+     * ADR-041's own consumer queue for AssignmentCompleted, independent of
+     * [orderManagementFromDispatchQueue] -- see this class's own KDoc for
+     * why. Same dead-letter wiring shape as the existing queue.
+     */
+    @Bean
+    fun assignmentCompletedQueue(): Queue =
+        QueueBuilder.durable(ASSIGNMENT_COMPLETED_QUEUE_NAME)
+            .withArgument("x-dead-letter-exchange", "")
+            .withArgument("x-dead-letter-routing-key", ASSIGNMENT_COMPLETED_DEAD_LETTER_QUEUE_NAME)
+            .build()
+
+    /** Binds only the already-ratified routing key for AssignmentCompleted (ADR-041) -- never a wildcard. */
+    @Bean
+    fun assignmentCompletedBinding(
+        assignmentCompletedQueue: Queue,
+        dispatchEventsExchange: TopicExchange
+    ): Binding =
+        BindingBuilder.bind(assignmentCompletedQueue)
+            .to(dispatchEventsExchange)
+            .with(ASSIGNMENT_COMPLETED_ROUTING_KEY)
+
     companion object {
         const val PRODUCER_EXCHANGE_NAME = "dispatch.events"
         const val QUEUE_NAME = "order-management.from-dispatch"
         const val DEAD_LETTER_QUEUE_NAME = "order-management.from-dispatch.dlq"
         const val ASSIGNMENT_ACCEPTED_ROUTING_KEY = "assignment.accepted"
+        const val ASSIGNMENT_COMPLETED_QUEUE_NAME = "order-management.from-dispatch.assignment-completed"
+        const val ASSIGNMENT_COMPLETED_DEAD_LETTER_QUEUE_NAME = "order-management.from-dispatch.assignment-completed.dlq"
+        const val ASSIGNMENT_COMPLETED_ROUTING_KEY = "assignment.completed"
     }
 }

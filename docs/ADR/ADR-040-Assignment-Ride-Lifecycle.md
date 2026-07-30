@@ -4,6 +4,15 @@
 
 Accepted
 
+Amended in part by [ADR-041: Order Lifecycle Synchronization with
+Assignment Completion](ADR-041-Order-Lifecycle-Synchronization-with-Assignment-Completion.md)
+(Sprint 3, "Order Consistency"). ADR-041 changes **only** Decision item 5
+below — a completed ride now does transition its Order to `COMPLETED`,
+via Order Management's own consumption of `AssignmentCompleted`. Decision
+items 1, 2, 3, 4 and 6, and everything in Context and Consequences, remain
+in force exactly as written. The original text of item 5 is left unchanged
+below for the record (`CLAUDE.md`: "Never Delete Documentation").
+
 ## Context
 
 Sprint "PIOS — Full Ride Lifecycle" asked for a driver to progress a ride
@@ -72,6 +81,11 @@ consequences.
    infrastructure work this sprint's own acceptance criterion (two phones,
    full button sequence, live polling) does not require. Tracked as
    deferred, not silently dropped.
+   *(Editorial note added after ratification: this item is amended by
+   ADR-041, which discharges exactly the deferral described here. Ride
+   progress states still do not move to `Order` — only the
+   `SUBMITTED → COMPLETED` transition on receipt of `AssignmentCompleted`
+   is added. The text above is retained unmodified.)*
 6. No ride history screen is built. "The order stops being active" is
    satisfied at the UI layer only: a driver's own list stops offering
    actions once its Assignment reaches `COMPLETED`.
