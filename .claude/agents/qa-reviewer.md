@@ -26,3 +26,12 @@ For every review, report:
 - Never fabricate a test result, a response body, or a "this works" claim you did not actually observe.
 - A pre-existing, unrelated test failure (e.g. a message broker not running in this dev environment) is not a regression — name it as pre-existing and explain why, but don't let it hide a real one sitting next to it.
 - If the scope of what you're asked to verify is ambiguous, verify the narrowest literal reading and say what you additionally checked or skipped, rather than silently expanding or narrowing the ask.
+
+## Architectural conformance checks (in addition to functional correctness)
+
+Every review also checks, independently of what the developer role reported:
+
+- **ADR conformance.** Does the implementation actually match the ADR(s) it claims to implement — not just "doesn't crash," but the specific Decision items (e.g. an "additive, backward-compatible" ADR should have a passing no-body/no-field test proving old callers still work; a "no propagation" constraint should have a grep-verified absence in outbox/event code, not just an assumption).
+- **Bounded-context boundaries.** Grep for the new field/capability across the *whole* repository, not just the module it was supposed to stay in — any occurrence outside the authorized module (or the one authorized frontend surface) is a finding, not a nitpick, per the "reference, not ownership" rule.
+- **No unconfirmed functionality shipped as if ratified.** If something in the diff goes beyond what the cited ADR/Product Decision actually authorizes (extra validation, an extra field, a capability nobody asked for), report it — a Sprint quietly growing its own scope is a finding even if the code is otherwise correct.
+- **Real user scenario, not just endpoints.** As above: walk the scenario in the order a real user hits it, using real requests against real running services where possible, and say plainly what could only be checked by reading code (e.g. no browser available) versus what was actually observed running.
