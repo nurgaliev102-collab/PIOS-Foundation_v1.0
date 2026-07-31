@@ -33,10 +33,10 @@ Among the eight modules (MODULE_STRUCTURE.md Section 3), four conceptual relatio
 
 ### Dispatch
 
-- **Owned responsibilities.** The assignment decision, exclusively.
-- **Information it controls.** Assignment information.
-- **Operations it provides.** Assign Order, Accept Assignment, Retrieve Assignment; OrderAssigned, AssignmentAccepted.
-- **Operations it does not own.** An order's own status (Order Management); a driver's availability (Driver Management).
+- **Owned responsibilities.** The assignment decision, exclusively; and, per [ADR-040](ADR/ADR-040-Assignment-Ride-Lifecycle.md), the ride's own progress as an Assignment lifecycle — arrival, ride start, and ride completion.
+- **Information it controls.** Assignment information, including the assignment's own ride-progress status.
+- **Operations it provides.** Assign Order, Accept Assignment, Retrieve Assignment; Arrive, Start and Complete Assignment (ADR-040 Decision item 4); OrderAssigned, AssignmentAccepted, AssignmentArrived, AssignmentStarted, AssignmentCompleted.
+- **Operations it does not own.** An order's own status (Order Management) — including the `SUBMITTED → COMPLETED` transition that Order Management performs on its own authority when it consumes AssignmentCompleted (ADR-041 Decision item 2); a driver's availability (Driver Management); payment or pricing information (Payments; ADR-034 Part 1).
 
 ### Driver Management
 
@@ -103,7 +103,8 @@ No method, payload, or schema is defined for any contract below.
 - **Provider Module.** Dispatch.
 - **Consumer Module.** Order Management.
 - **Purpose.** Make an order's assignment outcome known so Order Management can track the order's status.
-- **Conceptual interaction.** Order Management relies on OrderAssigned and AssignmentAccepted (EVENT_CATALOG.md Sections 6, 9; APPLICATION_ARCHITECTURE.md Section 4) to reflect an order's progression through its lifecycle (DOMAIN_MODEL.md Section 12).
+- **Conceptual interaction.** Order Management relies on OrderAssigned, AssignmentAccepted and AssignmentCompleted (EVENT_CATALOG.md Sections 6, 9; APPLICATION_ARCHITECTURE.md Section 4) to reflect an order's progression through its lifecycle (DOMAIN_MODEL.md Section 12).
+- **Extension (Sprint 3 — Order Consistency; [ADR-041](ADR/ADR-041-Order-Lifecycle-Synchronization-with-Assignment-Completion.md)).** AssignmentCompleted was added to this contract by ADR-041, which makes it *"the single trigger that completes an Order"* (Decision item 1). What crosses the boundary remains a plain order identifier resolved locally — never a foreign key, never a server-to-server call on the write path, and never a copy of Dispatch-owned state (ADR-041 Decision item 2; ADR-005, ADR-019, ADR-027). Receiving it grants Order Management no authority over the Assignment, and Dispatch gains no awareness that Order Management listens. **AssignmentArrived and AssignmentStarted are deliberately excluded from this contract**: ADR-041 Decision item 4 binds only `assignment.completed` alongside the existing `assignment.accepted`, because ride-progress states stay exclusively on Assignment.
 
 ### Contract: Any Module → Notifications and Analytics (Generic)
 
@@ -121,7 +122,7 @@ No command signature or API format is defined here.
 
 ## 7. Event Interaction Principles
 
-Only the six events already catalogued in EVENT_CATALOG.md are described below; none is added.
+This section originally read: *"Only the six events already catalogued in EVENT_CATALOG.md are described below; none is added."* That constraint is unchanged in substance — this table still adds no event of its own and remains strictly downstream of EVENT_CATALOG.md. It now describes nine events rather than six, because EVENT_CATALOG.md Section 6 itself has since grown: the three Dispatch ride-lifecycle events (ADR-040, ADR-041) are added below as part of Sprint 3's Documentation Hygiene item (see Section 14). The four Proposal events EVENT_CATALOG.md Section 6 catalogued in Sprint 1 are still not listed here, deliberately: that catalog's own text records that none of them "is published outside Dispatch's own process boundary today," so none crosses a module interaction boundary this document governs. That gap is recorded here as examined, not overlooked.
 
 | Event | Event Owner | Meaning | Possible Consumers |
 | --- | --- | --- | --- |
@@ -130,6 +131,9 @@ Only the six events already catalogued in EVENT_CATALOG.md are described below; 
 | OrderCompleted | Order Management | An order has reached completion. | None specifically established beyond the owner; Notifications and Analytics generically. |
 | OrderAssigned | Dispatch | Dispatch has connected an order to a driver. | Order Management (Contract, Section 5); the Driver actor externally (API_SPECIFICATION.md Section 8); Notifications and Analytics generically. |
 | AssignmentAccepted | Dispatch | A proposed assignment has been confirmed. | Order Management (Contract, Section 5); Notifications and Analytics generically. |
+| AssignmentArrived | Dispatch | The driver has reached the passenger. | None. Not bound by any consumer (ADR-041 Decision item 4); Notifications and Analytics generically. |
+| AssignmentStarted | Dispatch | The ride itself has begun. | None. Not bound by any consumer (ADR-041 Decision item 4); Notifications and Analytics generically. |
+| AssignmentCompleted | Dispatch | The ride connected to an assignment has finished. | Order Management (Contract, Section 5) — the single trigger for `SUBMITTED → COMPLETED`; Notifications and Analytics generically. |
 | DriverAvailabilityChanged | Driver Management | A driver's declared readiness has changed. | Dispatch (Contract, Section 5); Notifications and Analytics generically. |
 
 No event schema is defined here.
@@ -168,6 +172,7 @@ A contract evolves only through a decision that explicitly supersedes it, consis
 | 10. Evolution Strategy | ADR-010, ADR-015, ADR-021 | Section 16 | — | Section 8 | — | — | Section 9 | Section 10 |
 | 12. MVP Contract Verification and Transport Selection (Addendum) | ADR-027, ADR-028 | — | Section 10 | — | — | — | — |
 | 13. Notifications Module Boundary Confirmation (Addendum) | ADR-017, ADR-018, ADR-025, ADR-026, ADR-033 | — | — | Section 3 (Notifications) | — | Section 9 | — | — |
+| 14. Dispatch Ride Lifecycle Events (Addendum) | ADR-003, ADR-040, ADR-041 | — | — | Section 3 (Dispatch, Order Management) | Sections 12–13 | Sections 6, 9, 11 | — | — |
 
 ## 12. MVP Contract Verification and Transport Selection (Addendum)
 
@@ -176,5 +181,11 @@ Until ADR-028's selected transport category (message broker for events, REST for
 ## 13. Notifications Module Boundary Confirmation (Addendum)
 
 [ADR-033: Notifications Module and Event Consumption Boundary](ADR/ADR-033-Notifications-Module-and-Event-Consumption-Boundary.md) confirmed that Notifications is entitled, per ADR-017/ADR-018/ADR-026, to become an independently deployable module, but found no approved document authorizes a specific event-consumption relationship for it — the generic contract in Section 5 and the generic entries in Section 7's table remain exactly as stated, unaltered. ADR-033 also reaffirmed that ADR-025's own database-technology gate for Notifications remains a separate, still-open prerequisite. This addendum does not change any contract in Sections 4, 5, or 7; it records that the silence they already stated on Notifications' specific consumption was examined, not overlooked, and remains open pending a product/business decision.
+
+## 14. Dispatch Ride Lifecycle Events (Addendum)
+
+[ADR-040: Assignment Ride Lifecycle](ADR/ADR-040-Assignment-Ride-Lifecycle.md) placed ride progress (`ARRIVED`, `IN_PROGRESS`, `COMPLETED`) on Dispatch's own Assignment rather than on Order Management's Order, and [ADR-041](ADR/ADR-041-Order-Lifecycle-Synchronization-with-Assignment-Completion.md) then made exactly one of the resulting events — AssignmentCompleted — a cross-domain business event. Neither ADR's documentation impact had been reflected here; ADR-041's own Consequences named that debt explicitly (*"`INTERFACE_CONTRACTS.md` Section 5's 'Contract: Dispatch → Order Management' names only `OrderAssigned` and `AssignmentAccepted`, with Section 7's event table matching"*) and assigned it to Sprint 3's Documentation Hygiene item. This addendum records that it has now been discharged: Section 4 (Dispatch), Section 5 (Contract: Dispatch → Order Management), and Section 7's table are brought into agreement with EVENT_CATALOG.md Sections 6 and 9.
+
+**What this addendum does not do.** It establishes no new contract and no new consumer. AssignmentArrived and AssignmentStarted acquire no consumer here, and Order Management acquires no authority over Assignment. Order Management's own `SUBMITTED → COMPLETED` transition remains its own, exercised on its own aggregate through its own application service (ADR-041 Decision items 2 and 6) — Dispatch provides a fact, never an instruction (EVENT_CATALOG.md Section 2). The reverse direction remains equally unchanged: no Order Management → Dispatch contract exists, and this document creates none; ADR-041 Decision item 3 records that Dispatch has no cancellation capability to propagate and that Order cancellation is not communicated to Dispatch.
 
 Where this document is silent — including on which specific events Notifications and Analytics consume (examined, and left open pending a product decision, by ADR-033) — no lower-priority document may fill that silence by invention; resolution requires the relevant higher-priority document to be extended first, per the authority order established in PROJECT_CONSTITUTION.md Section 5.
