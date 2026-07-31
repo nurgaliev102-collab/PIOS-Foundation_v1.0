@@ -155,6 +155,26 @@ class ProposalTest {
         }
     }
 
+    // --- Acceptance: stated price (ADR-042) ---
+
+    @Test
+    fun `accepting an open proposal with a stated price records it`() {
+        val proposal = Proposal.propose(order, driver).proposal
+
+        proposal.accept(statedPrice = "500")
+
+        assertEquals("500", proposal.statedPrice)
+    }
+
+    @Test
+    fun `accepting an open proposal without a stated price leaves it null`() {
+        val proposal = Proposal.propose(order, driver).proposal
+
+        proposal.accept()
+
+        assertEquals(null, proposal.statedPrice)
+    }
+
     // --- Decline ---
 
     @Test
@@ -206,6 +226,15 @@ class ProposalTest {
         }
     }
 
+    @Test
+    fun `declining an open proposal never sets a stated price`() {
+        val proposal = Proposal.propose(order, driver).proposal
+
+        proposal.decline()
+
+        assertEquals(null, proposal.statedPrice)
+    }
+
     // --- Lapse ---
 
     @Test
@@ -255,5 +284,14 @@ class ProposalTest {
         assertFailsWith<IllegalStateException> {
             proposal.lapse()
         }
+    }
+
+    @Test
+    fun `lapsing an open proposal never sets a stated price`() {
+        val proposal = Proposal.propose(order, driver).proposal
+
+        proposal.lapse()
+
+        assertEquals(null, proposal.statedPrice)
     }
 }

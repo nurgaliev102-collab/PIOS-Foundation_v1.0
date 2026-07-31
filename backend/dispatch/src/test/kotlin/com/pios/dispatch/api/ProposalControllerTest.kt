@@ -80,6 +80,59 @@ class ProposalControllerTest {
         assertEquals("ACCEPTED", response.body?.status)
     }
 
+    // --- Stated price (ADR-042) ---
+
+    @Test
+    fun `accepting a proposal with a statedPrice returns it in the response`() {
+        val created = controller.createProposal(ProposeDriverRequest("order-3c", "driver-1")).body!!
+
+        val response = controller.acceptProposal(created.proposalId, AcceptProposalRequest(statedPrice = "750"))
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals("750", response.body?.statedPrice)
+    }
+
+    @Test
+    fun `accepting a proposal with no request body succeeds with no statedPrice and still creates an Assignment`() {
+        val created = controller.createProposal(ProposeDriverRequest("order-3d", "driver-1")).body!!
+
+        val response = controller.acceptProposal(created.proposalId)
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals("ACCEPTED", response.body?.status)
+        assertEquals(null, response.body?.statedPrice)
+        assertEquals(1, assignmentRepository.findByOrder(OrderReference("order-3d")).size)
+    }
+
+    @Test
+    fun `accepting a proposal with a request body but no statedPrice field succeeds with no statedPrice`() {
+        val created = controller.createProposal(ProposeDriverRequest("order-3e", "driver-1")).body!!
+
+        val response = controller.acceptProposal(created.proposalId, AcceptProposalRequest())
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals(null, response.body?.statedPrice)
+    }
+
+    @Test
+    fun `accepting a proposal with a blank statedPrice returns 400`() {
+        val created = controller.createProposal(ProposeDriverRequest("order-3f", "driver-1")).body!!
+
+        val response = controller.acceptProposal(created.proposalId, AcceptProposalRequest(statedPrice = "   "))
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
+    @Test
+    fun `declining a proposal never returns a statedPrice`() {
+        val created = controller.createProposal(ProposeDriverRequest("order-3g", "driver-1")).body!!
+
+        val response = controller.declineProposal(created.proposalId)
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals(null, response.body?.statedPrice)
+    }
+
     @Test
     fun `accepting a proposal through REST also creates an Assignment for the same order and driver`() {
         val created = controller.createProposal(ProposeDriverRequest("order-3b", "driver-1")).body!!

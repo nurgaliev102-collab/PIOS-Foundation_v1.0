@@ -58,4 +58,35 @@ class PostgreSQLProposalRepositoryTest {
 
         assertTrue(repository.findByOrder(order).any { it.id == created.proposal.id })
     }
+
+    // --- Stated price (ADR-042) ---
+
+    /**
+     * The trap this test exists to catch: `save`'s upsert is
+     * `INSERT ... ON CONFLICT (id) DO UPDATE SET ...`. A row is first
+     * inserted here at propose time (no price yet), then updated at accept
+     * time (when the price is set) -- the second [save] call therefore
+     * always takes the `DO UPDATE` path, exactly like a real accept
+     * request. Reading back through a **freshly constructed**
+     * [PostgreSQLProposalRepository] -- not the [repository] field used to
+     * write it -- rules out any possibility that the value merely survived
+     * in the writing object's own memory rather than actually being
+     * persisted to the `stated_price` column.
+     */
+    @Test
+    fun `a stated price set on a second save (accept, after the row already exists) is readable from a fresh repository instance`() {
+        val order = OrderReference("postgres-order-price-1")
+        val driver = DriverReference("postgres-driver-price-1")
+        val created = Proposal.propose(order, driver)
+        repository.save(created.proposal)
+
+        created.proposal.accept(statedPrice = "999")
+        repository.save(created.proposal)
+
+        val freshRepository = PostgreSQLProposalRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
+        val reloaded = freshRepository.findById(created.proposal.id)
+
+        assertEquals("999", reloaded?.statedPrice)
+        assertEquals(ProposalStatus.ACCEPTED, reloaded?.status)
+    }
 }

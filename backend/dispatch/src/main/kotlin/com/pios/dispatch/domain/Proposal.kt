@@ -35,15 +35,48 @@ class Proposal private constructor(
         private set
 
     /**
+     * The price the driver stated when accepting this proposal (ADR-042,
+     * Decision Revised R2/R5) — `null` for every proposal that has not
+     * (yet, or ever) been accepted with one supplied. A plain, opaque,
+     * unvalidated string: PIOS does not compute, parse, compare, or assign
+     * any meaning to it beyond carrying whatever the driver typed, exactly
+     * as [com.pios.ordermanagement.domain.Order.destination]'s own
+     * documented reasoning already establishes for a different optional
+     * field (ADR-042 R5, Open Question 2).
+     *
+     * Deliberately **not** a primary-constructor parameter — see this
+     * class's own KDoc precedent in [Assignment.statusChangedAt]:
+     * [com.pios.dispatch.persistence.PostgreSQLProposalRepository.reconstruct]
+     * restores a persisted [Proposal] by reflectively invoking this class's
+     * private constructor by parameter count and type; widening that
+     * constructor would break that lookup at runtime, silently, in a path
+     * no unit test that avoids the database would catch. Set exactly once,
+     * by [accept], and never modified afterwards — [decline] and [lapse]
+     * never touch it (ADR-042 Open Question 6: no amount on a refusal).
+     */
+    var statedPrice: String? = null
+        private set
+
+    /**
      * Accepts this proposal, per the driver's own confirming act. Only an
      * [ProposalStatus.OPEN] proposal may be accepted; an already-resolved
      * proposal cannot be accepted again.
+     *
+     * [statedPrice] is the amount the driver stated at the moment of
+     * acceptance (ADR-042, Decision Revised R2) — optional, defaulting to
+     * `null` so every existing caller that does not supply one keeps
+     * working unchanged. Also accepted here (not only as a fresh value) so
+     * [com.pios.dispatch.persistence.PostgreSQLProposalRepository.reconstruct]
+     * can replay a previously persisted amount during reconstruction,
+     * mirroring [Assignment.accept]'s own `at` parameter precedent
+     * (ADR-040).
      */
-    fun accept(): ProposalAccepted {
+    fun accept(statedPrice: String? = null): ProposalAccepted {
         check(status == ProposalStatus.OPEN) {
             "Proposal ${id.value} cannot be accepted from status $status"
         }
         status = ProposalStatus.ACCEPTED
+        this.statedPrice = statedPrice
         return ProposalAccepted(orderId = order, driverId = driver)
     }
 

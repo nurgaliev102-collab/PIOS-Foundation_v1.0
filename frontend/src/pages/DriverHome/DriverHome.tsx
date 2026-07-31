@@ -52,6 +52,11 @@ interface ProposalListItem {
   orderId: string
   driverId: string
   status: 'OPEN' | 'ACCEPTED' | 'DECLINED' | 'LAPSED'
+  // ADR-042 (Stated Ride Price Minimal Model): the amount this driver
+  // stated when accepting, if any. Always `null` for a proposal that is
+  // not yet ACCEPTED or was accepted with no price entered — PIOS never
+  // fills this in on its own (Decision Revised R4.1).
+  statedPrice: string | null
 }
 
 // Sprint 6A (Human Interface Polish): the raw status values above are this
@@ -205,6 +210,11 @@ export function DriverHome() {
   const [proposalsStatus, setProposalsStatus] = useState<Status>('loading')
   const [proposals, setProposals] = useState<ProposalListItem[]>([])
   const [proposalActions, setProposalActions] = useState<Record<string, ProposalActionStatus>>({})
+  // ADR-042 (Stated Ride Price Minimal Model): the price a driver is
+  // typing for a given open proposal, keyed by proposalId, before they
+  // tap "Принять". Sent only on the accept action (never on decline) and
+  // only if non-blank -- see `respondToProposal`.
+  const [priceInputs, setPriceInputs] = useState<Record<string, string>>({})
   const [orderDetails, setOrderDetails] = useState<Record<string, OrderListItem>>({})
   // ADR-040 (Assignment Ride Lifecycle): keyed by orderId, one entry per
   // ACCEPTED proposal that already has an Assignment — an OPEN proposal
@@ -422,6 +432,22 @@ export function DriverHome() {
     }
   }
 
+  // ADR-042 (Stated Ride Price Minimal Model): the accept request body,
+  // included only when the driver actually typed something. An empty
+  // input sends no body at all -- identical to this call before this ADR,
+  // and to what `respondToProposal('decline', ...)` still always sends
+  // (Open Question 6: a price may never accompany a decline).
+  function acceptRequestInit(proposalId: string): RequestInit {
+    const statedPrice = (priceInputs[proposalId] ?? '').trim()
+    if (!statedPrice) {
+      return {}
+    }
+    return {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ statedPrice }),
+    }
+  }
+
   async function respondToProposal(proposalId: string, action: 'accept' | 'decline') {
     if (proposalActions[proposalId] === 'submitting') {
       return
@@ -431,6 +457,7 @@ export function DriverHome() {
       const updated = await request<ProposalListItem>(`/v1/proposals/${proposalId}/${action}`, {
         method: 'POST',
         baseUrl: DISPATCH_BASE_URL,
+        ...(action === 'accept' ? acceptRequestInit(proposalId) : {}),
       })
       setProposals((current) => current.map((proposal) => (proposal.proposalId === proposalId ? updated : proposal)))
       setProposalActions((current) => ({ ...current, [proposalId]: 'idle' }))
@@ -675,6 +702,28 @@ export function DriverHome() {
               {order?.passengerName && <p className={styles.status}>Пассажир: {order.passengerName}</p>}
               {order?.destination && <p className={styles.status}>Куда: {order.destination}</p>}
               {time && <p className={styles.status}>Заказ создан: {time}</p>}
+              {/* ADR-042 (Stated Ride Price Minimal Model): read-back of
+                  the amount this driver themselves stated on acceptance --
+                  from the accept response and/or the same 3s poll that
+                  already refreshes every other field on this card, so it
+                  survives a reload (R7.2). Nothing is shown if none was
+                  entered. */}
+              {proposal.status === 'ACCEPTED' && proposal.statedPrice && (
+                <p className={styles.status}>Стоимость: {proposal.statedPrice}</p>
+              )}
+
+              {proposal.status === 'OPEN' && (
+                <input
+                  className={styles.driverCodeInput}
+                  type="text"
+                  value={priceInputs[proposal.proposalId] ?? ''}
+                  placeholder="Стоимость (необязательно)"
+                  aria-label="Стоимость поездки"
+                  onChange={(event) =>
+                    setPriceInputs((current) => ({ ...current, [proposal.proposalId]: event.target.value }))
+                  }
+                />
+              )}
 
               {proposal.status === 'OPEN' && (
                 <div className={styles.proposalActions}>

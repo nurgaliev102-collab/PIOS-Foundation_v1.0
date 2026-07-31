@@ -191,6 +191,15 @@ class ProposalApplicationServiceTest {
     }
 
     @Test
+    fun `accepting a proposal with a statedPrice persists it through the repository`() {
+        val proposal = service.handle(ProposeDriverCommand(order, driver)).proposal
+
+        service.acceptProposal(proposal, AcceptProposalCommand(proposal.id, statedPrice = "300"))
+
+        assertEquals("300", repository.findById(proposal.id)?.statedPrice)
+    }
+
+    @Test
     fun `accepting an already-accepted proposal through the service is rejected`() {
         val proposal = service.handle(ProposeDriverCommand(order, driver)).proposal
         proposal.accept()

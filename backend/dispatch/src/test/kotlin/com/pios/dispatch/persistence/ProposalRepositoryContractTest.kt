@@ -116,6 +116,41 @@ abstract class ProposalRepositoryContractTest {
 
         assertEquals(emptyList(), repository.findByDriver(DriverReference("contract-test-findbydriver-never-proposed")))
     }
+
+    // --- Stated price (ADR-042) ---
+
+    @Test
+    fun `a proposal accepted with a stated price can be found with that price intact`() {
+        val repository = createRepository()
+        val created = Proposal.propose(OrderReference("contract-test-order-price-1"), DriverReference("contract-test-driver-price-1"))
+        created.proposal.accept(statedPrice = "1200")
+
+        repository.save(created.proposal)
+
+        assertEquals("1200", repository.findById(created.proposal.id)?.statedPrice)
+    }
+
+    @Test
+    fun `a proposal accepted without a stated price can be found with a null price`() {
+        val repository = createRepository()
+        val created = Proposal.propose(OrderReference("contract-test-order-price-2"), DriverReference("contract-test-driver-price-2"))
+        created.proposal.accept()
+
+        repository.save(created.proposal)
+
+        assertNull(repository.findById(created.proposal.id)?.statedPrice)
+    }
+
+    @Test
+    fun `a declined proposal never has a stated price`() {
+        val repository = createRepository()
+        val created = Proposal.propose(OrderReference("contract-test-order-price-3"), DriverReference("contract-test-driver-price-3"))
+        created.proposal.decline()
+
+        repository.save(created.proposal)
+
+        assertNull(repository.findById(created.proposal.id)?.statedPrice)
+    }
 }
 
 class InMemoryProposalRepositoryContractTest : ProposalRepositoryContractTest() {

@@ -69,8 +69,11 @@ Architecture Decision Records. Every change to an architectural decision is reco
 | [ADR-035](adr/ADR-035-Pre-Commitment-Business-Fact-Aggregate-Boundary.md) | Pre-Commitment Business Fact — Aggregate Boundary | Proposed |
 | [ADR-036](adr/ADR-036-Proposal-Assignment-Shared-Transaction.md) | Proposal↔Assignment Shared Transaction | **Accepted** |
 | [ADR-037](ADR/ADR-037-Network-Management-Module-Bounded-Context-Extension.md) | Network Management Module — Bounded Context Extension | Proposed |
+| [ADR-042](ADR/ADR-042-Stated-Ride-Price-Minimal-Model.md) | Stated Ride Price — Minimal MVP Model and Ownership Boundary | Proposed (one Product Owner input outstanding) |
 
 Note (Sprint 1 — Foundation Stabilization): this table is also missing ADR-027 through ADR-034, which exist as real files under `docs/ADR/` but were never added here — a pre-existing indexing gap found during this sprint's own documentation-sync work, left uncorrected here since it is outside this sprint's authorized scope; recorded for Sprint 2.
+
+Note (Sprint 4): the gap recorded above was never closed, and has since widened — ADR-038, ADR-039, ADR-040 and ADR-041 also exist as real files under `docs/ADR/` without a row here. Sprint 4 added the ADR-042 row above rather than rebuilding the whole index, which would exceed this sprint's own authorized scope. The files themselves, not this table, remain authoritative.
 
 ## Domain
 

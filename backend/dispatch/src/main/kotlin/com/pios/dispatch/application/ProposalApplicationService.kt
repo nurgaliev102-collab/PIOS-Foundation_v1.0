@@ -114,7 +114,7 @@ class ProposalApplicationService(
         require(proposal.id == command.proposalId) {
             "Proposal ${proposal.id.value} does not match command target ${command.proposalId.value}"
         }
-        val event = proposal.accept()
+        val event = proposal.accept(command.statedPrice)
         proposalRepository.save(proposal)
         return event
     }

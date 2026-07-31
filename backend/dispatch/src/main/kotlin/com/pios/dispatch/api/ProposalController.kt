@@ -100,10 +100,15 @@ class ProposalController(
         }
 
     @PostMapping("/{proposalId}/accept")
-    fun acceptProposal(@PathVariable proposalId: String): ResponseEntity<ProposalResponse> =
+    fun acceptProposal(
+        @PathVariable proposalId: String,
+        @RequestBody(required = false) request: AcceptProposalRequest? = null
+    ): ResponseEntity<ProposalResponse> =
         try {
             val id = ProposalId(proposalId)
-            val outcome = proposalAssignmentOrchestrationService.acceptProposal(AcceptProposalCommand(id))
+            val outcome = proposalAssignmentOrchestrationService.acceptProposal(
+                AcceptProposalCommand(id, request?.statedPrice)
+            )
             ResponseEntity.ok(outcome.proposal.toResponse())
         } catch (ex: ProposalNotFoundException) {
             ResponseEntity.notFound().build()
@@ -185,5 +190,5 @@ class ProposalController(
         }
 
     private fun Proposal.toResponse(): ProposalResponse =
-        ProposalResponse(id.value, order.orderId, driver.driverId, status.name)
+        ProposalResponse(id.value, order.orderId, driver.driverId, status.name, statedPrice)
 }
