@@ -59,19 +59,21 @@ This section is operational (how to run what already exists), not architectural 
 
 ### 1. PostgreSQL
 
-Start a local PostgreSQL server, then create one database per backend module that needs one (`passenger-experience` needs none — it has no datasource):
+Start a local PostgreSQL server, then create one database per backend module used by the pilot flow (`network-management` also has its own datasource, but per ADR-037 it is isolated from the pilot flow and not covered here):
 
 ```sql
 CREATE DATABASE pios_driver_management;
 CREATE DATABASE pios_order_management;
 CREATE DATABASE pios_dispatch;
+CREATE DATABASE pios_identity;
+CREATE DATABASE pios_passenger_experience;
 ```
 
 Each module's `src/main/resources/application.yml` expects to connect as `postgres` with no password, at `127.0.0.1:5432` — adjust the `spring.datasource` block in the relevant module if your local instance differs. No environment-variable override exists for these values today; they are only changeable by editing `application.yml` directly.
 
 ### 2. RabbitMQ
 
-Start a local RabbitMQ server on the default port (`5672`), with the default `guest`/`guest` credentials — every module's `application.yml` expects exactly this, with no override mechanism today. Spring Boot does not fail to start if RabbitMQ is unreachable (connections and topology declaration retry in the background per Spring AMQP's own default behavior) — but outbox events will never actually publish or be consumed until it is running.
+Start a local RabbitMQ server on the default port (`5672`), with the default `guest`/`guest` credentials — three of the five pilot-flow backend modules (`driver-management`, `order-management`, `dispatch`) expect exactly this, with no override mechanism today; `identity` and `passenger-experience` have no RabbitMQ configuration at all. Spring Boot does not fail to start if RabbitMQ is unreachable (connections and topology declaration retry in the background per Spring AMQP's own default behavior) — but outbox events will never actually publish or be consumed until it is running.
 
 ### 3. Migrations
 
@@ -83,12 +85,14 @@ From `backend/`, each module is independently runnable (no module depends on ano
 
 ```
 cd backend
-./gradlew :driver-management:bootRun    # http://localhost:8081
-./gradlew :order-management:bootRun     # http://localhost:8083
-./gradlew :dispatch:bootRun             # http://localhost:8084
+./gradlew :driver-management:bootRun       # http://localhost:8081
+./gradlew :passenger-experience:bootRun    # http://localhost:8082
+./gradlew :order-management:bootRun        # http://localhost:8083
+./gradlew :dispatch:bootRun                # http://localhost:8084
+./gradlew :identity:bootRun                # http://localhost:8086
 ```
 
-`passenger-experience` (port 8082) is not required for the Coordinator/Driver dispatch flow described below — it backs no route the frontend currently calls directly.
+All five modules above are used by the current pilot flow: `passenger-experience` records the connection created when a passenger opens a driver's invitation link (`POST /v1/connections`, called from `PassengerLanding.tsx`), and `identity` backs a driver's own self-onboarding (`POST /v1/identities`, `POST /v1/identities/{id}/driver`, called from `DriverHome.tsx`'s `BackendIdentityProvider`). `network-management` (port 8085) is not part of this flow (ADR-037) and is not started here.
 
 ### 5. Frontend startup
 
@@ -98,17 +102,21 @@ npm install
 npm run dev       # http://localhost:5173
 ```
 
-`api/apiClient.ts` and each page that calls a second/third backend module default to the ports above (`8081`, `8083`, `8084`) with no `.env` file required; override via `VITE_API_BASE_URL`/`VITE_ORDER_MANAGEMENT_BASE_URL`/`VITE_DISPATCH_BASE_URL` only if your local setup differs. See [frontend/README.md](frontend/README.md) for details.
+`api/apiClient.ts` and each page that calls a second (or further) backend module default to the ports above with no `.env` file required; override only if your local setup differs:
 
-### 6. One manual setup step: seeding a Driver
+| Variable | Module | Default |
+| --- | --- | --- |
+| `VITE_API_BASE_URL` | driver-management | `http://localhost:8081` |
+| `VITE_PASSENGER_EXPERIENCE_BASE_URL` | passenger-experience | `http://localhost:8082` |
+| `VITE_ORDER_MANAGEMENT_BASE_URL` | order-management | `http://localhost:8083` |
+| `VITE_DISPATCH_BASE_URL` | dispatch | `http://localhost:8084` |
+| `VITE_IDENTITY_BASE_URL` | identity | `http://localhost:8086` |
 
-No REST endpoint anywhere in this repository creates a new Driver — `POST /v1/drivers/{id}/availability` requires the driver to already exist (it returns 404 otherwise), and no "Register Driver" capability is documented or ratified anywhere (`docs/DOMAIN_MODEL.md`, `docs/API_SPECIFICATION.md`). This is a genuine, named gap, not a defect this repository's own code can silently paper over without inventing an undocumented business capability. Until a real Driver onboarding capability is designed and ratified, seed the one driver the frontend's `CURRENT_DRIVER_ID` constant (`frontend/src/pages/DriverHome/currentDriver.ts`) already assumes, directly:
+See [frontend/README.md](frontend/README.md) for details.
 
-```sql
-INSERT INTO drivers (id, availability) VALUES ('ILDAR001', 'AVAILABLE');
-```
+### 6. Driver onboarding
 
-Run this once against `pios_driver_management`, after that module's own Flyway migration has created the `drivers` table (i.e., after its first successful startup).
+No manual seed step exists or is required: a driver creates their own profile the first time they open the app (`/`, `DriverHome.tsx`) — an Identity is created silently through the real `identity` module, then the driver provides only their name and `POST /v1/drivers` creates their Driver profile, linked to that Identity (ADR-038 Identity Module Foundation, ADR-039 Identity-Driver Association). The manual `INSERT INTO drivers ...` step and the `CURRENT_DRIVER_ID` constant this section used to document no longer exist in this repository.
 
 ## Current Status
 
