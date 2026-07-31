@@ -12,6 +12,22 @@ export default defineConfig({
   // not affect `vite dev` or the production build's own behavior.
   preview: {
     allowedHosts: ['.trycloudflare.com'],
+    // Pilot Infrastructure Decision (docs/PIOS_PILOT_INFRASTRUCTURE_DECISION.md):
+    // route the five pilot backend services through this single preview
+    // origin so one Cloudflare Tunnel can reach all of them. Paths are
+    // forwarded unchanged (no rewrite) -- the backends already serve these
+    // exact paths. `network-management`'s own `/v1/connections` (port 8085)
+    // is intentionally not routed here; it is excluded from the pilot flow
+    // (ADR-037), so there is no collision with passenger-experience's
+    // `/v1/connections` below.
+    proxy: {
+      '/v1/drivers': 'http://localhost:8081',
+      '/v1/connections': 'http://localhost:8082',
+      '/v1/orders': 'http://localhost:8083',
+      '/v1/proposals': 'http://localhost:8084',
+      '/v1/assignments': 'http://localhost:8084',
+      '/v1/identities': 'http://localhost:8086',
+    },
   },
   plugins: [
     react(),
