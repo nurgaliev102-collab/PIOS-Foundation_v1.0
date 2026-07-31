@@ -22,7 +22,7 @@ const ORDER_MANAGEMENT_BASE_URL = import.meta.env.VITE_ORDER_MANAGEMENT_BASE_URL
 // step for this, invited-passenger path.
 const DISPATCH_BASE_URL = import.meta.env.VITE_DISPATCH_BASE_URL ?? 'http://localhost:8084'
 
-type Step = 'loading' | 'not-found' | 'form' | 'confirmed'
+type Step = 'loading' | 'not-found' | 'error' | 'form' | 'confirmed'
 type ProposalStatus = 'proposing' | 'proposed' | 'error'
 
 interface SubmitOrderResponse {
@@ -118,21 +118,28 @@ export function RideRequest() {
   const [proposalStatus, setProposalStatus] = useState<ProposalStatus | null>(null)
   const [rideStatus, setRideStatus] = useState<RideStatus>('OPEN')
 
-  useEffect(() => {
-    let active = true
+  // Sprint 6 (Passenger Entry-Path Failure Handling): pulled out of the
+  // effect (mirrors DriverHome.tsx's own loadDriver) so the same fetch can
+  // also be re-run by the "Попробовать снова" retry action below, without
+  // duplicating this logic.
+  function loadInvitation(active: boolean, forDriverCode: string) {
     setStep('loading')
-    getInvitationByDriverCode(driverCode ?? '').then((result) => {
+    getInvitationByDriverCode(forDriverCode).then((result) => {
       if (!active) {
         return
       }
-      if (!result) {
+      if (result.status === 'not-found') {
         setStep('not-found')
+        return
+      }
+      if (result.status === 'error') {
+        setStep('error')
         return
       }
       // First-pilot feedback: a passenger who reloads this page must land
       // back on their current order, not a blank form — same driver, same
       // browser, an order already placed through `localCurrentOrder.ts`.
-      const existingOrderId = getCurrentOrderId(driverCode ?? '')
+      const existingOrderId = getCurrentOrderId(forDriverCode)
       if (existingOrderId) {
         setOrderId(existingOrderId)
         setStep('confirmed')
@@ -140,6 +147,11 @@ export function RideRequest() {
       }
       setStep('form')
     })
+  }
+
+  useEffect(() => {
+    let active = true
+    loadInvitation(active, driverCode ?? '')
     return () => {
       active = false
     }
@@ -283,6 +295,19 @@ export function RideRequest() {
             Ссылка недействительна или водитель ещё не зарегистрирован. Уточните ссылку у водителя, который вас
             пригласил.
           </p>
+        )}
+
+        {step === 'error' && (
+          <div className={styles.errorBlock}>
+            <p className={styles.error} role="alert">
+              Не удалось загрузить приглашение. Проверьте связь с интернетом.
+            </p>
+            <ActionButton
+              label="Попробовать снова"
+              variant="secondary"
+              onClick={() => loadInvitation(true, driverCode ?? '')}
+            />
+          </div>
         )}
 
         {step === 'form' && (

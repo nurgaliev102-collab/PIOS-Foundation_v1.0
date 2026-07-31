@@ -18,7 +18,7 @@ const MAX_NAME_LENGTH = 50
 // driver's own invitation link.
 const PASSENGER_EXPERIENCE_BASE_URL = import.meta.env.VITE_PASSENGER_EXPERIENCE_BASE_URL ?? 'http://localhost:8082'
 
-type Step = 'loading' | 'not-found' | 'invited' | 'onboarding' | 'confirmed'
+type Step = 'loading' | 'not-found' | 'error' | 'invited' | 'onboarding' | 'confirmed'
 
 const FAQ_ITEMS: Array<{ question: string; answer: string }> = [
   {
@@ -61,28 +61,40 @@ export function PassengerLanding() {
   const [name, setName] = useState('')
   const [nameError, setNameError] = useState<string | null>(null)
 
-  useEffect(() => {
-    let active = true
+  // Sprint 6 (Passenger Entry-Path Failure Handling): pulled out of the
+  // effect (mirrors DriverHome.tsx's own loadDriver) so the same fetch can
+  // also be re-run by the "Попробовать снова" retry action below, without
+  // duplicating this logic.
+  function loadInvitation(active: boolean, forDriverCode: string) {
     setStep('loading')
-    getInvitationByDriverCode(driverCode ?? '').then((result) => {
+    getInvitationByDriverCode(forDriverCode).then((result) => {
       if (!active) {
         return
       }
-      if (!result) {
+      if (result.status === 'not-found') {
         setStep('not-found')
         return
       }
-      setInvitation(result)
+      if (result.status === 'error') {
+        setStep('error')
+        return
+      }
+      setInvitation(result.invitation)
       const existingIdentity = getPassengerIdentity()
       if (existingIdentity) {
         // Returning passenger: the welcome screen and its instructions
         // already did their job on a previous visit — go straight to
         // creating an order.
-        navigate(`/i/${driverCode ?? ''}/request`, { replace: true })
+        navigate(`/i/${forDriverCode}/request`, { replace: true })
         return
       }
       setStep('invited')
     })
+  }
+
+  useEffect(() => {
+    let active = true
+    loadInvitation(active, driverCode ?? '')
     return () => {
       active = false
     }
@@ -145,6 +157,19 @@ export function PassengerLanding() {
 
         {step === 'not-found' && (
           <p className={styles.status}>Ссылка недействительна или водитель ещё не зарегистрирован.</p>
+        )}
+
+        {step === 'error' && (
+          <div className={styles.errorBlock}>
+            <p className={styles.error} role="alert">
+              Не удалось загрузить приглашение. Проверьте связь с интернетом.
+            </p>
+            <ActionButton
+              label="Попробовать снова"
+              variant="secondary"
+              onClick={() => loadInvitation(true, driverCode ?? '')}
+            />
+          </div>
         )}
 
         {step === 'invited' && invitation && (
