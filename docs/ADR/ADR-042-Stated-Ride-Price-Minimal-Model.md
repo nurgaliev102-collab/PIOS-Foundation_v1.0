@@ -66,6 +66,48 @@ Question 8 recorded as a limitation rather than a blocker.
 
 ---
 
+**Amendment 2026-08-01 (round 3) — Driver MVP v1.1; the passenger now sees
+the stated price; the round-2 passenger exclusion is superseded by the same
+authority that made it.**
+
+The Product Owner has ratified **PIOS Driver MVP v1.1**: *«пассажир видит
+предложенную цену; решение — вне PIOS, до появления отдельного механизма»* —
+the passenger sees the stated price; the decision happens outside PIOS,
+until a separate mechanism exists. This directly reverses the round-2 ruling
+of 2026-07-31 ("the passenger does not see the amount"), and the reversal is
+recorded openly rather than absorbed, because the earlier ruling was itself
+ratified in this document and is cited by name in eleven places.
+
+Consequently, and in full in **"Amendment 2026-08-01 (round 3)"** at the end
+of this document:
+
+- **R9** places passenger visibility, and establishes that it requires **no
+  backend change, no contract change and no migration** — the field is
+  already delivered on the passenger's own query (`ProposalResponse.kt`
+  lines 20–26; `ProposalController.kt` lines 183, 192–193), by R8's own
+  single-response-shape decision.
+- **R10** records what v1.1 deliberately does **not** add: no passenger-side
+  control of any kind, no «Отказаться», no negotiation. The future Product
+  Decision that would govern one is named — **«Управление жизненным циклом
+  заказа» (Order Lifecycle Management)** — and is unstarted. **ADR-043 is
+  not created and its number is not reserved.**
+- **R11** records this Sprint's basis: hypothesis **H3**
+  (`PIOS_PRODUCT_HYPOTHESES.md`), not an `E-NNN` evidence entry, under the
+  append-only rule the Product Owner ratified in `PIOS_PRODUCT_EVIDENCE.md`
+  on the same date.
+- **Eleven in-place markers, M1–M12** (M5 examined and found to need none),
+  are placed on every passage the reversal falsifies or reframes. Nothing is
+  deleted. The index is at the end of the round-3 amendment.
+- **Open Questions 2 and 8 remain open.** Neither is closed by this ruling,
+  and R11/Risks record that passenger visibility *raises* the cost of
+  leaving Open Question 2 (currency) unanswered rather than resolving it.
+
+Status of this ADR after the round-3 amendment: **Accepted for
+implementation**, with Open Questions 2, 8 and 10 open, none of them
+blocking v1.1.
+
+---
+
 ## Context
 
 Sprint 4's stated goal is to bring PIOS closer to a first commercial MVP without expanding the domain. The Product Owner's constraints for this sprint are explicit: no two-sided price negotiation, no new `Negotiation` aggregate, no Payments module, no change to bounded-context boundaries without genuine necessity, and a minimal solution compatible with future evolution.
@@ -229,6 +271,22 @@ These are business rules. They are recorded unanswered rather than assumed. Ques
    field is structurally ignored by it. What this ruling can and cannot
    mean, given that PIOS has no authorization layer at all, is analysed in
    **R8** below rather than assumed here.
+
+   > **M1 — SUPERSEDED 2026-08-01 (Amendment round 3, R9).** The round-2
+   > resolution immediately above — "no, the passenger does not see the
+   > amount" — is **no longer in force.** The Product Owner has ruled the
+   > opposite for Driver MVP v1.1: *«пассажир видит предложенную цену;
+   > решение — вне PIOS, до появления отдельного механизма»* — the passenger
+   > sees the stated price; the decision happens outside PIOS, until a
+   > separate mechanism exists. Open Question 5 is therefore **re-resolved,
+   > positively**: the passenger sees it, on the confirmed-order screen,
+   > after acceptance. The text above is preserved verbatim and unedited
+   > because it is the record of what was ratified between 2026-07-31 and
+   > 2026-08-01, and because the *reason* it gave for caution — that an
+   > amount a passenger responds to slides toward bilateral negotiation — is
+   > not withdrawn but answered: **R10** forbids any passenger-side response
+   > mechanism at all, so there is nothing for the passenger to respond
+   > *with* inside PIOS. Visibility without a control is not negotiation.
 
 6. **May a driver state an amount when *declining* a Proposal?** **Not open — derived as "no" from an existing constraint, not invented.** A price attached to a refusal is a counter-offer, and counter-offers plus bilateral price negotiation are excluded by this sprint's own standing constraints (restated by the Product Owner on 2026-07-31: "без Negotiation"). R2 therefore admits the amount on `accept` only. This is recorded as a derivation with its citation rather than as an architectural choice, so that a future reader can check the reasoning instead of having to trust it.
 
@@ -735,6 +793,22 @@ Payment custody, settlement, commission, refunds, disputes, price estimation, dy
 > stated amounts across proposals (R4.3), and displaying the amount on the
 > passenger's screen (Open Question 5, unanswered).
 
+> **M2 — SUPERSEDED IN ITS FINAL CLAUSE ONLY, 2026-08-01 (Amendment round 3,
+> R9/R10).** *"Displaying the amount on the passenger's screen"* is **no
+> longer unauthorised**: it is precisely what Driver MVP v1.1 authorises,
+> and Open Question 5 is no longer unanswered (M1). Everything else in the
+> 2026-07-31 block above stands **unchanged and in full force** — in
+> particular comparing or ranking stated amounts (R4.3) remains the single
+> most important prohibition in this ADR, and every backend exclusion listed
+> above still holds, because v1.1 changes **no backend file at all** (R9).
+> Newly unauthorised, and named here because passenger visibility is exactly
+> what makes them tempting: any passenger-side control that responds to the
+> amount — accept, confirm, refuse, «Отказаться», counter-offer, comment —
+> and any PIOS behaviour made conditional on such a response. Those belong
+> to the future Product Decision **«Управление жизненным циклом заказа»**
+> (R10, Open Question 10), which is unstarted and holds no reserved ADR
+> number.
+
 ## Related ADRs
 
 - [ADR-002: Dispatch Engine](ADR-002-Dispatch-Engine.md) — the standing exclusion of pricing rules from architectural scope; unmodified and directly applied by Decision item 1.
@@ -819,6 +893,21 @@ not):
 > the Architect treats the price as "system data". I would ask: **what
 > happens after the driver has stated the price?**
 
+> **M3 — REFRAMED 2026-08-01 (Amendment round 3).** The quotation above is
+> and remains **verbatim and unedited** — a record of what the Product Owner
+> actually said on 2026-07-31, which is not something a later ruling can
+> revise. What has changed is its *reach*: its **second line** (*«Нет,
+> пассажир в Sprint 4 стоимость не видит и не взаимодействует с ней»*) was
+> a Sprint 4 ruling and no longer governs beyond Sprint 4. For Driver MVP
+> v1.1 the same authority ruled that the passenger **does** see the stated
+> price, while continuing to see no mechanism for interacting with it — so
+> the second half of that sentence («не взаимодействует с ней») survives
+> intact and is now carried by **R10**, and only the first half («не видит»)
+> is superseded, by **R9**. Lines 1, 3 and 4 of the quotation are untouched
+> and still binding: driver input is in scope, all price-agreement /
+> price-change / negotiation logic remains excluded, and the value remains a
+> stated fact.
+
 ### What this ruling settles
 
 1. **Driver price-input UI is in scope.** → the write side is reachable in
@@ -827,6 +916,14 @@ not):
 2. **The passenger neither sees nor interacts with it.** → Open Question 5
    resolved, negatively. No passenger-side UI change. See R8 for the limit
    of what this can be enforced to mean in Sprint 4.
+
+   > **M4 — SUPERSEDED IN HALF, 2026-08-01 (Amendment round 3, R9/R10).**
+   > "Neither sees" is superseded: the passenger **does** see the stated
+   > price in Driver MVP v1.1 (R9). "Nor interacts with it" is **not**
+   > superseded — it is reaffirmed and given teeth by R10, which authorises
+   > no passenger-side control of any kind. "No passenger-side UI change" is
+   > superseded: v1.1's entire implementation is one passenger-side UI
+   > change, in `RideRequest.tsx`, and nothing else anywhere.
 3. **All negotiation, price-agreement and price-change logic is excluded.**
    → R4.3 (no comparison/ordering/aggregation), R5 (set once, no update
    path), R6 (no `Negotiation` aggregate) and Open Question 6 (no amount on
@@ -939,6 +1036,21 @@ That is a closed loop for the interval the sprint is actually about, and an
 honest dead end afterwards. Both halves are stated because only the first
 half would be flattering.
 
+> **M6 — REFRAMED 2026-08-01 (Amendment round 3, R9).** Two clauses in the
+> boxed answer above are **no longer accurate** for Driver MVP v1.1: *"and
+> only by them"* and *"never reaches the passenger."* Under v1.1 the stated
+> price is read by **both** the driver who stated it and the passenger whose
+> order it is, through two read paths that both already exist
+> (`?driverId=` and `?orderId=`, one shared `toResponse()` —
+> `ProposalController.kt` lines 183, 192–193). Everything else in the answer
+> survives **exactly as written and is not weakened**: the value still never
+> leaves Dispatch, never enters an event or outbox record, never reaches
+> Order Management, and still influences no PIOS behaviour whatsoever
+> (R4.5–R4.7 all stand). The change is one additional *reader of an existing
+> response field*, not an additional *destination for the fact*. The
+> "honest dead end afterwards" half is unchanged (R7.4, M-unmarked — v1.1
+> does not add a history surface for either role).
+
 ### R7.3 Why this is not a write-only field, and what it would take to make it one
 
 The original Risk 3 ("the field may be unreachable in the running product")
@@ -1027,6 +1139,20 @@ only, is exactly the right size for the ruling's "system data, for now"
 framing.** Every wider destination is either forbidden by an already-ratified
 document or serves no consumer that exists.
 
+> **M7 — REFRAMED 2026-08-01 (Amendment round 3, R9).** Read *"with a
+> driver-facing read-back only"* as **"with a driver-facing and
+> passenger-facing read-back"** from Driver MVP v1.1 onward. The
+> load-bearing half of this conclusion — **confinement to `Proposal`** — is
+> not merely unchanged but is what makes v1.1 cost nothing architecturally:
+> the passenger reads the *same field on the same aggregate through the same
+> already-existing query*, so no fact is copied, no new home is created, no
+> new contract appears, and `INTERFACE_CONTRACTS.md` Section 3 is still
+> untouched. Each destination-by-destination "Confirmed: no" above **still
+> holds without exception**: Order Management, `Assignment`, the availability
+> projection, any Assignment Policy, Notifications, Payments,
+> `network-management`, `identity`, `driver-management` and
+> `passenger-experience` all remain untouched by v1.1.
+
 ## R8. What "the passenger does not see it" can and cannot mean in Sprint 4
 
 The ruling is unambiguous about intent. Recorded here is the gap between
@@ -1066,6 +1192,28 @@ needs its own ADR. This is the architecture role's interpretation of the
 ruling's reach, not a quotation of it, and the Product Owner may overrule it;
 overruling it means either accepting the per-branch projection with its
 disclosed cost, or gating Sprint 4 on an authorization decision.
+
+> **M8 — SUPERSEDED IN ONE CLAUSE; THE REST STANDS AND IS NOW LOAD-BEARING.
+> 2026-08-01 (Amendment round 3, R9).** Superseded: *"no passenger UI
+> change."* Driver MVP v1.1 is exactly that change. **Not superseded, and
+> now the reason v1.1 is nearly free:** the decision *"single response
+> shape; no per-caller projection."* Because Sprint 4 declined to withhold
+> the field from the `?orderId=` branch, the amount is **already** in the
+> JSON the passenger's browser receives today — verified in current code:
+> `ProposalResponse.kt` lines 20–26 (the field, defaulted `null`) and
+> `ProposalController.kt` lines 183 and 192–193 (the `?orderId=` branch maps
+> through the same `toResponse()` that carries it). v1.1 therefore requires
+> **no backend change, no contract change, no migration, no new endpoint** —
+> only a render. Note the honest sequence, recorded so nobody reads it
+> backwards: this convenience was **not** designed for; it is a side effect
+> of a decision taken for a different reason (ADR-004 resource consistency),
+> and the section above correctly described the transmission as a
+> *limitation* at the time. **Also not superseded: the authorization
+> finding.** PIOS still has no authentication and no authorization
+> (ADR-038), so the value remains readable by anyone who can call either
+> query branch. What changes is only that one of those readers is now
+> intended. **Open Question 8 therefore stays open** and is not closed by
+> v1.1 — see M12.
 
 ## Developer Scope (Sprint 4, revised — supersedes the prior list)
 
@@ -1154,6 +1302,23 @@ re-states an amount; any history, receipt or earnings screen; any
 comparison, sorting or aggregation of amounts anywhere, backend or frontend
 (R4.3 — the single most important prohibition in this ADR).
 
+> **M9 — SUPERSEDED IN ONE CLAUSE ONLY, 2026-08-01 (Amendment round 3, R9).**
+> *"Any change to `RideRequest.tsx`"* is no longer out of scope — under
+> Driver MVP v1.1 it is the **only** file in scope, and the change is a
+> render plus one widened response interface, nothing else. Every other
+> exclusion in this list stands **verbatim and in full force for v1.1**, and
+> several are strengthened by it: `Coordinator.tsx` and
+> `PassengerLanding.tsx` unchanged; `Assignment`, `AssignmentStatus`,
+> `AssignOrderCommand`, `Assignment.create`, the availability projection,
+> every outbox record and event payload, and every Assignment Policy
+> unchanged; `order-management`, `passenger-experience`,
+> `driver-management`, `network-management` and `identity` unchanged; no
+> endpoint that edits, clears or re-states an amount; no history, receipt or
+> earnings screen; and no comparison, sorting or aggregation anywhere. v1.1
+> additionally touches **no backend file whatsoever** — the whole Sprint 4
+> backend scope listed above is complete and is not reopened. The Developer
+> Scope for v1.1 is in the round-3 amendment, not here.
+
 ## Definition of Done (revised)
 
 1. A driver can enter an amount on an open order card and accept it in one
@@ -1171,6 +1336,17 @@ comparison, sorting or aggregation of amounts anywhere, backend or frontend
    `null` amount.
 6. The passenger screen shows no amount and no price-related control; its
    accept-status polling behaves identically to before.
+
+   > **M10 — SUPERSEDED IN HALF, 2026-08-01 (Amendment round 3, R9/R10).**
+   > This was a correct Definition-of-Done item for Sprint 4 and it was met.
+   > For Driver MVP v1.1 it is replaced by the v1.1 Definition of Done in
+   > the round-3 amendment, which **inverts the first half** — the passenger
+   > screen now shows the amount, when one was stated — and **keeps the
+   > second half exactly**: still **no price-related control**, nothing to
+   > press, nothing to answer (R10). The polling clause also survives:
+   > v1.1 adds no new request, no new endpoint and no new interval; it reads
+   > one more field from the response the same 3-second poll already
+   > receives (`RideRequest.tsx` line 171).
 7. No event payload, outbox record or cross-module contract changed;
    `order-management` has zero diff.
 8. No code anywhere compares, sorts, sums or parses a stated amount.
@@ -1193,6 +1369,17 @@ comparison, sorting or aggregation of amounts anywhere, backend or frontend
   displayed there.** R8. Not remediable in Sprint 4 by any proportionate
   means, because PIOS has no authorization layer at all. Recorded as Open
   Question 8.
+
+  > **M11 — REFRAMED 2026-08-01 (Amendment round 3, R9).** This risk is
+  > **dissolved in its stated form** — the gap it described was between
+  > transmission and display, and Driver MVP v1.1 closes that gap from the
+  > display side: the amount is now transmitted **and** displayed, on
+  > purpose. What is **not** dissolved is the underlying condition that
+  > produced it: PIOS still has no authorization layer, so the value is
+  > still readable by any caller of either query branch, not only by the
+  > passenger it is intended for. That residue stays recorded as Open
+  > Question 8 (M12) and is restated in the v1.1 Risks section, so that
+  > "the risk was closed" is not mistaken for "the exposure was closed."
 - **Unchanged and still principal — several priced proposals per order is
   structurally the shape of an auction.** R4.3 forbids the comparison that
   would make it one, and the round-2 ruling's blanket exclusion of
@@ -1215,6 +1402,17 @@ comparison, sorting or aggregation of amounts anywhere, backend or frontend
    meaningfully until PIOS has an authorization model (ADR-038's explicit
    non-scope). R8 records the recommendation (single shape, no per-branch
    projection) and its disclosed cost.
+
+   > **M12 — REFRAMED, NOT CLOSED, 2026-08-01 (Amendment round 3, R9).** The
+   > question as phrased — *"withheld from the passenger's own payload"* —
+   > is **moot for the passenger**, who is now the intended reader (R9). It
+   > is **not closed**, and is restated in the only form that still bites:
+   > *should a stated amount be readable by callers who are neither the
+   > driver who stated it nor the passenger whose order it is?* Today it is,
+   > because PIOS has no authentication and no authorization anywhere
+   > (ADR-038). Still not answerable without an authorization model, still a
+   > recorded limitation rather than a blocker, and explicitly **not**
+   > resolved by v1.1.
 9. **Does a driver need to see previously stated amounts after a ride
    completes?** Not asked and not answered by the round-2 ruling. No ride
    history, receipt or earnings screen exists anywhere in the product
@@ -1265,3 +1463,416 @@ production code was changed by it.
 - `frontend/src/pages/` — complete page inventory: `Coordinator`,
   `NetworkTest`, `PassengerLanding`, `NotFound`, `RideRequest`,
   `DriverHome`. No history, receipt or earnings screen exists.
+
+---
+
+# Amendment 2026-08-01 (round 3) — Driver MVP v1.1
+
+Append-only. Nothing above is deleted, edited in substance, or rewritten.
+The in-place additions are the round-3 status pointer at the top of this
+document and the eleven markers **M1–M4, M6–M12** (M5 examined and found to
+need none — see the marker index at the end of this amendment). Every
+superseded passage remains readable in its original wording, because what
+was ratified between 2026-07-31 and 2026-08-01 is part of this decision's
+record (`CLAUDE.md`: "Never Delete Documentation").
+
+## Product Decision (Product Owner, 2026-08-01) — PIOS Driver MVP v1.1
+
+Authority: Product Owner. This is a business ruling, not an architectural
+one (ADR-002): it decides what a passenger sees and what PIOS does not yet
+offer them, neither of which the architecture role may decide.
+
+Recorded exactly as ratified:
+
+> **пассажир видит предложенную цену; решение — вне PIOS, до появления
+> отдельного механизма**
+
+Working translation, for readers of this repository who do not read Russian
+(the Russian above is authoritative; this rendering is not):
+
+> The passenger sees the stated price; the decision happens outside PIOS,
+> until a separate mechanism exists.
+
+This wording is exact and is used verbatim throughout this amendment,
+including in the Developer Scope and in `IMPLEMENTATION_PLAN_DRIVER_MVP_V1_1.md`.
+It replaces an earlier drafting of this decision that said the passenger
+"sees the amount and can decide." That phrasing was wrong in a way worth
+recording rather than quietly fixing: **"can decide" implies a decision
+control inside the product, and no such control exists or is authorised.**
+PIOS shows a number; whatever the passenger then does about it — call the
+driver, agree, refuse, do nothing — happens entirely outside PIOS and leaves
+no trace in it. Anyone reading "can decide" would have been entitled to
+implement a button. R10 exists so that nobody does.
+
+Three further confirmations, each recorded because each closes something
+this amendment would otherwise have had to guess:
+
+1. **«Отказаться» is not implemented.** No passenger-side refusal control of
+   any kind is built in v1.1.
+2. **ADR-043 is not created, and its number is not reserved.** The next ADR
+   written in this repository takes 043, whatever its subject. No
+   placeholder file exists and none may be created.
+3. **The future Product Decision is named: «Управление жизненным циклом
+   заказа» (Order Lifecycle Management).** It is unstarted, unscheduled and
+   unscoped. Naming it is not scheduling it; it exists so that a future
+   reader finding "not implemented" here knows *where* the question went.
+
+## R9. The passenger sees the stated price.
+
+**The decision.** From Driver MVP v1.1, the passenger sees the price the
+driver stated, on the confirmed-order screen, once the driver has accepted.
+*Пассажир видит предложенную цену; решение — вне PIOS, до появления
+отдельного механизма.*
+
+### R9.1 This requires no backend change, no contract change, no migration
+
+Stated first because it is the most consequential fact about this sprint and
+it is verifiable in current code, not asserted:
+
+- `backend/dispatch/src/main/kotlin/com/pios/dispatch/api/ProposalResponse.kt`
+  lines 20–26 — `statedPrice: String? = null` is already a field of the one
+  response type every Proposal endpoint returns. Its own KDoc (lines 13–18)
+  already records that the field is delivered on **both**
+  `GET /v1/proposals?driverId=…` and `GET /v1/proposals?orderId=…`.
+- `backend/dispatch/src/main/kotlin/com/pios/dispatch/api/ProposalController.kt`
+  line 183 (the `?orderId=` branch) and lines 192–193 (`toResponse`, which
+  passes `statedPrice`) — the passenger's own query already carries the
+  value today.
+- `frontend/src/pages/RideRequest/RideRequest.tsx` line 171 already polls
+  that exact query every 3 seconds and already parses the result; it simply
+  declares a local interface (lines 32–34) that names only `status`.
+
+So the entire delta is **one frontend file**: widen a local TypeScript
+interface, keep the value from the accepted item, render it. R8's
+single-response-shape decision — taken in Sprint 4 for ADR-004 resource
+consistency, and explicitly *not* for this — is what makes it free. That
+sequence is recorded honestly in M8: this is a side effect being used, not a
+prescience being claimed.
+
+### R9.2 Why this is not a new architectural decision, and what it therefore does not need
+
+Checked against this repository's own rules rather than assumed:
+
+- **No new cross-module contract.** The passenger's screen already calls
+  Dispatch directly (`RideRequest.tsx` lines 23, 171, 185) — the
+  direct-module-call precedent ADR-040's Consequences ratified.
+  `INTERFACE_CONTRACTS.md` Section 3's four justified relationships are
+  unchanged.
+- **No new fact, no copy, no second home.** The passenger reads the *same*
+  attribute of the *same* `Proposal` aggregate, through the *same* endpoint.
+  R2's "one fact, one home" is preserved literally. Nothing is written to
+  `Order`, nothing is added to `Assignment`, no event is created or
+  versioned (R4.6, Decision item 6 — every payload stays v1).
+- **No ownership change.** R3's whole analysis is untouched: Dispatch
+  remains the custodian of a record of an utterance and owns no pricing
+  capability. A second reader of a stored fact changes nothing about who
+  decides its meaning.
+- **No new module, no new aggregate, no new endpoint, no migration, no
+  boundary change.** All six bounded contexts keep their current ownership;
+  `network-management` and `identity` remain isolated in both directions.
+- **Every R4 prohibition binds the passenger screen exactly as it binds the
+  driver screen.** No parsing the value as a number, no currency symbol
+  added by the UI, no rounding, no formatting, no comparison with anything,
+  no aggregation, and nothing in PIOS made conditional on it (R4.1–R4.8).
+  The passenger sees the string the driver typed, or nothing.
+
+### R9.3 Timing: the passenger sees a price only after acceptance
+
+A direct consequence of R5, stated so it is not later mistaken for a defect
+and "fixed" by inventing an estimate. `statedPrice` is set **only** inside
+`Proposal.accept()` (`Proposal.kt` lines 57, 74, 79). Before acceptance
+there is no amount, so an `OPEN` proposal shows none — and PIOS must not
+manufacture one to fill the gap, because producing a value is exactly what
+R4.1 forbids. If a passenger seeing a price *before* acceptance is ever
+wanted, that is a different decision with a different producer, and it is
+not this one.
+
+## R10. PIOS offers the passenger no way to respond to the price.
+
+**«решение — вне PIOS, до появления отдельного механизма».** The decision
+happens outside PIOS. This is the binding half of the ruling and the half
+most at risk of erosion during implementation, so it is stated as concrete
+prohibitions in the same manner as R4:
+
+1. **No control of any kind next to the amount.** No button, no confirm, no
+   accept, no «Отказаться», no counter-offer field, no comment box, no
+   rating, no "propose another price."
+2. **No endpoint.** v1.1 adds no request of any kind. The passenger screen
+   remains read-only with respect to the price; its only writes are the ones
+   that already exist (`POST /v1/orders`, `POST /v1/proposals`).
+3. **No stored passenger response.** Nothing records whether the passenger
+   saw the amount, agreed with it, or objected. There is no field to hold
+   such a thing and none may be added under this ADR.
+4. **No PIOS behaviour becomes conditional on the passenger's reaction.**
+   R4.7 stands unchanged: the ride completes exactly as ADR-041 ratified,
+   with or without an amount and regardless of what the passenger thinks of
+   it. ADR-040 and ADR-041 are untouched by v1.1.
+5. **No negotiation, in any form.** The round-2 ruling's exclusion of all
+   price-agreement, price-change and negotiation logic is unchanged and
+   applies to the passenger side in full. Visibility without a control is
+   not negotiation; adding a control is.
+
+**Why «Отказаться» is not a small addition, and why it is correctly
+deferred.** A passenger-side refusal is not a price feature at all — it is
+an order-lifecycle feature. It would have to decide what happens to an
+`Assignment` that already exists (the Proposal was accepted; ADR-036's
+shared transaction already created it), what `OrderStatus` results, who may
+trigger it and until when, and what the driver sees. ADR-041 settled how an
+Order's lifecycle synchronizes with Assignment completion and placed a
+standing gate in front of exactly this class of change. So «Отказаться»
+requires a Product Decision first — the one now named **«Управление
+жизненным циклом заказа»** — and then its own ADR, at whatever number is
+next free when it is written. **Not started, not scoped, not reserved
+here.** Recorded as Open Question 10.
+
+## R11. This Sprint's basis: hypothesis H3, not an `E-NNN` entry.
+
+### R11.1 The gate, and the tension it created
+
+`PIOS_PRODUCT_EVIDENCE.md` states its own pre-Sprint gate plainly: *«Перед
+началом любого нового Sprint — один обязательный вопрос: Какое
+доказательство из журнала делает этот Sprint необходимым? Если ответа нет —
+не начинаем.»* And the log itself records, at the time of writing: *«Пока
+пусто — первая запись появится после первого сеанса
+PIOS_PILOT_REVIEW_PROTOCOL.md.»*
+
+Read literally, those two sentences together block every Sprint
+unconditionally: no Sprint may start without an `E-NNN`, no `E-NNN` exists
+until a pilot runs, and no pilot can run without something shipped to
+observe. Driver MVP v1.1 has no `E-NNN` behind it and cannot have one. This
+was raised as a conflict rather than worked around, per this repository's
+own discipline, and the Product Owner resolved it.
+
+### R11.2 The resolution, ratified 2026-08-01
+
+An append-only rule now stands in `PIOS_PRODUCT_EVIDENCE.md`: **a registered
+hypothesis is a valid basis for starting a Sprint, and such a Sprint
+*produces* evidence rather than consuming it.** The original gate is not
+weakened — an evidence-based Sprint still consumes a cited `E-NNN`, and "у
+меня появилась хорошая идея" is still not a basis. What is added is a second,
+narrower door with its own conditions: the hypothesis must be registered
+*before* the Sprint, with its «Как проверим» and «Критерий успеха» filled
+in; the Sprint must cite it by number; and the Sprint must leave behind
+behaviour a Pilot Review can actually observe — otherwise it fails its own
+basis by producing nothing.
+
+That "hypothesis before the work, not after" condition is deliberately the
+same discipline `MODULE_STRUCTURE.md` Section 8 already imposes on ADRs.
+
+### R11.3 The basis actually cited
+
+**H3** in `PIOS_PRODUCT_HYPOTHESES.md`, registered on 2026-08-01, before
+this Sprint: that a passenger who sees the price the driver stated does not
+have to ask for it separately, and is not surprised by it later. Driver MVP
+v1.1 exists to test H3 and for no other reason.
+
+Three consequences bind the implementation, not just the paperwork:
+
+1. **The rendered price must be genuinely observable in a Pilot Review** —
+   otherwise the Sprint produces no evidence and does not satisfy its own
+   basis. This is why the Definition of Done below includes the reload
+   check rather than only a "field appears" check.
+2. **H3's status stays «Ожидает проверки»** until `E-NNN` entries exist
+   under it. Shipping a Sprint for a hypothesis does not confirm the
+   hypothesis, and this document must never be cited as if it did.
+3. **The first passenger who tries to refuse a price and finds no way to is
+   an observation, not a defect.** It belongs in the evidence log, and it is
+   the natural first input to «Управление жизненным циклом заказа». It must
+   not be patched mid-sprint by adding the control R10 forbids.
+
+### R11.4 Standing Product Decisions checked against v1.1
+
+Done explicitly, because a Sprint must not silently re-decide something
+already ratified:
+
+- **`PRODUCT_DECISION_MVP_PILOT_BOUNDARY.md`** (lines 33, 46, 52) — payment
+  occurs directly between requester and driver, outside PIOS; no PIOS
+  custody, no commission engine, no dynamic pricing. **No conflict:** v1.1
+  displays a stated string and creates no settlement, custody or
+  reconciliation path (R4.8, Decision item 5). If anything, showing the
+  amount to both parties is closer to that Decision's own "payment happens
+  between them" model than hiding it from one of them was.
+- **`PRODUCT_DECISION_FAIR_OPPORTUNITY_POLICY.md`** Section 8 — payment may
+  never purchase priority. **No conflict:** R4.5 stands untouched, and R3's
+  temporal argument still holds, since the amount still does not exist until
+  after selection.
+- **The round-2 ruling of 2026-07-31** ("the passenger does not see the
+  amount"). **This is the one genuine conflict, and it is a conflict with
+  the Product Owner's own earlier ruling, resolved by the Product Owner's
+  own later one.** It is superseded openly, by name, in eleven marked
+  places, rather than absorbed — which is the entire reason those markers
+  exist.
+
+## Developer Scope (Driver MVP v1.1)
+
+Everything not listed here is out of scope and remains covered by "What This
+ADR Does Not Authorize" as amended by M2.
+
+**Frontend — one file:**
+
+1. `frontend/src/pages/RideRequest/RideRequest.tsx`
+   - **(a) Widen the local response interface.** `ProposalStatusItem`
+     (lines 32–34) gains `statedPrice?: string | null`. No backend change
+     accompanies this — the field is already on the wire (R9.1).
+   - **(b) Keep the value from the accepted proposal.** The poll at
+     lines 171–179 already locates the accepted item
+     (`items.some((item) => item.status === 'ACCEPTED')`); take
+     `statedPrice` from that same item into local state. Do not aggregate
+     across items, do not pick a "best" one, do not compare (R4.3 — the
+     single most important prohibition in this ADR). If more than one
+     accepted item were ever present, that is a multi-candidate question
+     ADR-035 Part 3 leaves open, not something this screen resolves.
+   - **(c) Render it, read-only.** On the confirmed screen, alongside the
+     existing ride-status line (line 372), only when a value is present —
+     the same `{value && <p …>}` shape the driver's own card already uses
+     (`DriverHome.tsx` lines 711–713). No currency symbol, no parsing, no
+     rounding, no formatting, no placeholder or default when absent
+     (R4.1, R4.2, R4.4).
+   - **(d) No control beside it.** Nothing to press, nothing to answer
+     (R10.1). This is not a styling preference; it is the ruling.
+   - **(e) Copy is not ratified here.** The label wording is a product/UX
+     matter, not an architectural one. Mirroring the driver screen's
+     existing «Стоимость: …» is the smallest consistent choice and is
+     recommended; anything that frames the amount as an offer awaiting a
+     reply («Подтвердите стоимость», «Согласны?») is **excluded**, because
+     it asserts the decision control R10 forbids.
+2. `frontend/src/pages/RideRequest/RideRequest.module.css` — only if (c)
+   needs a style; reuse the existing `styles.status` if it fits.
+
+**Backend — nothing.** No Kotlin file, no migration, no endpoint, no
+contract, no event. `git diff --stat backend/` must be empty at the end of
+this Sprint.
+
+**Explicitly NOT in scope:** any passenger-side control, «Отказаться», or
+anything that records a passenger reaction (R10); any change to
+`DriverHome.tsx`, `Coordinator.tsx` or `PassengerLanding.tsx`; any backend
+change of any kind; any event, outbox record or cross-module contract; any
+history, receipt or earnings screen; any comparison, sorting, parsing,
+summing or formatting of an amount anywhere; creating `ADR-043` or reserving
+its number; and any edit to `docs/PIOS_UX_BACKLOG.md` under this ADR.
+
+## Definition of Done (Driver MVP v1.1)
+
+1. A passenger whose order has been accepted **with** a stated price sees
+   that price on the confirmed-order screen.
+2. **The price is still there after a full page reload** — the same check
+   R7.1 step 3 established for the driver, and for the same reason: it
+   proves the value round-tripped from `pios_dispatch` rather than surviving
+   in React state.
+3. An accepted order with **no** stated price shows no price line, no empty
+   label and no placeholder.
+4. Before acceptance, no price and no price-shaped placeholder appears
+   (R9.3).
+5. **No control appears anywhere near the amount** — nothing to press,
+   nothing to answer, no «Отказаться» (R10).
+6. `git diff --stat backend/` is empty. No migration was added; the highest
+   Dispatch migration is still `V6`.
+7. No event payload, outbox record or cross-module contract changed.
+8. The driver's own screen behaves exactly as before.
+9. Nothing anywhere parses, compares, sorts, sums or formats the amount.
+10. The result is observable by a Pilot Review session, so the Sprint can
+    actually produce the `E-NNN` entries H3 needs (R11.3).
+
+## Risks (Driver MVP v1.1)
+
+- **The passenger sees a number they cannot act on inside PIOS.** Disclosed,
+  intended, and precisely what H3 is testing. If a pilot passenger tries to
+  refuse and finds no way to, **that is the observation**, and it is the
+  first real input to «Управление жизненным циклом заказа». It is not to be
+  fixed mid-sprint by adding a control (R11.3.3).
+- **Currency is still unspecified, and now it is passenger-facing.** Open
+  Question 2 remains open (it was not closed by any of the three rulings).
+  The passenger now sees a bare string a driver typed, with no currency, no
+  formatting and no validation behind it. v1.1 does not resolve this and
+  must not invent a currency to tidy it up (R4.4; ADR-002). What v1.1 does
+  do is **raise the cost of leaving it open** — from a driver-only
+  inconvenience to something a first-time passenger reads. Recommended, not
+  decided here: answer Open Question 2 before widening exposure further.
+- **The exposure R8 identified is unchanged.** PIOS still has no
+  authentication and no authorization (ADR-038), so the amount is readable
+  by any caller of either query branch, not only by the passenger it is
+  meant for. v1.1 makes one reader intended; it makes none impossible. Open
+  Question 8, reframed (M12), stays open.
+- **Multi-candidate remains the principal residual risk, unchanged.**
+  Several priced proposals per order is structurally the shape of an
+  auction; R4.3 forbids the comparison that would make it one, and
+  Developer Scope item 1(b) restates that prohibition at the exact place a
+  frontend implementation would be tempted to break it.
+- **Wording risk, named because it already happened once.** The framing
+  "the passenger sees the amount and can decide" was drafted and corrected
+  before ratification. Any UI copy that reintroduces it — a label implying
+  the passenger is being asked something — reintroduces the same error at
+  the surface where users actually read it (Developer Scope 1(e)).
+
+## Marker index (round 3)
+
+Twelve passages were identified as touched by the reversal; eleven carry an
+in-place marker and one was examined and left alone. Listed so the set can
+be audited without re-reading the whole document.
+
+| # | Passage | Effect |
+| --- | --- | --- |
+| M1 | Open Question 5 — round-2 resolution ("no, the passenger does not see") | Superseded; re-resolved positively (R9) |
+| M2 | "What This ADR Does Not Authorize" — 2026-07-31 block, final clause | Superseded in that clause only; new exclusions added (R10) |
+| M3 | Round-2 Product Decision, verbatim quotation | Reframed; quote preserved verbatim, line 2's first half superseded |
+| M4 | "What this ruling settles", item 2 | Superseded in half ("neither sees"); "nor interacts" reaffirmed |
+| M5 | "What this ruling does *not* settle", third bullet | **Examined — no marker required.** It is a statement about what the *round-2 ruling* did and did not settle, and remains accurate as a historical description of that ruling's reach. Round 3 does not falsify it; it answers part of what it left open, which is what the bullet anticipated. |
+| M6 | R7.2 "The answer" | Reframed — "and only by them" / "never reaches the passenger" no longer accurate; all confinement clauses stand |
+| M7 | R7.5 conclusion ("driver-facing read-back only") | Reframed — now driver- and passenger-facing; confinement to `Proposal` unchanged |
+| M8 | R8 "Decision: single response shape…" | "No passenger UI change" superseded; single-shape decision and authorization finding stand, and are now load-bearing |
+| M9 | Developer Scope — "Explicitly NOT in scope", `RideRequest.tsx` clause | Superseded in that clause only; every other exclusion stands |
+| M10 | Definition of Done (revised), item 6 | Superseded in half — display inverted, "no control" kept |
+| M11 | Risks (revised) — "transmitted without being displayed" | Reframed — dissolved as stated; underlying authorization exposure preserved |
+| M12 | New Open Questions, item 8 | Reframed, **not closed** — restated as "readable by callers who are neither party" |
+
+## New Open Questions (round 3)
+
+10. **«Управление жизненным циклом заказа» (Order Lifecycle Management).**
+    The named future Product Decision covering any passenger-side response
+    to an order after it has been accepted — including «Отказаться», the
+    effect of such a response on an existing `Assignment` and on
+    `OrderStatus`, who may trigger it, and until when. **Not started, not
+    scheduled, not scoped, and holding no reserved ADR number** — ADR-043 is
+    not created and 043 goes to whatever ADR is written next. Named here
+    only so that "not implemented" has a destination rather than
+    disappearing.
+
+## Evolution Path — additions
+
+7. **A passenger-side response mechanism**, if «Управление жизненным циклом
+   заказа» ever ratifies one. It would need its own ADR and would touch the
+   order lifecycle (ADR-041), not this ADR's price attribute.
+8. **Answering Open Question 2 (currency)**, whose cost v1.1 raises by
+   putting an unvalidated string in front of passengers.
+
+## Evidence read for this amendment
+
+All read on 2026-08-01; none modified. This ADR remains a documentation
+artefact only. Line numbers are as found on that date.
+
+- `backend/dispatch/src/main/kotlin/com/pios/dispatch/api/ProposalResponse.kt`
+  lines 1–26 — `statedPrice: String? = null` present; KDoc lines 13–18
+  already record delivery on both query branches
+- `backend/dispatch/src/main/kotlin/com/pios/dispatch/api/ProposalController.kt`
+  lines 176–185 (`listProposals`, both branches), 192–193 (`toResponse`
+  passing `statedPrice`)
+- `backend/dispatch/src/main/kotlin/com/pios/dispatch/domain/Proposal.kt`
+  lines 57, 65, 74, 79 — `statedPrice` is set only inside `accept(...)`
+- `backend/dispatch/src/main/resources/db/migration/dispatch/V6__proposal_stated_price.sql`
+  — present; Sprint 4's migration is applied, and v1.1 adds none
+- `frontend/src/pages/RideRequest/RideRequest.tsx` lines 23
+  (`DISPATCH_BASE_URL`), 32–34 (`ProposalStatusItem`, `status` only),
+  45 (3s poll interval), 165–209 (the poll, `?orderId=` and
+  `/v1/assignments`), 351–375 (the confirmed screen and its status line)
+- `frontend/src/pages/DriverHome/DriverHome.tsx` lines 702–713 — the
+  existing driver-side conditional price render, the shape recommended for
+  the passenger side
+- `docs/PIOS_PRODUCT_EVIDENCE.md` — the pre-Sprint gate and the empty
+  journal; the append-only hypothesis-basis rule added the same day
+- `docs/PIOS_PRODUCT_HYPOTHESES.md` — H1/H2 format and the H3 entry added
+  the same day
+- `docs/PRODUCT_DECISION_MVP_PILOT_BOUNDARY.md` lines 33, 46, 52;
+  `docs/PRODUCT_DECISION_FAIR_OPPORTUNITY_POLICY.md` Section 8 — checked
+  for conflict (R11.4); none found
+- `docs/ADR/` — confirmed that no `ADR-043-*` file exists; the highest ADR
+  is 042, this one
