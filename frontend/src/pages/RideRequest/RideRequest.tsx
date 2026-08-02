@@ -51,11 +51,22 @@ const STATUS_POLL_INTERVAL_MS = 3000
  * already uses separately — Proposal (whether a driver accepted at all)
  * and Assignment (ride progress after that) — into one value, since no
  * Assignment exists at all until a Proposal is accepted.
+ *
+ * Sprint H5 (Entrepreneur Working Cycle Integrity, Truthful Status
+ * Rendering) adds 'DECLINED' and 'LAPSED' as their own distinct values —
+ * both real [ProposalStatusItem] statuses this screen's own poll already
+ * receives. Previously both were folded into 'OPEN', which rendered the
+ * same "✅ ... он свяжется с вами" success wording as a genuinely still-open
+ * proposal — false for an order a driver has actually declined or that has
+ * lapsed. No new status is invented here: this only stops discarding two
+ * real ones the backend already sends.
  */
-type RideStatus = 'OPEN' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED'
+type RideStatus = 'OPEN' | 'DECLINED' | 'LAPSED' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED'
 
 const RIDE_STATUS_LABEL: Record<RideStatus, string> = {
-  OPEN: '✅ Водитель уведомлён о заказе. Он свяжется с вами, как только будет готов.',
+  OPEN: '⏳ Ждём ответа водителя. Мы сообщим, как только он подтвердит заказ.',
+  DECLINED: '❌ Водитель отклонил ваш заказ.',
+  LAPSED: '⌛ Заказ больше не активен — водитель не ответил вовремя.',
   ACCEPTED: '✅ Водитель принял ваш заказ и скоро свяжется с вами.',
   ARRIVED: '🚗 Водитель прибыл на место.',
   IN_PROGRESS: '🚕 Поездка началась.',
@@ -105,11 +116,23 @@ const RIDE_STATUS_LABEL: Record<RideStatus, string> = {
  * resulting Assignment's own status (`/v1/assignments?orderId=...`) to
  * show "Водитель прибыл" / "Поездка началась" / "Поездка завершена" as
  * the driver's own screen advances them — see [RideStatus].
+ *
+ * Sprint H5 (Entrepreneur Working Cycle Integrity): this form now also
+ * collects "Откуда" (pickup address), sent as Order Management's new
+ * optional `pickupAddress` (see
+ * `backend/order-management/.../api/SubmitOrderRequest.kt`) alongside the
+ * existing `destination`. Plain text, exactly like `destination` — no
+ * geocoding, no coordinates. This closes the gap the old copy on this form
+ * used to describe ("Водитель свяжется с вами, чтобы уточнить место
+ * посадки"): the address is now collected directly, so that copy is
+ * removed rather than left inaccurate.
  */
 export function RideRequest() {
   const { driverCode } = useParams<{ driverCode: string }>()
   const [identity] = useState(() => getPassengerIdentity())
   const [step, setStep] = useState<Step>('loading')
+  const [pickupAddress, setPickupAddress] = useState('')
+  const [pickupAddressError, setPickupAddressError] = useState<string | null>(null)
   const [destination, setDestination] = useState('')
   const [destinationError, setDestinationError] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -174,7 +197,25 @@ export function RideRequest() {
             return
           }
           if (!items.some((item) => item.status === 'ACCEPTED')) {
-            setRideStatus('OPEN')
+            // Sprint H5 (Truthful Status Rendering): reflect whichever real
+            // proposal status this order actually has -- OPEN, DECLINED, or
+            // LAPSED are three different facts and must not all render as
+            // the same "✅ ... он свяжется с вами" success message. Priority
+            // (OPEN > DECLINED > LAPSED) only matters if more than one
+            // proposal somehow exists for this order; in the normal
+            // single-proposal case exactly one of these is true.
+            if (items.some((item) => item.status === 'OPEN')) {
+              setRideStatus('OPEN')
+            } else if (items.some((item) => item.status === 'DECLINED')) {
+              setRideStatus('DECLINED')
+            } else if (items.some((item) => item.status === 'LAPSED')) {
+              setRideStatus('LAPSED')
+            } else {
+              // No proposal recorded yet (e.g., the propose call is still
+              // in flight) -- honestly "waiting", not yet knowable as
+              // anything else.
+              setRideStatus('OPEN')
+            }
             return
           }
           // Accepted -- an Assignment now exists (created in the same
@@ -215,6 +256,13 @@ export function RideRequest() {
   const passengerId = identity.id
   const passengerName = identity.name
 
+  function handlePickupAddressChange(value: string) {
+    setPickupAddress(value)
+    if (pickupAddressError) {
+      setPickupAddressError(null)
+    }
+  }
+
   function handleDestinationChange(value: string) {
     setDestination(value)
     if (destinationError) {
@@ -224,6 +272,11 @@ export function RideRequest() {
 
   async function handleSubmit() {
     if (isSubmitting) {
+      return
+    }
+    const trimmedPickupAddress = pickupAddress.trim()
+    if (!trimmedPickupAddress) {
+      setPickupAddressError('Пожалуйста, укажите адрес.')
       return
     }
     const trimmedDestination = destination.trim()
@@ -240,6 +293,7 @@ export function RideRequest() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           passengerReference: passengerId,
+          pickupAddress: trimmedPickupAddress,
           destination: trimmedDestination,
           passengerName,
         }),
@@ -314,6 +368,23 @@ export function RideRequest() {
           <>
             <h1 className={styles.title}>Заказать поездку</h1>
 
+            <label className={styles.label} htmlFor="pickupAddress">
+              Откуда
+            </label>
+            <input
+              id="pickupAddress"
+              className={styles.input}
+              type="text"
+              value={pickupAddress}
+              placeholder="Укажите адрес"
+              onChange={(event) => handlePickupAddressChange(event.target.value)}
+            />
+            {pickupAddressError && (
+              <p className={styles.error} role="alert">
+                {pickupAddressError}
+              </p>
+            )}
+
             <label className={styles.label} htmlFor="destination">
               Куда
             </label>
@@ -330,7 +401,6 @@ export function RideRequest() {
                 {destinationError}
               </p>
             )}
-            <p className={styles.hint}>Водитель свяжется с вами, чтобы уточнить место посадки.</p>
 
             {submitError && (
               <p className={styles.error} role="alert">

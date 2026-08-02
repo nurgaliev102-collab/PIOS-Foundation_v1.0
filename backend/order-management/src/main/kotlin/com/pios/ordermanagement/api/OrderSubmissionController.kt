@@ -51,7 +51,12 @@ class OrderSubmissionController(
     @PostMapping
     fun submitOrder(@RequestBody request: SubmitOrderRequest): ResponseEntity<SubmitOrderResponse> =
         try {
-            val orderId = orderSubmissionRequestHandler.handle(request.passengerReference, request.destination, request.passengerName)
+            val orderId = orderSubmissionRequestHandler.handle(
+                request.passengerReference,
+                request.destination,
+                request.passengerName,
+                request.pickupAddress
+            )
             ResponseEntity.status(HttpStatus.CREATED).body(SubmitOrderResponse(orderId))
         } catch (ex: IllegalArgumentException) {
             ResponseEntity.badRequest().build()

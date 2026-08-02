@@ -93,6 +93,13 @@ interface OrderListItem {
   // `destination` already was).
   passengerName: string | null
   createdAt: string | null
+  // Sprint H5 (Entrepreneur Working Cycle Integrity): Order Management's
+  // own optional `pickupAddress` -- rendered conditionally below exactly
+  // like `destination`, since an order submitted before this sprint has
+  // none. Closes the gap this screen used to have no way to fill: a driver
+  // previously had no way to know where to pick a passenger up short of
+  // calling them.
+  pickupAddress: string | null
 }
 
 /**
@@ -186,6 +193,10 @@ function generateDriverId(): string {
  * already does for three. Destination lookup is best-effort: a failure
  * loading orders leaves proposals visible and actionable without a
  * destination shown, rather than blocking the section they came from.
+ *
+ * Sprint H5 (Entrepreneur Working Cycle Integrity) adds each order's own
+ * `pickupAddress`, read from the same `GET /v1/orders` response, rendered
+ * next to `destination` exactly like it.
  */
 export function DriverHome() {
   const [identity, setIdentity] = useState<StoredIdentity | null>(null)
@@ -700,6 +711,7 @@ export function DriverHome() {
               </div>
 
               {order?.passengerName && <p className={styles.status}>Пассажир: {order.passengerName}</p>}
+              {order?.pickupAddress && <p className={styles.status}>Откуда: {order.pickupAddress}</p>}
               {order?.destination && <p className={styles.status}>Куда: {order.destination}</p>}
               {time && <p className={styles.status}>Заказ создан: {time}</p>}
               {/* ADR-042 (Stated Ride Price Minimal Model): read-back of

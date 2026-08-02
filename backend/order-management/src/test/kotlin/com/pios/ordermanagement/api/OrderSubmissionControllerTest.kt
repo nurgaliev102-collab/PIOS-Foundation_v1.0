@@ -77,4 +77,26 @@ class OrderSubmissionControllerTest {
         val orderId = assertNotNull(response.body).orderId
         assertNull(repository.findById(OrderId(orderId))?.passengerName)
     }
+
+    // --- Pickup address (Sprint H5: Entrepreneur Working Cycle Integrity) ---
+
+    @Test
+    fun `a request with a pickup address persists it`() {
+        val response = controller.submitOrder(
+            SubmitOrderRequest("passenger-with-pickup", pickupAddress = "ул. Ленина, 10")
+        )
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        val orderId = assertNotNull(response.body).orderId
+        assertEquals("ул. Ленина, 10", repository.findById(OrderId(orderId))?.pickupAddress)
+    }
+
+    @Test
+    fun `a request without a pickup address still succeeds -- regression for the existing contract`() {
+        val response = controller.submitOrder(SubmitOrderRequest("passenger-no-pickup"))
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        val orderId = assertNotNull(response.body).orderId
+        assertNull(repository.findById(OrderId(orderId))?.pickupAddress)
+    }
 }

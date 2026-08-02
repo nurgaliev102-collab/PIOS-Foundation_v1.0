@@ -99,6 +99,31 @@ class OrderTest {
         assertNotEquals(null, submitted.order.createdAt)
     }
 
+    // --- Pickup address (Sprint H5: Entrepreneur Working Cycle Integrity) ---
+
+    @Test
+    fun `a submitted order carries the pickup address it was submitted with`() {
+        val submitted = Order.submit(origin, pickupAddress = "ул. Ленина, 10")
+
+        assertEquals("ул. Ленина, 10", submitted.order.pickupAddress)
+    }
+
+    @Test
+    fun `a submitted order without a pickup address has a null pickup address`() {
+        val submitted = Order.submit(origin)
+
+        assertEquals(null, submitted.order.pickupAddress)
+    }
+
+    @Test
+    fun `pickup address survives completion unchanged`() {
+        val order = Order.submit(origin, pickupAddress = "ул. Ленина, 10").order
+
+        order.complete()
+
+        assertEquals("ул. Ленина, 10", order.pickupAddress)
+    }
+
     // --- Completion ---
 
     @Test

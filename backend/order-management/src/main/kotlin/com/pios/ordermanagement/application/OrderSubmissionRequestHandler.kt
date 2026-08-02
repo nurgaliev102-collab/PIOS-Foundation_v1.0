@@ -30,6 +30,10 @@ import org.springframework.stereotype.Service
  * supplies only [passengerReference] continues to compile and behave
  * unchanged.
  *
+ * [pickupAddress] (Sprint H5: Entrepreneur Working Cycle Integrity) follows
+ * the same optional, defaulting-to-`null`, appended-last shape for the same
+ * backward-compatibility reason.
+ *
  * This handler makes no call into any other module (ADR-027); its
  * compatibility with Passenger Experience's provider representation
  * (`OrderSubmissionRequestedPublisher`) is verified only from test code
@@ -39,9 +43,19 @@ import org.springframework.stereotype.Service
 class OrderSubmissionRequestHandler(
     private val orderLifecycleApplicationService: OrderLifecycleApplicationService
 ) {
-    fun handle(passengerReference: String, destination: String? = null, passengerName: String? = null): String {
+    fun handle(
+        passengerReference: String,
+        destination: String? = null,
+        passengerName: String? = null,
+        pickupAddress: String? = null
+    ): String {
         val submitted = orderLifecycleApplicationService.submitOrder(
-            SubmitOrderCommand(origin = OrderOrigin(passengerReference), destination = destination, passengerName = passengerName)
+            SubmitOrderCommand(
+                origin = OrderOrigin(passengerReference),
+                destination = destination,
+                passengerName = passengerName,
+                pickupAddress = pickupAddress
+            )
         )
         return submitted.order.id.value
     }

@@ -74,6 +74,17 @@ abstract class OrderRepositoryContractTest {
     }
 
     @Test
+    fun `a saved order's pickup address survives a round trip`() {
+        val repository = createRepository()
+        val submitted = Order.submit(contractOrigin, pickupAddress = "ул. Ленина, 10")
+
+        repository.save(submitted.order)
+        val reloaded = repository.findById(submitted.order.id)
+
+        assertEquals("ул. Ленина, 10", reloaded?.pickupAddress)
+    }
+
+    @Test
     fun `findAll includes every saved order`() {
         val repository = createRepository()
         val first = Order.submit(OrderOrigin("contract-test-findall-1"))

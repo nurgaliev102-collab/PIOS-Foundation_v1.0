@@ -68,6 +68,28 @@ class PostgreSQLOrderRepositoryTest {
         assertNull(loaded?.destination)
     }
 
+    // --- Pickup address (Sprint H5: Entrepreneur Working Cycle Integrity) ---
+
+    @Test
+    fun `an order saved to PostgreSQL with a pickup address can be loaded back with it preserved`() {
+        val submitted = Order.submit(origin, pickupAddress = "ул. Ленина, 10")
+
+        repository.save(submitted.order)
+        val loaded = repository.findById(submitted.order.id)
+
+        assertEquals("ул. Ленина, 10", loaded?.pickupAddress)
+    }
+
+    @Test
+    fun `an order saved to PostgreSQL without a pickup address loads back with a null pickup address`() {
+        val submitted = Order.submit(origin)
+
+        repository.save(submitted.order)
+        val loaded = repository.findById(submitted.order.id)
+
+        assertNull(loaded?.pickupAddress)
+    }
+
     @Test
     fun `saving again after a status change overwrites the previously persisted row`() {
         val submitted = Order.submit(origin)

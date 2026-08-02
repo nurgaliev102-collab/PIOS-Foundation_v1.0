@@ -63,6 +63,18 @@ import java.util.UUID
  * needs no validation. Both are set once, at submission, and never change
  * for the rest of the order's lifecycle, mirroring [origin]/[destination]'s
  * own immutability.
+ *
+ * Sprint H5 (Entrepreneur Working Cycle Integrity) adds [pickupAddress] —
+ * where the passenger is, not [origin] (that value object is the
+ * passenger's own participant reference, unrelated to any location). Follows
+ * [destination]'s own precedent exactly: a plain, unvalidated `String?`,
+ * appended as this class's own last constructor parameter (not inserted
+ * before [createdAt]) so every existing positional call site — this class's
+ * own [submit] factory and any test constructing an [Order] positionally —
+ * continues to compile unchanged. Set once, at submission, and never
+ * changes for the rest of the order's lifecycle, mirroring
+ * [destination]/[passengerName]'s own immutability: neither [complete] nor
+ * [cancel] touches it.
  */
 class Order private constructor(
     val id: OrderId,
@@ -70,7 +82,8 @@ class Order private constructor(
     val origin: OrderOrigin,
     val destination: String?,
     val passengerName: String?,
-    val createdAt: Instant?
+    val createdAt: Instant?,
+    val pickupAddress: String?
 ) {
     var status: OrderStatus = status
         private set
@@ -111,22 +124,31 @@ class Order private constructor(
          * not a transition on an existing order, so this is a factory
          * function rather than an instance method. The order's identifier
          * is generated as part of submission, since no order exists prior
-         * to it. [origin] is required at this point; [destination] and
-         * [passengerName] default to `null` so every existing call site
-         * (this class's own tests,
+         * to it. [origin] is required at this point; [destination],
+         * [passengerName], and [pickupAddress] default to `null` so every
+         * existing call site (this class's own tests,
          * [com.pios.ordermanagement.application.OrderLifecycleApplicationService])
          * continues to compile and behave unchanged. [createdAt] is not a
          * parameter at all — always the server's own clock at the moment
-         * of submission, never caller-supplied.
+         * of submission, never caller-supplied. [pickupAddress] (Sprint H5)
+         * is appended last, after [passengerName], for the same positional-
+         * compatibility reason [passengerName] itself was appended after
+         * [destination].
          */
-        fun submit(origin: OrderOrigin, destination: String? = null, passengerName: String? = null): SubmittedOrder {
+        fun submit(
+            origin: OrderOrigin,
+            destination: String? = null,
+            passengerName: String? = null,
+            pickupAddress: String? = null
+        ): SubmittedOrder {
             val order = Order(
                 id = OrderId(UUID.randomUUID().toString()),
                 status = OrderStatus.SUBMITTED,
                 origin = origin,
                 destination = destination,
                 passengerName = passengerName,
-                createdAt = Instant.now()
+                createdAt = Instant.now(),
+                pickupAddress = pickupAddress
             )
             return SubmittedOrder(order = order, event = OrderSubmitted(orderId = order.id))
         }

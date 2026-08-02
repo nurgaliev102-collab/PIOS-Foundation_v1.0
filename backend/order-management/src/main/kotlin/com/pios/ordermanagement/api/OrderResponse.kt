@@ -26,6 +26,12 @@ package com.pios.ordermanagement.api
  * convention [com.pios.ordermanagement.application.OrderLifecycleApplicationService.envelopeFor]
  * already uses for a domain event's own `occurredAt`, rather than
  * depending on Jackson's automatic `Instant` (de)serialization.
+ *
+ * [pickupAddress] (Sprint H5: Entrepreneur Working Cycle Integrity) carries
+ * [com.pios.ordermanagement.domain.Order.pickupAddress] unchanged — nullable
+ * for the same reason [destination] is. This is what lets a driver, reading
+ * this same list, see where to pick the passenger up, not only where they
+ * are going.
  */
 data class OrderResponse(
     val id: String,
@@ -33,5 +39,6 @@ data class OrderResponse(
     val origin: String,
     val destination: String?,
     val passengerName: String?,
-    val createdAt: String?
+    val createdAt: String?,
+    val pickupAddress: String?
 )

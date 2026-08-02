@@ -21,5 +21,14 @@ import com.pios.ordermanagement.domain.OrderOrigin
  * Carries [passengerName] (first-pilot feedback), defaulting to `null` for
  * the same reason [destination] does — see [com.pios.ordermanagement.domain.Order]'s
  * own KDoc.
+ *
+ * Carries [pickupAddress] (Sprint H5: Entrepreneur Working Cycle
+ * Integrity), defaulting to `null` for the same reason — see
+ * [com.pios.ordermanagement.domain.Order]'s own KDoc.
  */
-class SubmitOrderCommand(val origin: OrderOrigin, val destination: String? = null, val passengerName: String? = null)
+class SubmitOrderCommand(
+    val origin: OrderOrigin,
+    val destination: String? = null,
+    val passengerName: String? = null,
+    val pickupAddress: String? = null
+)

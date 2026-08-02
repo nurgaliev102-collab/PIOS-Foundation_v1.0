@@ -32,7 +32,7 @@ const FAQ_ITEMS: Array<{ question: string; answer: string }> = [
   },
   {
     question: 'Что будет, если водитель занят?',
-    answer: 'PIOS поможет найти другого свободного водителя.',
+    answer: 'Заказ пойдёт только этому водителю — если он не сможет ответить, свяжитесь с ним напрямую.',
   },
 ]
 
@@ -202,19 +202,19 @@ export function PassengerLanding() {
                   👤
                 </span>
                 <div>
-                  <p className={styles.stepTitle}>Сначала заказ получает {invitation.driverName}</p>
-                  <p className={styles.stepDescription}>Если он свободен — заказ сразу придёт ему.</p>
+                  <p className={styles.stepTitle}>Заказ получает {invitation.driverName}</p>
+                  <p className={styles.stepDescription}>Заказ приходит напрямую ему — и больше никому.</p>
                 </div>
               </div>
 
               <div className={styles.stepRow}>
                 <span className={styles.stepEmoji} aria-hidden="true">
-                  🔄
+                  📵
                 </span>
                 <div>
-                  <p className={styles.stepTitle}>Если {invitation.driverName} занят</p>
+                  <p className={styles.stepTitle}>Если {invitation.driverName} не отвечает</p>
                   <p className={styles.stepDescription}>
-                    Ваш заказ не потеряется. PIOS предложит его другому свободному водителю.
+                    Свяжитесь с ним напрямую — заказ не передаётся другому водителю.
                   </p>
                 </div>
               </div>

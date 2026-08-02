@@ -24,5 +24,16 @@ package com.pios.ordermanagement.api
  *
  * [passengerName] (first-pilot feedback) follows the same optional,
  * defaulting-to-`null` shape for the same backward-compatibility reason.
+ *
+ * [pickupAddress] (Sprint H5: Entrepreneur Working Cycle Integrity) follows
+ * the same optional, defaulting-to-`null` shape, appended last, for the
+ * same backward-compatibility reason — it lets the passenger state where
+ * to be picked up, closing the gap where this contract previously only
+ * carried where they were going.
  */
-data class SubmitOrderRequest(val passengerReference: String, val destination: String? = null, val passengerName: String? = null)
+data class SubmitOrderRequest(
+    val passengerReference: String,
+    val destination: String? = null,
+    val passengerName: String? = null,
+    val pickupAddress: String? = null
+)

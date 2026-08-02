@@ -97,6 +97,14 @@ import org.springframework.stereotype.Repository
  * constructor's declared type for that parameter (a regular class, not a
  * `@JvmInline value class`, so no unboxing subtlety applies the way it
  * does for `origin`/`id`).
+ *
+ * Sprint H5 (Entrepreneur Working Cycle Integrity) adds `pickup_address`,
+ * read and written below exactly like `destination` — excluded from
+ * `ON CONFLICT ... UPDATE` since [Order.pickupAddress] is likewise set
+ * once, at submission, and never changes. It is [Order]'s own last
+ * constructor parameter (declared after `createdAt`), so the reflected
+ * constructor below gains a seventh, trailing `String::class.java`
+ * parameter, matching [Order]'s own declaration order exactly.
  */
 @Repository
 class PostgreSQLOrderRepository(
@@ -106,7 +114,7 @@ class PostgreSQLOrderRepository(
     override fun save(order: Order) {
         jdbcTemplate.update(
             """
-            INSERT INTO orders (id, status, origin, destination, passenger_name, created_at) VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO orders (id, status, origin, destination, passenger_name, created_at, pickup_address) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status
             """.trimIndent(),
             order.id.value,
@@ -114,13 +122,14 @@ class PostgreSQLOrderRepository(
             order.origin.reference,
             order.destination,
             order.passengerName,
-            order.createdAt?.let { java.sql.Timestamp.from(it) }
+            order.createdAt?.let { java.sql.Timestamp.from(it) },
+            order.pickupAddress
         )
     }
 
     override fun findById(id: OrderId): Order? {
         val rows = jdbcTemplate.query(
-            "SELECT id, status, origin, destination, passenger_name, created_at FROM orders WHERE id = ?",
+            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address FROM orders WHERE id = ?",
             { rs, _ ->
                 reconstruct(
                     id = rs.getString("id"),
@@ -128,7 +137,8 @@ class PostgreSQLOrderRepository(
                     origin = rs.getString("origin"),
                     destination = rs.getString("destination"),
                     passengerName = rs.getString("passenger_name"),
-                    createdAt = rs.getTimestamp("created_at")
+                    createdAt = rs.getTimestamp("created_at"),
+                    pickupAddress = rs.getString("pickup_address")
                 )
             },
             id.value
@@ -138,7 +148,7 @@ class PostgreSQLOrderRepository(
 
     override fun findAll(): List<Order> =
         jdbcTemplate.query(
-            "SELECT id, status, origin, destination, passenger_name, created_at FROM orders"
+            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address FROM orders"
         ) { rs, _ ->
             reconstruct(
                 id = rs.getString("id"),
@@ -146,7 +156,8 @@ class PostgreSQLOrderRepository(
                 origin = rs.getString("origin"),
                 destination = rs.getString("destination"),
                 passengerName = rs.getString("passenger_name"),
-                createdAt = rs.getTimestamp("created_at")
+                createdAt = rs.getTimestamp("created_at"),
+                pickupAddress = rs.getString("pickup_address")
             )
         }
 
@@ -156,7 +167,8 @@ class PostgreSQLOrderRepository(
         origin: String,
         destination: String?,
         passengerName: String?,
-        createdAt: java.sql.Timestamp?
+        createdAt: java.sql.Timestamp?,
+        pickupAddress: String?
     ): Order {
         val constructor = Order::class.java.getDeclaredConstructor(
             String::class.java,
@@ -164,9 +176,10 @@ class PostgreSQLOrderRepository(
             String::class.java,
             String::class.java,
             String::class.java,
-            java.time.Instant::class.java
+            java.time.Instant::class.java,
+            String::class.java
         )
         constructor.isAccessible = true
-        return constructor.newInstance(id, status, origin, destination, passengerName, createdAt?.toInstant())
+        return constructor.newInstance(id, status, origin, destination, passengerName, createdAt?.toInstant(), pickupAddress)
     }
 }
