@@ -190,5 +190,13 @@ class ProposalController(
         }
 
     private fun Proposal.toResponse(): ProposalResponse =
-        ProposalResponse(id.value, order.orderId, driver.driverId, status.name, statedPrice)
+        ProposalResponse(
+            id.value,
+            order.orderId,
+            driver.driverId,
+            status.name,
+            statedPrice,
+            createdAt?.toString(),
+            respondedAt?.toString()
+        )
 }

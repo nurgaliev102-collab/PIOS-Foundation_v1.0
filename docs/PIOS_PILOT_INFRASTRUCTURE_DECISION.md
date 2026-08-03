@@ -240,6 +240,13 @@ npm run preview -- --port 4173 --strictPort
 | `/v1/proposals` | `http://localhost:8084` |
 | `/v1/assignments` | `http://localhost:8084` |
 | `/v1/identities` | `http://localhost:8086` |
+| `/v1/health/driver-management` | `http://localhost:8081` |
+| `/v1/health/passenger-experience` | `http://localhost:8082` |
+| `/v1/health/order-management` | `http://localhost:8083` |
+| `/v1/health/dispatch` | `http://localhost:8084` |
+| `/v1/health/identity` | `http://localhost:8086` |
+
+Пять строк `/v1/health/<имя-модуля>` добавлены `PILOT_INFRASTRUCTURE_ROUTING_DECISION.md` (Variant A, утверждено Product Owner 2026-08-03): пять модулей Owner Control Center иначе отвечали бы на один и тот же `/v1/health`, что эта таблица не может различить по префиксу. Условие 1 ниже (без переписывания) на них распространяется без исключений.
 
 **Условия, которым обязана удовлетворять реализация:**
 

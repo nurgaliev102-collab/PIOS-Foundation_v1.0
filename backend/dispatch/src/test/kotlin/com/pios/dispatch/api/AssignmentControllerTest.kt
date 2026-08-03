@@ -123,4 +123,21 @@ class AssignmentControllerTest {
         assertEquals(HttpStatus.OK, completed.statusCode)
         assertEquals("COMPLETED", assertNotNull(completed.body).status)
     }
+
+    @Test
+    fun `the arrive-start-complete sequence stamps arrivedAt, startedAt and completedAt at each step`() {
+        val created = assertNotNull(controller.assignOrder(AssignOrderRequest("order-11", "driver-11")).body)
+
+        val arrived = assertNotNull(controller.arrive(created.assignmentId).body)
+        assertNotNull(arrived.arrivedAt)
+
+        val started = assertNotNull(controller.start(created.assignmentId).body)
+        assertNotNull(started.arrivedAt)
+        assertNotNull(started.startedAt)
+
+        val completed = assertNotNull(controller.complete(created.assignmentId).body)
+        assertNotNull(completed.arrivedAt)
+        assertNotNull(completed.startedAt)
+        assertNotNull(completed.completedAt)
+    }
 }

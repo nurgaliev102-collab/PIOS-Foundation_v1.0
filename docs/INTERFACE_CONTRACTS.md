@@ -173,6 +173,7 @@ A contract evolves only through a decision that explicitly supersedes it, consis
 | 12. MVP Contract Verification and Transport Selection (Addendum) | ADR-027, ADR-028 | — | Section 10 | — | — | — | — |
 | 13. Notifications Module Boundary Confirmation (Addendum) | ADR-017, ADR-018, ADR-025, ADR-026, ADR-033 | — | — | Section 3 (Notifications) | — | Section 9 | — | — |
 | 14. Dispatch Ride Lifecycle Events (Addendum) | ADR-003, ADR-040, ADR-041 | — | — | Section 3 (Dispatch, Order Management) | Sections 12–13 | Sections 6, 9, 11 | — | — |
+| 15. Owner Observation Boundary — No New Relationship (Addendum) | ADR-037, ADR-043, ADR-044 | — | — | — | — | — | Section 14 | — |
 
 ## 12. MVP Contract Verification and Transport Selection (Addendum)
 
@@ -189,3 +190,14 @@ Until ADR-028's selected transport category (message broker for events, REST for
 **What this addendum does not do.** It establishes no new contract and no new consumer. AssignmentArrived and AssignmentStarted acquire no consumer here, and Order Management acquires no authority over Assignment. Order Management's own `SUBMITTED → COMPLETED` transition remains its own, exercised on its own aggregate through its own application service (ADR-041 Decision items 2 and 6) — Dispatch provides a fact, never an instruction (EVENT_CATALOG.md Section 2). The reverse direction remains equally unchanged: no Order Management → Dispatch contract exists, and this document creates none; ADR-041 Decision item 3 records that Dispatch has no cancellation capability to propagate and that Order cancellation is not communicated to Dispatch.
 
 Where this document is silent — including on which specific events Notifications and Analytics consume (examined, and left open pending a product decision, by ADR-033) — no lower-priority document may fill that silence by invention; resolution requires the relevant higher-priority document to be extended first, per the authority order established in PROJECT_CONSTITUTION.md Section 5.
+
+## 15. Owner Observation Boundary — No New Relationship (Addendum)
+
+[ADR-043: Owner Control Center — Observation Boundary](ADR/ADR-043-Owner-Control-Center-Observation-Boundary.md) and [ADR-044: Owner Authentication — PIOS's First Authentication Mechanism](ADR/ADR-044-Owner-Authentication-Mechanism.md) add a `GET`-only, per-module self-report ("Retrieve Module Health", API_SPECIFICATION.md Section 14) to Order Management, Dispatch, Driver Management, Passenger Experience, and Identity. This addendum exists only to record, for this document specifically, what ADR-043 Decision 1 already states: **Section 3's module interaction model is unchanged, and no row is added to it.**
+
+- No module calls another module to answer this capability. Each module reports only its own process, its own datasource, and — for the three that have one — its own outbox table.
+- No new provider/consumer pair is created; the reader is the owner's own browser, which is not a module and holds no place in Section 3's model.
+- All correlation across what different modules separately report happens in that browser and is never persisted, queried by any module, or treated as a fifth module's own information (ADR-043 Decision 1). Section 8's Data Access Boundaries are therefore not engaged by this capability at all — there is no module obtaining information it does not own, because no module obtains anything from another module here.
+- Network Management (Module Structure, ADR-037) is not part of this capability in any way, consistent with its existing absence from every contract in this document.
+
+This addendum establishes no new contract, in Section 5 or anywhere else, and none should be inferred from the existence of the health capability described in API_SPECIFICATION.md Section 14.

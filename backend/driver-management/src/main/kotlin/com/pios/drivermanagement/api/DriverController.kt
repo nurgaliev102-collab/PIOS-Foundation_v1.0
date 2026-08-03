@@ -75,7 +75,7 @@ class DriverController(
                 CreateDriverCommand(DriverId(request.driverId), request.displayName)
             )
             ResponseEntity.status(HttpStatus.CREATED)
-                .body(DriverResponse(driver.id.value, driver.availability.name, driver.displayName))
+                .body(DriverResponse(driver.id.value, driver.availability.name, driver.displayName, driver.createdAt?.toString()))
         } catch (ex: DriverAlreadyExistsException) {
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         } catch (ex: IllegalArgumentException) {
@@ -86,7 +86,7 @@ class DriverController(
     fun getDriver(@PathVariable driverId: String): ResponseEntity<DriverResponse> =
         try {
             val driver = retrieveDriverAvailabilityHandler.handle(DriverId(driverId))
-            ResponseEntity.ok(DriverResponse(driver.id.value, driver.availability.name, driver.displayName))
+            ResponseEntity.ok(DriverResponse(driver.id.value, driver.availability.name, driver.displayName, driver.createdAt?.toString()))
         } catch (ex: DriverNotFoundException) {
             ResponseEntity.notFound().build()
         } catch (ex: IllegalArgumentException) {
@@ -97,7 +97,7 @@ class DriverController(
     fun listDrivers(): ResponseEntity<List<DriverResponse>> =
         ResponseEntity.ok(
             retrieveDriverAvailabilityHandler.handleAll()
-                .map { DriverResponse(it.id.value, it.availability.name, it.displayName) }
+                .map { DriverResponse(it.id.value, it.availability.name, it.displayName, it.createdAt?.toString()) }
         )
 
     @PostMapping("/{driverId}/availability")

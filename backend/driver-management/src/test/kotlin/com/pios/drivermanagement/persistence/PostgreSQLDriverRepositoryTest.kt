@@ -4,6 +4,7 @@ import com.pios.drivermanagement.domain.Availability
 import com.pios.drivermanagement.domain.Driver
 import com.pios.drivermanagement.domain.DriverId
 import org.springframework.jdbc.core.JdbcTemplate
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -52,5 +53,24 @@ class PostgreSQLDriverRepositoryTest {
         repository.save(driver)
 
         assertTrue(repository.findAll().any { it.id == driver.id && it.availability == Availability.AVAILABLE })
+    }
+
+    @Test
+    fun `createdAt round-trips through PostgreSQL`() {
+        val createdAt = Instant.parse("2026-08-02T15:44:10Z")
+        val driver = Driver(DriverId("postgres-driver-created-at"), createdAt = createdAt)
+
+        repository.save(driver)
+
+        assertEquals(createdAt, repository.findById(driver.id)?.createdAt)
+    }
+
+    @Test
+    fun `a driver saved without createdAt loads back with createdAt null`() {
+        val driver = Driver(DriverId("postgres-driver-no-created-at"))
+
+        repository.save(driver)
+
+        assertNull(repository.findById(driver.id)?.createdAt)
     }
 }

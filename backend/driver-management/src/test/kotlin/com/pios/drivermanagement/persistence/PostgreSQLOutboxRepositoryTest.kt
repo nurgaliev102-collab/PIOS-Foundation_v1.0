@@ -73,4 +73,45 @@ class PostgreSQLOutboxRepositoryTest {
 
         assertEquals(listOf(first.id, second.id), unpublished.map { it.id })
     }
+
+    @Test
+    fun `countUnpublished reflects a newly saved record without loading its payload`() {
+        // Relative, not exact -- the shared local database persists rows
+        // from every other test in this class and this run, mirroring
+        // this file's own "commit order" test's own reasoning above.
+        val before = repository.countUnpublished()
+
+        repository.save(
+            OutboxRecord(
+                aggregateId = "outbox-repo-count-${java.util.UUID.randomUUID()}",
+                eventType = "DriverAvailabilityChanged",
+                routingKey = "driver.availability.changed",
+                payload = "{}"
+            )
+        )
+
+        val after = repository.countUnpublished()
+
+        assertTrue(after.pending >= before.pending + 1)
+        assertTrue(after.oldestPendingCreatedAt != null)
+    }
+
+    @Test
+    fun `countUnpublished excludes a record once marked published`() {
+        val aggregateId = "outbox-repo-count-published-${java.util.UUID.randomUUID()}"
+        val saved = repository.save(
+            OutboxRecord(
+                aggregateId = aggregateId,
+                eventType = "DriverAvailabilityChanged",
+                routingKey = "driver.availability.changed",
+                payload = "{}"
+            )
+        )
+        val whilePending = repository.countUnpublished()
+
+        repository.markPublished(saved.id!!)
+
+        val afterPublished = repository.countUnpublished()
+        assertTrue(afterPublished.pending == whilePending.pending - 1)
+    }
 }

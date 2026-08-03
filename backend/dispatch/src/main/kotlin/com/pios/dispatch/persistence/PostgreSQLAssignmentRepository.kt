@@ -8,6 +8,7 @@ import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Repository
+import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Instant
 
@@ -68,12 +69,20 @@ import java.time.Instant
  * written below alongside `status`, and extends [reconstruct] to replay
  * however many transition methods are needed to reach a persisted
  * [AssignmentStatus.ARRIVED]/[AssignmentStatus.IN_PROGRESS]/[AssignmentStatus.COMPLETED] —
- * the same replay technique already established for [AssignmentStatus.ACCEPTED],
- * extended along the same chain. Only the *last* replayed call is given
- * the real persisted `status_changed_at`; every earlier one in the chain
- * is immediately superseded by the next, so its own exact timestamp
- * (necessarily `now()`, since [Assignment.accept]/[Assignment.arrive]/
- * [Assignment.start] default that way) is never observed.
+ * the same replay technique already established for [AssignmentStatus.ACCEPTED].
+ *
+ * ADR-043 (Owner Control Center — Observation Boundary) adds
+ * `arrived_at`/`started_at`/`completed_at` beside `status_changed_at`
+ * (kept, not replaced — that Decision's own binding constraint) and
+ * changes how [reconstruct] replays a multi-step chain: **each** step is
+ * now given its own real persisted timestamp (falling back to `now()`
+ * only when a persisted value happens to be `null` — a row written before
+ * this migration, per ADR-043's own disclosed limitation), rather than
+ * every step but the last being replayed with an unobserved `now()`. This
+ * is not merely cosmetic: those columns exist so the owner console can
+ * show *when* a ride arrived or started, and a reconstructed
+ * [AssignmentStatus.COMPLETED] assignment that fabricated its own
+ * `arrivedAt`/`startedAt` on every read would silently defeat that.
  */
 @Repository
 class PostgreSQLAssignmentRepository(
@@ -83,30 +92,37 @@ class PostgreSQLAssignmentRepository(
     override fun save(assignment: Assignment) {
         jdbcTemplate.update(
             """
-            INSERT INTO assignments (id, order_reference, driver_reference, status, status_changed_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, status_changed_at = EXCLUDED.status_changed_at
+            INSERT INTO assignments (
+                id, order_reference, driver_reference, status, status_changed_at,
+                arrived_at, started_at, completed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET
+                status = EXCLUDED.status,
+                status_changed_at = EXCLUDED.status_changed_at,
+                arrived_at = EXCLUDED.arrived_at,
+                started_at = EXCLUDED.started_at,
+                completed_at = EXCLUDED.completed_at
             """.trimIndent(),
             assignment.id.value,
             assignment.order.orderId,
             assignment.driver.driverId,
             assignment.status.name,
-            assignment.statusChangedAt?.let { Timestamp.from(it) }
+            assignment.statusChangedAt?.let { Timestamp.from(it) },
+            assignment.arrivedAt?.let { Timestamp.from(it) },
+            assignment.startedAt?.let { Timestamp.from(it) },
+            assignment.completedAt?.let { Timestamp.from(it) }
         )
     }
 
     override fun findById(id: AssignmentId): Assignment? {
         val rows = jdbcTemplate.query(
-            "SELECT id, order_reference, driver_reference, status, status_changed_at FROM assignments WHERE id = ?",
-            { rs, _ ->
-                reconstruct(
-                    id = rs.getString("id"),
-                    orderReference = rs.getString("order_reference"),
-                    driverReference = rs.getString("driver_reference"),
-                    status = AssignmentStatus.valueOf(rs.getString("status")),
-                    statusChangedAt = rs.getTimestamp("status_changed_at")
-                )
-            },
+            """
+            SELECT id, order_reference, driver_reference, status, status_changed_at,
+                   arrived_at, started_at, completed_at
+            FROM assignments WHERE id = ?
+            """.trimIndent(),
+            { rs, _ -> reconstruct(rs) },
             id.value
         )
         return rows.firstOrNull()
@@ -114,46 +130,44 @@ class PostgreSQLAssignmentRepository(
 
     override fun findByOrder(order: OrderReference): List<Assignment> =
         jdbcTemplate.query(
-            "SELECT id, order_reference, driver_reference, status, status_changed_at FROM assignments WHERE order_reference = ?",
-            { rs, _ ->
-                reconstruct(
-                    id = rs.getString("id"),
-                    orderReference = rs.getString("order_reference"),
-                    driverReference = rs.getString("driver_reference"),
-                    status = AssignmentStatus.valueOf(rs.getString("status")),
-                    statusChangedAt = rs.getTimestamp("status_changed_at")
-                )
-            },
+            """
+            SELECT id, order_reference, driver_reference, status, status_changed_at,
+                   arrived_at, started_at, completed_at
+            FROM assignments WHERE order_reference = ?
+            """.trimIndent(),
+            { rs, _ -> reconstruct(rs) },
             order.orderId
         )
 
-    private fun reconstruct(
-        id: String,
-        orderReference: String,
-        driverReference: String,
-        status: AssignmentStatus,
-        statusChangedAt: Timestamp?
-    ): Assignment {
+    private fun reconstruct(rs: ResultSet): Assignment {
         val constructor = Assignment::class.java.getDeclaredConstructor(
             String::class.java,
             String::class.java,
             String::class.java
         )
         constructor.isAccessible = true
-        val assignment = constructor.newInstance(id, orderReference, driverReference)
-        val at: Instant = statusChangedAt?.toInstant() ?: Instant.now()
+        val assignment = constructor.newInstance(
+            rs.getString("id"),
+            rs.getString("order_reference"),
+            rs.getString("driver_reference")
+        )
+        val status = AssignmentStatus.valueOf(rs.getString("status"))
+        val statusChangedAt: Instant = rs.getTimestamp("status_changed_at")?.toInstant() ?: Instant.now()
+        val arrivedAt: Instant = rs.getTimestamp("arrived_at")?.toInstant() ?: Instant.now()
+        val startedAt: Instant = rs.getTimestamp("started_at")?.toInstant() ?: Instant.now()
+        val completedAt: Instant = rs.getTimestamp("completed_at")?.toInstant() ?: Instant.now()
         when (status) {
             AssignmentStatus.CREATED -> {}
-            AssignmentStatus.ACCEPTED -> assignment.accept(at)
-            AssignmentStatus.ARRIVED -> assignment.arrive(at)
+            AssignmentStatus.ACCEPTED -> assignment.accept(statusChangedAt)
+            AssignmentStatus.ARRIVED -> assignment.arrive(arrivedAt)
             AssignmentStatus.IN_PROGRESS -> {
-                assignment.arrive()
-                assignment.start(at)
+                assignment.arrive(arrivedAt)
+                assignment.start(startedAt)
             }
             AssignmentStatus.COMPLETED -> {
-                assignment.arrive()
-                assignment.start()
-                assignment.complete(at)
+                assignment.arrive(arrivedAt)
+                assignment.start(startedAt)
+                assignment.complete(completedAt)
             }
         }
         return assignment

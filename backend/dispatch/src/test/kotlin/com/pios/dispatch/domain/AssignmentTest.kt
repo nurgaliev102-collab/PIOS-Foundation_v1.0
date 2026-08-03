@@ -1,9 +1,12 @@
 package com.pios.dispatch.domain
 
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 
 class AssignmentTest {
 
@@ -216,5 +219,59 @@ class AssignmentTest {
         assertFailsWith<IllegalStateException> {
             assignment.complete()
         }
+    }
+
+    // --- ADR-043: arrivedAt/startedAt/completedAt, alongside statusChangedAt ---
+
+    @Test
+    fun `arrivedAt, startedAt and completedAt are all null on a freshly created assignment`() {
+        val assignment = Assignment.create(order, driver).assignment
+
+        assertNull(assignment.arrivedAt)
+        assertNull(assignment.startedAt)
+        assertNull(assignment.completedAt)
+    }
+
+    @Test
+    fun `arriving stamps arrivedAt with the moment given, and leaves startedAt and completedAt null`() {
+        val assignment = Assignment.create(order, driver).assignment
+        val at = Instant.parse("2026-08-02T20:19:00Z")
+
+        assignment.arrive(at)
+
+        assertEquals(at, assignment.arrivedAt)
+        assertNull(assignment.startedAt)
+        assertNull(assignment.completedAt)
+    }
+
+    @Test
+    fun `starting stamps startedAt without touching the already-set arrivedAt`() {
+        val assignment = Assignment.create(order, driver).assignment
+        val arrivedAt = Instant.parse("2026-08-02T20:19:00Z")
+        val startedAt = Instant.parse("2026-08-02T20:20:00Z")
+        assignment.arrive(arrivedAt)
+
+        assignment.start(startedAt)
+
+        assertEquals(arrivedAt, assignment.arrivedAt)
+        assertEquals(startedAt, assignment.startedAt)
+        assertNull(assignment.completedAt)
+    }
+
+    @Test
+    fun `completing stamps completedAt without touching arrivedAt or startedAt`() {
+        val assignment = Assignment.create(order, driver).assignment
+        val arrivedAt = Instant.parse("2026-08-02T20:19:00Z")
+        val startedAt = Instant.parse("2026-08-02T20:20:00Z")
+        val completedAt = Instant.parse("2026-08-02T20:28:00Z")
+        assignment.arrive(arrivedAt)
+        assignment.start(startedAt)
+
+        assignment.complete(completedAt)
+
+        assertEquals(arrivedAt, assignment.arrivedAt)
+        assertEquals(startedAt, assignment.startedAt)
+        assertEquals(completedAt, assignment.completedAt)
+        assertEquals(completedAt, assignment.statusChangedAt)
     }
 }

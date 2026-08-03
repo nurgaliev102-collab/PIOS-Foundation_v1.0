@@ -25,3 +25,19 @@ pios:
   outbox:
     relay:
       fixed-delay-ms: 2000
+  # ADR-044 (Owner Authentication): the one credential `GET /v1/health`
+  # checks. Deliberately left unset here -- an unset username/password-hash/
+  # password-salt makes OwnerCredentialGate.isConfigured() false, which
+  # denies every request rather than defaulting open. Each deployment must
+  # set all three explicitly, generated for that deployment
+  # (`pios.owner.password-hash`/`pios.owner.password-salt` are PBKDF2-HMAC-
+  # SHA256 output and its salt, both base64, never the plain password).
+  # owner:
+  #   username: ""
+  #   password-hash: ""
+  #   password-salt: ""
+  #   password-iterations: 210000
+  #   auth:
+  #     failure-delay-ms: 500
+  #     max-failures-per-window: 20
+  #     window-ms: 900000

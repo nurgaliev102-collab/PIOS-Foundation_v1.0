@@ -6,6 +6,7 @@ import com.pios.dispatch.domain.AssignmentStatus
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import org.springframework.jdbc.core.JdbcTemplate
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -57,5 +58,50 @@ class PostgreSQLAssignmentRepositoryTest {
         repository.save(created.assignment)
 
         assertTrue(repository.findByOrder(order).any { it.id == created.assignment.id })
+    }
+
+    // --- ADR-043: arrivedAt/startedAt/completedAt reconstruction ---
+
+    /**
+     * The specific bug ADR-043 requires this class's own [reconstruct] to
+     * avoid: before this fix, only the *last* transition in a replayed
+     * chain received its real persisted timestamp, and every earlier one
+     * was silently given an unobserved `Instant.now()`. A COMPLETED
+     * assignment reloaded from a fresh repository instance must show its
+     * own real, distinct `arrivedAt` and `startedAt` — not two
+     * indistinguishable "just now" values fabricated by the reload itself.
+     */
+    @Test
+    fun `a completed assignment reloaded from a fresh repository instance preserves its own distinct arrivedAt, startedAt and completedAt`() {
+        val created = Assignment.create(OrderReference("postgres-order-lifecycle-1"), DriverReference("postgres-driver-lifecycle-1"))
+        val arrivedAt = Instant.parse("2026-08-02T20:19:00Z")
+        val startedAt = Instant.parse("2026-08-02T20:20:00Z")
+        val completedAt = Instant.parse("2026-08-02T20:28:00Z")
+        created.assignment.arrive(arrivedAt)
+        created.assignment.start(startedAt)
+        created.assignment.complete(completedAt)
+        repository.save(created.assignment)
+
+        val freshRepository = PostgreSQLAssignmentRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
+        val reloaded = freshRepository.findById(created.assignment.id)
+
+        assertEquals(arrivedAt, reloaded?.arrivedAt)
+        assertEquals(startedAt, reloaded?.startedAt)
+        assertEquals(completedAt, reloaded?.completedAt)
+        assertEquals(completedAt, reloaded?.statusChangedAt)
+    }
+
+    @Test
+    fun `an assignment that has only arrived reloads with startedAt and completedAt still null`() {
+        val created = Assignment.create(OrderReference("postgres-order-lifecycle-2"), DriverReference("postgres-driver-lifecycle-2"))
+        val arrivedAt = Instant.parse("2026-08-02T20:19:00Z")
+        created.assignment.arrive(arrivedAt)
+        repository.save(created.assignment)
+
+        val reloaded = repository.findById(created.assignment.id)
+
+        assertEquals(arrivedAt, reloaded?.arrivedAt)
+        assertNull(reloaded?.startedAt)
+        assertNull(reloaded?.completedAt)
     }
 }

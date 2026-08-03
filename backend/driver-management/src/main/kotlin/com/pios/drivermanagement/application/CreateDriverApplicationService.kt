@@ -2,6 +2,7 @@ package com.pios.drivermanagement.application
 
 import com.pios.drivermanagement.domain.Driver
 import org.springframework.stereotype.Service
+import java.time.Instant
 
 /**
  * Application-layer coordination for the Create Driver command (Sprint 3A:
@@ -49,7 +50,7 @@ class CreateDriverApplicationService(
         if (driverRepository.findById(command.driverId) != null) {
             throw DriverAlreadyExistsException(command.driverId)
         }
-        val driver = Driver(command.driverId, displayName = command.displayName)
+        val driver = Driver(command.driverId, displayName = command.displayName, createdAt = Instant.now())
         driverRepository.save(driver)
         driver
     }

@@ -8,6 +8,9 @@ import com.pios.dispatch.domain.ProposalId
 import com.pios.dispatch.domain.ProposalStatus
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Repository
+import java.sql.ResultSet
+import java.sql.Timestamp
+import java.time.Instant
 
 /**
  * The PostgreSQL-backed adapter for [ProposalRepository], mirroring
@@ -32,17 +35,27 @@ import org.springframework.stereotype.Repository
  * [PostgreSQLAssignmentRepository]:
  *
  * 1. Reflectively invoke the private constructor with the persisted id,
- *    order reference, and driver reference, yielding a proposal in its
- *    initial [ProposalStatus.OPEN] state.
+ *    order reference, driver reference, and (ADR-043) `created_at`,
+ *    yielding a proposal in its initial [ProposalStatus.OPEN] state.
  * 2. If the persisted row's status is [ProposalStatus.ACCEPTED],
  *    [ProposalStatus.DECLINED], or [ProposalStatus.LAPSED], call the
  *    aggregate's own public [Proposal.accept], [Proposal.decline], or
- *    [Proposal.lapse] to advance it — no further reflection needed.
+ *    [Proposal.lapse] — each now taking the persisted `responded_at` as
+ *    its `at` argument (ADR-043) — to advance it. No further reflection
+ *    needed.
  *
  * This does not bypass any invariant: step 1's private constructor
  * performs no validation beyond what already-persisted, previously-valid
  * data satisfies by construction, and step 2 uses the aggregate's own
  * business logic unmodified.
+ *
+ * **ADR-043 binding constraint on this class specifically.** [Proposal]'s
+ * private constructor gained a fourth parameter ([Proposal.createdAt]).
+ * The reflective lookup below is widened to `(String, String, String,
+ * Instant)` to match exactly — the same landmine this class's own KDoc
+ * already names for [statedPrice] applies here in the other direction: an
+ * un-widened lookup would throw `NoSuchMethodException` at the first real
+ * database read, not at compile time.
  *
  * ## `stated_price` (ADR-042, Stated Ride Price Minimal Model)
  *
@@ -64,33 +77,33 @@ class PostgreSQLProposalRepository(
     private val jdbcTemplate: JdbcTemplate
 ) : ProposalRepository {
 
+    private val selectColumns =
+        "id, order_reference, driver_reference, status, stated_price, created_at, responded_at"
+
     override fun save(proposal: Proposal) {
         jdbcTemplate.update(
             """
-            INSERT INTO proposals (id, order_reference, driver_reference, status, stated_price)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, stated_price = EXCLUDED.stated_price
+            INSERT INTO proposals (id, order_reference, driver_reference, status, stated_price, created_at, responded_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET
+                status = EXCLUDED.status,
+                stated_price = EXCLUDED.stated_price,
+                responded_at = EXCLUDED.responded_at
             """.trimIndent(),
             proposal.id.value,
             proposal.order.orderId,
             proposal.driver.driverId,
             proposal.status.name,
-            proposal.statedPrice
+            proposal.statedPrice,
+            proposal.createdAt?.let { Timestamp.from(it) },
+            proposal.respondedAt?.let { Timestamp.from(it) }
         )
     }
 
     override fun findById(id: ProposalId): Proposal? {
         val rows = jdbcTemplate.query(
-            "SELECT id, order_reference, driver_reference, status, stated_price FROM proposals WHERE id = ?",
-            { rs, _ ->
-                reconstruct(
-                    id = rs.getString("id"),
-                    orderReference = rs.getString("order_reference"),
-                    driverReference = rs.getString("driver_reference"),
-                    status = ProposalStatus.valueOf(rs.getString("status")),
-                    statedPrice = rs.getString("stated_price")
-                )
-            },
+            "SELECT $selectColumns FROM proposals WHERE id = ?",
+            { rs, _ -> reconstruct(rs) },
             id.value
         )
         return rows.firstOrNull()
@@ -98,52 +111,39 @@ class PostgreSQLProposalRepository(
 
     override fun findByOrder(order: OrderReference): List<Proposal> =
         jdbcTemplate.query(
-            "SELECT id, order_reference, driver_reference, status, stated_price FROM proposals WHERE order_reference = ?",
-            { rs, _ ->
-                reconstruct(
-                    id = rs.getString("id"),
-                    orderReference = rs.getString("order_reference"),
-                    driverReference = rs.getString("driver_reference"),
-                    status = ProposalStatus.valueOf(rs.getString("status")),
-                    statedPrice = rs.getString("stated_price")
-                )
-            },
+            "SELECT $selectColumns FROM proposals WHERE order_reference = ?",
+            { rs, _ -> reconstruct(rs) },
             order.orderId
         )
 
     override fun findByDriver(driver: DriverReference): List<Proposal> =
         jdbcTemplate.query(
-            "SELECT id, order_reference, driver_reference, status, stated_price FROM proposals WHERE driver_reference = ?",
-            { rs, _ ->
-                reconstruct(
-                    id = rs.getString("id"),
-                    orderReference = rs.getString("order_reference"),
-                    driverReference = rs.getString("driver_reference"),
-                    status = ProposalStatus.valueOf(rs.getString("status")),
-                    statedPrice = rs.getString("stated_price")
-                )
-            },
+            "SELECT $selectColumns FROM proposals WHERE driver_reference = ?",
+            { rs, _ -> reconstruct(rs) },
             driver.driverId
         )
 
-    private fun reconstruct(
-        id: String,
-        orderReference: String,
-        driverReference: String,
-        status: ProposalStatus,
-        statedPrice: String?
-    ): Proposal {
+    private fun reconstruct(rs: ResultSet): Proposal {
         val constructor = Proposal::class.java.getDeclaredConstructor(
             String::class.java,
             String::class.java,
-            String::class.java
+            String::class.java,
+            Instant::class.java
         )
         constructor.isAccessible = true
-        val proposal = constructor.newInstance(id, orderReference, driverReference)
+        val proposal = constructor.newInstance(
+            rs.getString("id"),
+            rs.getString("order_reference"),
+            rs.getString("driver_reference"),
+            rs.getTimestamp("created_at")?.toInstant()
+        )
+        val status = ProposalStatus.valueOf(rs.getString("status"))
+        val statedPrice = rs.getString("stated_price")
+        val respondedAt: Instant = rs.getTimestamp("responded_at")?.toInstant() ?: Instant.now()
         when (status) {
-            ProposalStatus.ACCEPTED -> proposal.accept(statedPrice)
-            ProposalStatus.DECLINED -> proposal.decline()
-            ProposalStatus.LAPSED -> proposal.lapse()
+            ProposalStatus.ACCEPTED -> proposal.accept(statedPrice, respondedAt)
+            ProposalStatus.DECLINED -> proposal.decline(respondedAt)
+            ProposalStatus.LAPSED -> proposal.lapse(respondedAt)
             ProposalStatus.OPEN -> Unit
         }
         return proposal

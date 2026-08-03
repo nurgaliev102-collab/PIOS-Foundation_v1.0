@@ -17,4 +17,5 @@ object NoOpOutboxRepository : OutboxRepository {
     override fun save(record: OutboxRecord): OutboxRecord = record
     override fun findUnpublished(): List<OutboxRecord> = emptyList()
     override fun markPublished(id: Long) = Unit
+    override fun countUnpublished(): OutboxBacklog = OutboxBacklog(pending = 0, oldestPendingCreatedAt = null)
 }

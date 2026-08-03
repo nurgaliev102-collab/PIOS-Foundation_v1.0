@@ -20,4 +20,15 @@ interface OutboxRepository {
 
     /** Marks the record identified by [id] as published. */
     fun markPublished(id: Long)
+
+    /**
+     * A count-only measurement of the unpublished backlog (ADR-043
+     * Decision 2; `GET /v1/health`), obtained by one aggregate query —
+     * never by loading the rows [findUnpublished] loads. [findUnpublished]
+     * must not be reused for this purpose: it materializes every
+     * unpublished row's own payload, which makes a health check built on
+     * it slowest and heaviest exactly when the backlog it reports is
+     * largest.
+     */
+    fun countUnpublished(): OutboxBacklog
 }

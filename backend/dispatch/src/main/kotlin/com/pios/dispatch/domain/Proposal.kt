@@ -1,5 +1,6 @@
 package com.pios.dispatch.domain
 
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -25,13 +26,40 @@ import java.util.UUID
  * [OrderReference] and [DriverReference] are reused unchanged from
  * Assignment's own module — narrow references, never another module's
  * domain type (ADR-005, ADR-009).
+ *
+ * [createdAt] (ADR-043, Owner Control Center — Observation Boundary) is
+ * the moment this proposal was created — a genuine constructor parameter,
+ * unlike [respondedAt] below, since it is fixed at construction and
+ * independent of [status]. Set by [propose] for every new proposal; `null`
+ * only for a proposal reconstructed from a row persisted before
+ * `V7__proposal_timestamps.sql` existed
+ * ([com.pios.dispatch.persistence.PostgreSQLProposalRepository]'s own
+ * reflective constructor lookup is widened to match, per that class's own
+ * KDoc on this constructor being reflectively invoked).
  */
 class Proposal private constructor(
     val id: ProposalId,
     val order: OrderReference,
-    val driver: DriverReference
+    val driver: DriverReference,
+    val createdAt: Instant? = null
 ) {
     var status: ProposalStatus = ProposalStatus.OPEN
+        private set
+
+    /**
+     * The moment this proposal left [ProposalStatus.OPEN] — by
+     * acceptance, decline, or lapse (ADR-043, Owner Control Center —
+     * Observation Boundary). `null` until one of those three happens.
+     * Deliberately **not** a primary-constructor parameter, the same
+     * reasoning [statedPrice]'s own KDoc gives: it is set only later, by
+     * [accept]/[decline]/[lapse], each of which now takes the same
+     * optional `at` parameter [Assignment]'s own transition methods
+     * already established (ADR-040 precedent) so
+     * [com.pios.dispatch.persistence.PostgreSQLProposalRepository.reconstruct]
+     * can replay a persisted `responded_at` instead of an unobserved
+     * `now()`.
+     */
+    var respondedAt: Instant? = null
         private set
 
     /**
@@ -70,13 +98,20 @@ class Proposal private constructor(
      * can replay a previously persisted amount during reconstruction,
      * mirroring [Assignment.accept]'s own `at` parameter precedent
      * (ADR-040).
+     *
+     * [at] defaults to the current time for real callers; overridable so
+     * [com.pios.dispatch.persistence.PostgreSQLProposalRepository] can
+     * replay this transition during reconstruction with the originally
+     * persisted `responded_at` instead of the moment of the read (ADR-043,
+     * mirroring [Assignment]'s own already-established `at` precedent).
      */
-    fun accept(statedPrice: String? = null): ProposalAccepted {
+    fun accept(statedPrice: String? = null, at: Instant = Instant.now()): ProposalAccepted {
         check(status == ProposalStatus.OPEN) {
             "Proposal ${id.value} cannot be accepted from status $status"
         }
         status = ProposalStatus.ACCEPTED
         this.statedPrice = statedPrice
+        this.respondedAt = at
         return ProposalAccepted(orderId = order, driverId = driver)
     }
 
@@ -85,12 +120,16 @@ class Proposal private constructor(
      * [ProposalStatus.OPEN] proposal may be declined; no obligation exists
      * before acceptance, so a decline violates nothing
      * (PRODUCT_DECISION_OPPORTUNITY_ACCEPTANCE_COMMITMENT.md Section 3).
+     *
+     * [at] defaults to the current time; overridable for reconstruction
+     * replay, mirroring [accept]'s own `at` parameter (ADR-043).
      */
-    fun decline(): ProposalDeclined {
+    fun decline(at: Instant = Instant.now()): ProposalDeclined {
         check(status == ProposalStatus.OPEN) {
             "Proposal ${id.value} cannot be declined from status $status"
         }
         status = ProposalStatus.DECLINED
+        this.respondedAt = at
         return ProposalDeclined(orderId = order, driverId = driver)
     }
 
@@ -101,12 +140,16 @@ class Proposal private constructor(
      * policy decision) is not this aggregate's concern (Implementation
      * Design — Proposal Aggregate, Section 6) — this method only records
      * the fact once it is already established elsewhere.
+     *
+     * [at] defaults to the current time; overridable for reconstruction
+     * replay, mirroring [accept]'s own `at` parameter (ADR-043).
      */
-    fun lapse(): ProposalLapsed {
+    fun lapse(at: Instant = Instant.now()): ProposalLapsed {
         check(status == ProposalStatus.OPEN) {
             "Proposal ${id.value} cannot lapse from status $status"
         }
         status = ProposalStatus.LAPSED
+        this.respondedAt = at
         return ProposalLapsed(orderId = order, driverId = driver)
     }
 
@@ -133,7 +176,8 @@ class Proposal private constructor(
             val proposal = Proposal(
                 id = ProposalId(UUID.randomUUID().toString()),
                 order = order,
-                driver = driver
+                driver = driver,
+                createdAt = Instant.now()
             )
             val event = OrderProposed(orderId = order, driverId = driver)
             return ProposalCreated(proposal = proposal, event = event)

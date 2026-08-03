@@ -44,8 +44,38 @@ class Assignment private constructor(
      * (ADR-040, Assignment Ride Lifecycle) — `null` until the first one
      * happens, since a freshly-created assignment has not transitioned
      * yet. Every transition method below sets it; none of them read it.
+     *
+     * Kept as-is, not replaced, by ADR-043 Decision 4's own binding
+     * constraint: it records only the *latest* transition, never a
+     * history, which is exactly why [arrivedAt]/[startedAt]/[completedAt]
+     * exist beside it rather than instead of it.
      */
     var statusChangedAt: Instant? = null
+        private set
+
+    /**
+     * The moment this assignment reached [AssignmentStatus.ARRIVED]
+     * (ADR-043, Owner Control Center — Observation Boundary) — `null`
+     * until [arrive] is called. Set once, alongside [statusChangedAt],
+     * never touched by any other transition.
+     */
+    var arrivedAt: Instant? = null
+        private set
+
+    /**
+     * The moment this assignment reached [AssignmentStatus.IN_PROGRESS]
+     * (ADR-043) — `null` until [start] is called. Set once, alongside
+     * [statusChangedAt], never touched by any other transition.
+     */
+    var startedAt: Instant? = null
+        private set
+
+    /**
+     * The moment this assignment reached [AssignmentStatus.COMPLETED]
+     * (ADR-043) — `null` until [complete] is called. Set once, alongside
+     * [statusChangedAt], never touched by any other transition.
+     */
+    var completedAt: Instant? = null
         private set
 
     /**
@@ -85,6 +115,7 @@ class Assignment private constructor(
         }
         status = AssignmentStatus.ARRIVED
         statusChangedAt = at
+        arrivedAt = at
         return AssignmentArrived(orderId = order, driverId = driver)
     }
 
@@ -98,6 +129,7 @@ class Assignment private constructor(
         }
         status = AssignmentStatus.IN_PROGRESS
         statusChangedAt = at
+        startedAt = at
         return AssignmentStarted(orderId = order, driverId = driver)
     }
 
@@ -113,6 +145,7 @@ class Assignment private constructor(
         }
         status = AssignmentStatus.COMPLETED
         statusChangedAt = at
+        completedAt = at
         return AssignmentCompleted(orderId = order, driverId = driver)
     }
 

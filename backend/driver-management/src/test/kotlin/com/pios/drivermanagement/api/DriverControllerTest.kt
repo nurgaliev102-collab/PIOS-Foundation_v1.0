@@ -40,6 +40,17 @@ class DriverControllerTest {
     }
 
     @Test
+    fun `creating a driver stamps registeredAt, retrievable afterwards`() {
+        val response = controller.createDriver(CreateDriverRequest("new-driver-registered-at"))
+
+        assertNotNull(assertNotNull(response.body).registeredAt)
+        assertNotNull(repository.findById(DriverId("new-driver-registered-at"))?.createdAt)
+
+        val getResponse = controller.getDriver("new-driver-registered-at")
+        assertNotNull(assertNotNull(getResponse.body).registeredAt)
+    }
+
+    @Test
     fun `creating a driver for an id that already exists returns 409`() {
         repository.save(Driver(DriverId("existing-driver"), Availability.AVAILABLE))
 

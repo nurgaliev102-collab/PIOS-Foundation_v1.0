@@ -73,6 +73,8 @@ class DriverAvailabilityOutboxTransactionTest {
             override fun save(record: OutboxRecord): OutboxRecord = throw RuntimeException("simulated outbox failure")
             override fun findUnpublished(): List<OutboxRecord> = emptyList()
             override fun markPublished(id: Long) = Unit
+            override fun countUnpublished(): com.pios.drivermanagement.application.OutboxBacklog =
+                com.pios.drivermanagement.application.OutboxBacklog(pending = 0, oldestPendingCreatedAt = null)
         }
         val failingService = DriverAvailabilityApplicationService(driverRepository, failingOutboxRepository, transactionRunner, objectMapper)
 

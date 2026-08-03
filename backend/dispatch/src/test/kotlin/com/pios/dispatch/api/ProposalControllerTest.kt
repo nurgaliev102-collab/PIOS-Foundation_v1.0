@@ -48,6 +48,24 @@ class ProposalControllerTest {
     }
 
     @Test
+    fun `creating a proposal stamps createdAt, and respondedAt stays null until it is resolved`() {
+        val response = controller.createProposal(ProposeDriverRequest("order-created-at", "driver-created-at"))
+
+        val body = assertNotNull(response.body)
+        assertNotNull(body.createdAt)
+        assertEquals(null, body.respondedAt)
+    }
+
+    @Test
+    fun `accepting a proposal returns a respondedAt`() {
+        val created = assertNotNull(controller.createProposal(ProposeDriverRequest("order-responded-at", "driver-responded-at")).body)
+
+        val response = controller.acceptProposal(created.proposalId)
+
+        assertNotNull(assertNotNull(response.body).respondedAt)
+    }
+
+    @Test
     fun `a blank orderId returns 400`() {
         val response = controller.createProposal(ProposeDriverRequest("", "driver-1"))
 

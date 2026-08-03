@@ -1,5 +1,6 @@
 package com.pios.drivermanagement.domain
 
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -12,6 +13,22 @@ class DriverTest {
         val driver = Driver(id = DriverId("driver-1"))
 
         assertEquals(Availability.UNAVAILABLE, driver.availability)
+    }
+
+    @Test
+    fun `createdAt defaults to null when not supplied`() {
+        val driver = Driver(id = DriverId("driver-1"))
+
+        assertNull(driver.createdAt)
+    }
+
+    @Test
+    fun `createdAt carries whatever moment it is constructed with`() {
+        val createdAt = Instant.parse("2026-08-02T15:44:10Z")
+
+        val driver = Driver(id = DriverId("driver-1"), createdAt = createdAt)
+
+        assertEquals(createdAt, driver.createdAt)
     }
 
     @Test

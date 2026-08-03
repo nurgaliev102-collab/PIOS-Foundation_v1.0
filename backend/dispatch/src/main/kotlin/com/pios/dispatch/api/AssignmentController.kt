@@ -173,5 +173,14 @@ class AssignmentController(
         }
 
     private fun Assignment.toResponse() =
-        AssignmentResponse(id.value, order.orderId, driver.driverId, status.name, statusChangedAt?.toString())
+        AssignmentResponse(
+            id.value,
+            order.orderId,
+            driver.driverId,
+            status.name,
+            statusChangedAt?.toString(),
+            arrivedAt?.toString(),
+            startedAt?.toString(),
+            completedAt?.toString()
+        )
 }

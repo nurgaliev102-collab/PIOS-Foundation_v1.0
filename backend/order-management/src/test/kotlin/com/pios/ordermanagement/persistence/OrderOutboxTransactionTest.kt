@@ -64,6 +64,8 @@ class OrderOutboxTransactionTest {
             override fun save(record: OutboxRecord): OutboxRecord = throw RuntimeException("simulated outbox failure")
             override fun findUnpublished(): List<OutboxRecord> = emptyList()
             override fun markPublished(id: Long) = Unit
+            override fun countUnpublished(): com.pios.ordermanagement.application.OutboxBacklog =
+                com.pios.ordermanagement.application.OutboxBacklog(pending = 0, oldestPendingCreatedAt = null)
         }
         val failingService = OrderLifecycleApplicationService(orderRepository, failingOutboxRepository, transactionRunner, objectMapper)
 

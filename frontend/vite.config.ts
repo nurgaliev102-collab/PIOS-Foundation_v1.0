@@ -20,6 +20,13 @@ export default defineConfig({
     // is intentionally not routed here; it is excluded from the pilot flow
     // (ADR-037), so there is no collision with passenger-experience's
     // `/v1/connections` below.
+    //
+    // The five `/v1/health/<module-name>` rows exist because all five
+    // modules otherwise serve an identical `/v1/health` -- one path could
+    // not be routed to five different ports through this single origin.
+    // PILOT_INFRASTRUCTURE_ROUTING_DECISION.md Variant A (Product Owner
+    // approved 2026-08-03): each module names itself in its own health
+    // path, no rewrite, same property as every other row here.
     proxy: {
       '/v1/drivers': 'http://localhost:8081',
       '/v1/connections': 'http://localhost:8082',
@@ -27,6 +34,11 @@ export default defineConfig({
       '/v1/proposals': 'http://localhost:8084',
       '/v1/assignments': 'http://localhost:8084',
       '/v1/identities': 'http://localhost:8086',
+      '/v1/health/driver-management': 'http://localhost:8081',
+      '/v1/health/passenger-experience': 'http://localhost:8082',
+      '/v1/health/order-management': 'http://localhost:8083',
+      '/v1/health/dispatch': 'http://localhost:8084',
+      '/v1/health/identity': 'http://localhost:8086',
     },
   },
   plugins: [

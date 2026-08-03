@@ -1,5 +1,7 @@
 package com.pios.drivermanagement.domain
 
+import java.time.Instant
+
 /**
  * The Driver aggregate (DOMAIN_MODEL.md Section 4), within Driver
  * Management's exclusive ownership (ADR-005, ADR-019).
@@ -17,11 +19,19 @@ package com.pios.drivermanagement.domain
  * link ("Вас пригласил Артур") — optional and immutable once set, the
  * same "plain nullable field, no new Value Object" precedent
  * `Order.destination` already established (Sprint 3B).
+ *
+ * [createdAt] (ADR-043, Owner Control Center — Observation Boundary) is
+ * the moment this driver was registered, surfaced as `registeredAt` on
+ * `GET /v1/drivers` — optional and immutable once set, appended last so
+ * every existing positional call site keeps compiling. `null` for every
+ * driver created before this field existed (`V4__add_driver_created_at.sql`'s
+ * own disclosed limitation) and for any caller that still omits it.
  */
 class Driver(
     val id: DriverId,
     availability: Availability = Availability.UNAVAILABLE,
-    val displayName: String? = null
+    val displayName: String? = null,
+    val createdAt: Instant? = null
 ) {
     var availability: Availability = availability
         private set

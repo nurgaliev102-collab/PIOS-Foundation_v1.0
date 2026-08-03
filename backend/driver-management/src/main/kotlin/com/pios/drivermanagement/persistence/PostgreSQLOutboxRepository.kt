@@ -1,5 +1,6 @@
 package com.pios.drivermanagement.persistence
 
+import com.pios.drivermanagement.application.OutboxBacklog
 import com.pios.drivermanagement.application.OutboxRecord
 import com.pios.drivermanagement.application.OutboxRepository
 import org.springframework.jdbc.core.JdbcTemplate
@@ -79,4 +80,18 @@ class PostgreSQLOutboxRepository(
             id
         )
     }
+
+    override fun countUnpublished(): OutboxBacklog =
+        jdbcTemplate.query(
+            """
+            SELECT count(*) AS pending, min(created_at) AS oldest_pending_created_at
+            FROM driver_management_outbox
+            WHERE published_at IS NULL
+            """.trimIndent()
+        ) { rs, _ ->
+            OutboxBacklog(
+                pending = rs.getLong("pending"),
+                oldestPendingCreatedAt = rs.getTimestamp("oldest_pending_created_at")?.toInstant()
+            )
+        }.first()
 }

@@ -1,9 +1,12 @@
 package com.pios.dispatch.domain
 
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 
 class ProposalTest {
 
@@ -18,6 +21,48 @@ class ProposalTest {
 
         assertEquals(order, created.proposal.order)
         assertEquals(driver, created.proposal.driver)
+    }
+
+    @Test
+    fun `proposing a driver stamps createdAt`() {
+        val created = Proposal.propose(order, driver)
+
+        assertNotNull(created.proposal.createdAt)
+    }
+
+    @Test
+    fun `respondedAt is null until the proposal is resolved`() {
+        val created = Proposal.propose(order, driver)
+
+        assertNull(created.proposal.respondedAt)
+    }
+
+    @Test
+    fun `accepting a proposal stamps respondedAt with the moment given`() {
+        val created = Proposal.propose(order, driver)
+        val at = Instant.parse("2026-08-02T15:15:00Z")
+
+        created.proposal.accept(at = at)
+
+        assertEquals(at, created.proposal.respondedAt)
+    }
+
+    @Test
+    fun `declining a proposal stamps respondedAt`() {
+        val created = Proposal.propose(order, driver)
+
+        created.proposal.decline()
+
+        assertNotNull(created.proposal.respondedAt)
+    }
+
+    @Test
+    fun `lapsing a proposal stamps respondedAt`() {
+        val created = Proposal.propose(order, driver)
+
+        created.proposal.lapse()
+
+        assertNotNull(created.proposal.respondedAt)
     }
 
     @Test

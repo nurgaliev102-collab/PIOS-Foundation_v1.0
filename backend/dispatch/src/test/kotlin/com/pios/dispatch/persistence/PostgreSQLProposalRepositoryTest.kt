@@ -6,8 +6,10 @@ import com.pios.dispatch.domain.Proposal
 import com.pios.dispatch.domain.ProposalId
 import com.pios.dispatch.domain.ProposalStatus
 import org.springframework.jdbc.core.JdbcTemplate
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -87,6 +89,35 @@ class PostgreSQLProposalRepositoryTest {
         val reloaded = freshRepository.findById(created.proposal.id)
 
         assertEquals("999", reloaded?.statedPrice)
+        assertEquals(ProposalStatus.ACCEPTED, reloaded?.status)
+    }
+
+    // --- ADR-043: createdAt/respondedAt reconstruction ---
+
+    @Test
+    fun `createdAt round-trips through PostgreSQL, and respondedAt stays null while still OPEN`() {
+        val created = Proposal.propose(OrderReference("postgres-order-timestamps-1"), DriverReference("postgres-driver-timestamps-1"))
+
+        repository.save(created.proposal)
+        val reloaded = repository.findById(created.proposal.id)
+
+        assertNotNull(reloaded?.createdAt)
+        assertNull(reloaded?.respondedAt)
+    }
+
+    @Test
+    fun `an accepted proposal reloaded from a fresh repository instance preserves its own real respondedAt`() {
+        val created = Proposal.propose(OrderReference("postgres-order-timestamps-2"), DriverReference("postgres-driver-timestamps-2"))
+        repository.save(created.proposal)
+        val respondedAt = Instant.parse("2026-08-02T20:15:00Z")
+
+        created.proposal.accept(statedPrice = "500", at = respondedAt)
+        repository.save(created.proposal)
+
+        val freshRepository = PostgreSQLProposalRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
+        val reloaded = freshRepository.findById(created.proposal.id)
+
+        assertEquals(respondedAt, reloaded?.respondedAt)
         assertEquals(ProposalStatus.ACCEPTED, reloaded?.status)
     }
 }

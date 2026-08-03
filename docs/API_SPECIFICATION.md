@@ -141,5 +141,19 @@ No protocol, message format, or technology is selected for any of these boundari
 | 10. Error Philosophy | — | ADR-005 | — | Section 11 | — | — |
 | 11. Security Boundary Philosophy | Section 3 (Trust) | ADR-011 | Section 14 | Section 12 | — | — |
 | 12. External Integration Contracts | — | ADR-011, ADR-020 | Section 11 | — | — | — |
+| 14. Owner Observation Boundary (Addendum) | — | ADR-011, ADR-042, ADR-043, ADR-044 | — | — | — | — |
 
 Where this document is silent — including on Analytics, Notifications, and Payments having no capability contract, and on Partner having no boundary — no lower-priority document may fill that silence by invention; resolution requires the relevant higher-priority document to be extended first, per the authority order established in PROJECT_CONSTITUTION.md Section 5.
+
+## 14. Owner Observation Boundary (Addendum)
+
+[ADR-043: Owner Control Center — Observation Boundary](ADR/ADR-043-Owner-Control-Center-Observation-Boundary.md) and [ADR-044: Owner Authentication — PIOS's First Authentication Mechanism](ADR/ADR-044-Owner-Authentication-Mechanism.md), ratified 2026-08-02 per [PRODUCT_DECISION_OWNER_CONTROL_CENTER.md](PRODUCT_DECISION_OWNER_CONTROL_CENTER.md), add exactly one new capability, deliberately outside the shape of Section 5's capability contracts.
+
+- **Purpose.** Lets the platform owner — not a Section 4 consumer, and not a party to any use case in USE_CASE_CATALOG.md — observe whether each of five pilot modules (Order Management, Dispatch, Driver Management, Passenger Experience, Identity) is itself serving, whether its own datasource answers, and, for the three that have one, its own unpublished outbox depth and the age of the oldest unpublished record.
+- **Available interaction.** Retrieve Module Health — from each of Order Management, Dispatch, Driver Management, Passenger Experience, and Identity, independently. Each module reports only on itself; no module reports on another, and no module's report is combined with another's anywhere but in the owner's own browser (ADR-043 Decision 1). No command exists on this boundary — it is read-only, permanently (ADR-043 Decision 5).
+- **Owned responsibility.** Each module owns only the report of its own state. No module gains authority over, or knowledge of, another module's state by virtue of this capability.
+- **Why this is not a Section 5 capability contract.** Section 5's contracts expose business capability to an ecosystem participant named in Section 4. This is not that: it exposes operational self-report to the platform's own owner, carries no business meaning, and never crosses a module-to-module boundary (INTERFACE_CONTRACTS.md Section 15 records the same conclusion from that document's own side). It is recorded here, addended rather than inserted into Section 5, so the boundary named in Section 3 — internal, external, partner, user-facing — is not stretched to fit a fifth kind of thing it was never meant to describe.
+- **What is deliberately excluded, permanently, not only for this iteration.** No amount, sum, or comparison of money in any form (ADR-042 R4.3); no history beyond the current day; no control, mutation, or command of any kind (ADR-043 Decision 5); no role or second credential (ADR-044 Decision 6).
+- **Security boundary.** Per Section 11's own principle that every capability contract enforces its own authentication at its own boundary: this is the first capability in this document whose boundary does so, per the mechanism ADR-044 defines (not described here, consistent with Section 11's own refusal to name a mechanism).
+
+No endpoint, method, payload, or transport is described here, consistent with Section 1 and Section 5's own convention; those are ADR-043 Decision 2 and the MVP design document's own concern.

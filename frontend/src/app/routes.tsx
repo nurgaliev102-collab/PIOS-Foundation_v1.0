@@ -4,6 +4,7 @@ import { PassengerLanding } from '../pages/PassengerLanding'
 import { RideRequest } from '../pages/RideRequest'
 import { Coordinator } from '../pages/Coordinator'
 import { NetworkTest } from '../pages/NetworkTest'
+import { OwnerControlCenter } from '../pages/OwnerControlCenter'
 import { NotFound } from '../pages/NotFound'
 
 /**
@@ -33,6 +34,15 @@ export const routes: RouteObject[] = [
   {
     path: '/network-test',
     element: <NetworkTest />,
+  },
+  {
+    // ADR-044 Decision 5: gated, but not by the router — OwnerControlCenter
+    // itself renders the login screen instead of the console until a
+    // credential is held (Section 4.2 of the MVP design document). Every
+    // route above stays exactly as unauthenticated as before this one was
+    // added.
+    path: '/owner',
+    element: <OwnerControlCenter />,
   },
   {
     path: '*',
