@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: platform-ops
+
+server:
+  port: 8090
+  # 0.0.0.0, not the default (all interfaces already, but stated explicitly
+  # here as a deliberate fact, not an accident) -- O-2 requires phone/LAN
+  # reachability for Sprint 1, not just localhost. See this same reasoning
+  # already applied to the frontend service
+  # (windows-services/frontend/pios-frontend.xml) and the machine-specific
+  # IPv6-loopback defect diagnosed earlier this session: never assume
+  # "localhost" resolves usefully on this machine.
+  address: 0.0.0.0
+
+# ADR-047 Decision 1 (Destructive Action Authorization): the one credential
+# every /v1/ops/** endpoint checks, including reads -- a second, independent
+# secret from the owner's (pios.owner.* in each PIOS module). Deliberately
+# left unset here -- an unset username/password-hash/password-salt makes
+# OpsCredentialGate.isConfigured() false, which denies every request rather
+# than defaulting open, exactly the precedent ADR-044/OwnerCredentialGate
+# already established. Each deployment must set all three explicitly,
+# generated for that deployment (pios.ops.password-hash/password-salt are
+# PBKDF2-HMAC-SHA256 output and its salt, both base64, never the plain
+# password).
+# pios:
+#   ops:
+#     username: ""
+#     password-hash: ""
+#     password-salt: ""
+#     password-iterations: 210000
+#     auth:
+#       failure-delay-ms: 500
+#       max-failures-per-window: 20
+#       window-ms: 900000

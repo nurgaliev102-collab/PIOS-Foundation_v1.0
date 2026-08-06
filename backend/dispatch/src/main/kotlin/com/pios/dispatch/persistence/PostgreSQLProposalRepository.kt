@@ -38,11 +38,18 @@ import java.time.Instant
  *    order reference, driver reference, and (ADR-043) `created_at`,
  *    yielding a proposal in its initial [ProposalStatus.OPEN] state.
  * 2. If the persisted row's status is [ProposalStatus.ACCEPTED],
- *    [ProposalStatus.DECLINED], or [ProposalStatus.LAPSED], call the
- *    aggregate's own public [Proposal.accept], [Proposal.decline], or
- *    [Proposal.lapse] — each now taking the persisted `responded_at` as
- *    its `at` argument (ADR-043) — to advance it. No further reflection
- *    needed.
+ *    [ProposalStatus.DECLINED], [ProposalStatus.LAPSED], or
+ *    [ProposalStatus.WITHDRAWN] (ADR-053), call the aggregate's own
+ *    public [Proposal.accept], [Proposal.decline], [Proposal.lapse], or
+ *    [Proposal.withdraw] — each now taking the persisted `responded_at`
+ *    as its `at` argument (ADR-043) — to advance it. No further
+ *    reflection needed.
+ *
+ *    **Binding, per ADR-053's own "Architectural Prerequisite: PostgreSQL
+ *    Reconstruction Update":** the `when` block below is a statement, not
+ *    an expression, so Kotlin does not enforce its exhaustiveness — a
+ *    future `ProposalStatus` value added without a corresponding branch
+ *    here would compile and silently misreconstruct, not fail to build.
  *
  * This does not bypass any invariant: step 1's private constructor
  * performs no validation beyond what already-persisted, previously-valid
@@ -123,6 +130,13 @@ class PostgreSQLProposalRepository(
             driver.driverId
         )
 
+    override fun findOpen(): List<Proposal> =
+        jdbcTemplate.query(
+            "SELECT $selectColumns FROM proposals WHERE status = ?",
+            { rs, _ -> reconstruct(rs) },
+            ProposalStatus.OPEN.name
+        )
+
     private fun reconstruct(rs: ResultSet): Proposal {
         val constructor = Proposal::class.java.getDeclaredConstructor(
             String::class.java,
@@ -144,6 +158,7 @@ class PostgreSQLProposalRepository(
             ProposalStatus.ACCEPTED -> proposal.accept(statedPrice, respondedAt)
             ProposalStatus.DECLINED -> proposal.decline(respondedAt)
             ProposalStatus.LAPSED -> proposal.lapse(respondedAt)
+            ProposalStatus.WITHDRAWN -> proposal.withdraw(respondedAt)
             ProposalStatus.OPEN -> Unit
         }
         return proposal

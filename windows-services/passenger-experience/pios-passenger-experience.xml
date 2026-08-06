@@ -1,0 +1,17 @@
+<service>
+  <id>pios-passenger-experience</id>
+  <name>PIOS Passenger Experience</name>
+  <description>PIOS passenger-experience backend module (Spring Boot 3.3.4), managed by WinSW. T-2 of ENGINEERING_EXECUTION_PLAN_SPRINT_1_PLATFORM_OPERATIONS_MVP.md; grounded in ADR-046 Decision 2 and ADR-049 Decisions 1-2.</description>
+  <executable>C:\Program Files\Eclipse Adoptium\jdk-21.0.12.8-hotspot\bin\java.exe</executable>
+  <arguments>-jar "build\libs\passenger-experience-0.1.0-SNAPSHOT.jar"</arguments>
+  <workingdirectory>C:\Projects\PIOS-Foundation_v1.0\backend\passenger-experience</workingdirectory>
+  <!-- See LOG_DIRECTORY_POLICY.md: working directory must match bootRun's
+       own default so the T-1 log path keeps resolving correctly. -->
+  <env name="PIOS_PILOT_FRONTEND_ORIGIN" value="http://192.168.0.102:5173"/>
+  <log mode="none"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <onfailure action="restart" delay="120 sec"/>
+  <resetfailure>24 hours</resetfailure>
+  <startmode>Automatic</startmode>
+</service>

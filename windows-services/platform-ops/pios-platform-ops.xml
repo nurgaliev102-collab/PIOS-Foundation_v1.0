@@ -1,0 +1,20 @@
+<service>
+  <id>pios-platform-ops</id>
+  <name>PIOS Platform Operations Center</name>
+  <description>Platform Operations Center's backend agent (T-3/T-4, ENGINEERING_EXECUTION_PLAN_SPRINT_1_PLATFORM_OPERATIONS_MVP.md). Not a PIOS module (ADR-046 Decision 1). Corrective work for T-4's phone-verification failure: platform-ops previously only ran as a manual bootRun session and had nothing keeping it alive once that session was stopped.</description>
+  <executable>C:\Program Files\Eclipse Adoptium\jdk-21.0.12.8-hotspot\bin\java.exe</executable>
+  <arguments>-jar "build\libs\platform-ops-0.1.0-SNAPSHOT.jar"</arguments>
+  <workingdirectory>C:\Projects\PIOS-Foundation_v1.0\platform-ops</workingdirectory>
+  <!-- Deliberately not silenced, unlike the six T-2 service definitions.
+       Those six are safe to silence because each already writes its own
+       rolling file log (T-1, ADR-049 Decision 5). platform-ops has no such
+       log yet, out of T-3/T-4 scope; silencing WinSW's own wrapper log
+       here would leave this service with no log output anywhere at all, a
+       real debugging blind spot. Left at WinSW's default (append) until
+       platform-ops gets its own log configuration in a later task. -->
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <onfailure action="restart" delay="120 sec"/>
+  <resetfailure>24 hours</resetfailure>
+  <startmode>Automatic</startmode>
+</service>

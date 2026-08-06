@@ -1,0 +1,21 @@
+<service>
+  <id>pios-driver-management</id>
+  <name>PIOS Driver Management</name>
+  <description>PIOS driver-management backend module (Spring Boot 3.3.4), managed by WinSW. T-2 of ENGINEERING_EXECUTION_PLAN_SPRINT_1_PLATFORM_OPERATIONS_MVP.md; grounded in ADR-046 Decision 2 (SCM as the read surface) and ADR-049 Decisions 1-2 (Automatic start type, group ordering).</description>
+  <executable>C:\Program Files\Eclipse Adoptium\jdk-21.0.12.8-hotspot\bin\java.exe</executable>
+  <arguments>-jar "build\libs\driver-management-0.1.0-SNAPSHOT.jar"</arguments>
+  <workingdirectory>C:\Projects\PIOS-Foundation_v1.0\backend\driver-management</workingdirectory>
+  <!-- Preserves the working-directory invariant LOG_DIRECTORY_POLICY.md requires:
+       must match gradlew bootRun's own default so `logging.file.name: ../logs/...`
+       (T-1) keeps resolving to backend/logs/ unchanged. -->
+  <env name="PIOS_PILOT_FRONTEND_ORIGIN" value="http://192.168.0.102:5173"/>
+  <!-- The application already writes its own rolling file log (T-1, ADR-049
+       Decision 5) via Logback. WinSW's own wrapper log is disabled so there
+       is exactly one log file per module, not two divergent copies. -->
+  <log mode="none"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <onfailure action="restart" delay="120 sec"/>
+  <resetfailure>24 hours</resetfailure>
+  <startmode>Automatic</startmode>
+</service>

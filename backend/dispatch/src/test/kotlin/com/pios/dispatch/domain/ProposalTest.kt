@@ -66,6 +66,16 @@ class ProposalTest {
     }
 
     @Test
+    fun `withdrawing a proposal stamps respondedAt with the moment given`() {
+        val created = Proposal.propose(order, driver)
+        val at = Instant.parse("2026-08-06T12:00:00Z")
+
+        created.proposal.withdraw(at = at)
+
+        assertEquals(at, created.proposal.respondedAt)
+    }
+
+    @Test
     fun `proposing a driver produces an OrderProposed event for the same order and driver`() {
         val created = Proposal.propose(order, driver)
 
@@ -149,6 +159,16 @@ class ProposalTest {
         assertEquals(order, second.proposal.order)
     }
 
+    @Test
+    fun `proposing a driver for an order whose only existing proposal was already withdrawn is allowed`() {
+        val first = Proposal.propose(order, driver).proposal
+        first.withdraw()
+
+        val second = Proposal.propose(order, DriverReference("driver-2"), existingProposals = listOf(first))
+
+        assertEquals(order, second.proposal.order)
+    }
+
     // --- Acceptance ---
 
     @Test
@@ -194,6 +214,16 @@ class ProposalTest {
     fun `accepting an already-lapsed proposal is rejected`() {
         val proposal = Proposal.propose(order, driver).proposal
         proposal.lapse()
+
+        assertFailsWith<IllegalStateException> {
+            proposal.accept()
+        }
+    }
+
+    @Test
+    fun `accepting an already-withdrawn proposal is rejected`() {
+        val proposal = Proposal.propose(order, driver).proposal
+        proposal.withdraw()
 
         assertFailsWith<IllegalStateException> {
             proposal.accept()
@@ -272,6 +302,16 @@ class ProposalTest {
     }
 
     @Test
+    fun `declining an already-withdrawn proposal is rejected`() {
+        val proposal = Proposal.propose(order, driver).proposal
+        proposal.withdraw()
+
+        assertFailsWith<IllegalStateException> {
+            proposal.decline()
+        }
+    }
+
+    @Test
     fun `declining an open proposal never sets a stated price`() {
         val proposal = Proposal.propose(order, driver).proposal
 
@@ -332,10 +372,90 @@ class ProposalTest {
     }
 
     @Test
+    fun `lapsing an already-withdrawn proposal is rejected`() {
+        val proposal = Proposal.propose(order, driver).proposal
+        proposal.withdraw()
+
+        assertFailsWith<IllegalStateException> {
+            proposal.lapse()
+        }
+    }
+
+    @Test
     fun `lapsing an open proposal never sets a stated price`() {
         val proposal = Proposal.propose(order, driver).proposal
 
         proposal.lapse()
+
+        assertEquals(null, proposal.statedPrice)
+    }
+
+    // --- Withdraw (ADR-053, Proposal Resolution on Order Cancellation) ---
+
+    @Test
+    fun `withdrawing an open proposal transitions it to WITHDRAWN`() {
+        val proposal = Proposal.propose(order, driver).proposal
+
+        proposal.withdraw()
+
+        assertEquals(ProposalStatus.WITHDRAWN, proposal.status)
+    }
+
+    @Test
+    fun `withdrawing an open proposal produces a ProposalWithdrawn event for the same order and driver`() {
+        val proposal = Proposal.propose(order, driver).proposal
+
+        val event = proposal.withdraw()
+
+        assertEquals(order, event.orderId)
+        assertEquals(driver, event.driverId)
+    }
+
+    @Test
+    fun `withdrawing an already-withdrawn proposal is rejected`() {
+        val proposal = Proposal.propose(order, driver).proposal
+        proposal.withdraw()
+
+        assertFailsWith<IllegalStateException> {
+            proposal.withdraw()
+        }
+    }
+
+    @Test
+    fun `withdrawing an already-accepted proposal is rejected`() {
+        val proposal = Proposal.propose(order, driver).proposal
+        proposal.accept()
+
+        assertFailsWith<IllegalStateException> {
+            proposal.withdraw()
+        }
+    }
+
+    @Test
+    fun `withdrawing an already-declined proposal is rejected`() {
+        val proposal = Proposal.propose(order, driver).proposal
+        proposal.decline()
+
+        assertFailsWith<IllegalStateException> {
+            proposal.withdraw()
+        }
+    }
+
+    @Test
+    fun `withdrawing an already-lapsed proposal is rejected`() {
+        val proposal = Proposal.propose(order, driver).proposal
+        proposal.lapse()
+
+        assertFailsWith<IllegalStateException> {
+            proposal.withdraw()
+        }
+    }
+
+    @Test
+    fun `withdrawing an open proposal never sets a stated price`() {
+        val proposal = Proposal.propose(order, driver).proposal
+
+        proposal.withdraw()
 
         assertEquals(null, proposal.statedPrice)
     }

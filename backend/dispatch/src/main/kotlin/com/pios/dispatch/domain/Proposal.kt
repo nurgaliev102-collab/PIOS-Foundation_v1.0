@@ -19,7 +19,7 @@ import java.util.UUID
  * Assignment's own invariant, which treats every existing Assignment as
  * active regardless of status, this invariant considers only proposals
  * still in [ProposalStatus.OPEN] — a proposal already resolved (accepted,
- * declined, or lapsed) does not block a new one for the same order, since
+ * declined, lapsed, or withdrawn — ADR-053) does not block a new one for the same order, since
  * its own resolution is exactly what frees the order for reconsideration
  * (Implementation Design — Proposal Aggregate, Section 2).
  *
@@ -151,6 +151,27 @@ class Proposal private constructor(
         status = ProposalStatus.LAPSED
         this.respondedAt = at
         return ProposalLapsed(orderId = order, driverId = driver)
+    }
+
+    /**
+     * Withdraws this proposal because the order it was for has been
+     * cancelled before any driver acceptance (ADR-053, Proposal
+     * Resolution on Order Cancellation). Only an [ProposalStatus.OPEN]
+     * proposal may be withdrawn — mirrors [lapse]'s own precondition
+     * exactly, since both are non-actor-driven resolutions reaching this
+     * aggregate from outside a driver's own act.
+     *
+     * [at] defaults to the current time; overridable for reconstruction
+     * replay, mirroring [accept]/[decline]/[lapse]'s own `at` parameter
+     * (ADR-043).
+     */
+    fun withdraw(at: Instant = Instant.now()): ProposalWithdrawn {
+        check(status == ProposalStatus.OPEN) {
+            "Proposal ${id.value} cannot be withdrawn from status $status"
+        }
+        status = ProposalStatus.WITHDRAWN
+        this.respondedAt = at
+        return ProposalWithdrawn(orderId = order, driverId = driver)
     }
 
     companion object {

@@ -239,3 +239,12 @@ dist/
 *.tsbuildinfo
 npm-debug.log*
 yarn-error.log*
+
+# Windows services (T-2, ENGINEERING_EXECUTION_PLAN_SPRINT_1_PLATFORM_OPERATIONS_MVP.md):
+# the WinSW binary copy in each windows-services/<target>/ directory is a
+# downloaded third-party executable, not project source -- only the .xml
+# configuration next to it is committed.
+windows-services/**/*.exe
+
+# Rolling log files (T-1, ADR-049 Decision 5) -- runtime output, not source.
+backend/logs/

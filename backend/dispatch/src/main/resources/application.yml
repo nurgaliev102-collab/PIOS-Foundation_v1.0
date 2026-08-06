@@ -18,6 +18,23 @@ spring:
 server:
   port: 8084
 
+# T-1 (ENGINEERING_EXECUTION_PLAN_SPRINT_1_PLATFORM_OPERATIONS_MVP.md): a
+# rolling log file, so one exists before this module becomes a Windows
+# service (ADR-049 Decision 5 -- once that happens, the bootRun console
+# disappears entirely, not just becomes inconvenient, and this file is all
+# that is left). Shared directory: `backend/logs/`, one level above every
+# module's own working directory, so a future reader (ADR-050's tier-3
+# endpoint, or a human) finds all five logs in one place. Retention is O-8's
+# own recommendation, not yet a separately ratified number.
+logging:
+  file:
+    name: ../logs/dispatch.log
+  logback:
+    rollingpolicy:
+      max-file-size: 20MB
+      max-history: 14
+      total-size-cap: 500MB
+
 # Implementation Plan: Production Outbox Relay Trigger v1.0. Interval, in
 # milliseconds, between the end of one OutboxRelayScheduler tick and the
 # start of the next -- a configuration default, not a product invariant.
@@ -25,6 +42,17 @@ pios:
   outbox:
     relay:
       fixed-delay-ms: 2000
+  # P0-3 (docs/SPRINT_PILOT_BLOCKERS.md); ADR-051 (ownership), ADR-052
+  # (mechanism) -- both Accepted. Neither ADR ratifies these numbers:
+  # fixed-delay-ms is a configuration default mirroring pios.outbox.relay's
+  # own convention above; timeout-minutes is PD-2's own "single configurable
+  # operational parameter", explicitly left to real pilot data
+  # (PRODUCT_DECISION_ELECTRONIC_DISPATCHER_MVP_BLOCKERS.md PD-2), not
+  # invented here as a business rule.
+  proposal:
+    lapse:
+      fixed-delay-ms: 30000
+      timeout-minutes: 5
   # ADR-044 (Owner Authentication): the one credential `GET /v1/health`
   # checks. Deliberately left unset here -- an unset username/password-hash/
   # password-salt makes OwnerCredentialGate.isConfigured() false, which

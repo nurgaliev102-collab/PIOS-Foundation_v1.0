@@ -45,3 +45,26 @@ export function saveCurrentOrderId(driverCode: string, orderId: string): void {
     // documents for its own case.
   }
 }
+
+/**
+ * P0-1 (`docs/SPRINT_PILOT_BLOCKERS.md`): the missing half of this file --
+ * every order this file ever remembered was permanent, with no way for a
+ * passenger to reach a second ride with the same driver once the first one
+ * resolved (`RideRequest.tsx` had no path back to the order form). Removes
+ * only [driverCode]'s own entry -- every other driver's stored order id in
+ * the same map is untouched, mirroring [saveCurrentOrderId]'s own
+ * per-driver scope exactly.
+ */
+export function clearCurrentOrderId(driverCode: string): void {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) {
+      return
+    }
+    const parsed: CurrentOrderMap = JSON.parse(raw)
+    delete parsed[driverCode]
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed))
+  } catch {
+    // Storage may be unavailable -- same accepted limitation as above.
+  }
+}

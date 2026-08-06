@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { RideRequest } from './RideRequest'
 import { savePassengerIdentity } from '../../persistence/localPassengerIdentity'
-import { saveCurrentOrderId } from '../../persistence/localCurrentOrder'
+import { getCurrentOrderId, saveCurrentOrderId } from '../../persistence/localCurrentOrder'
 import { ApiError, request } from '../../api/apiClient'
 
 // Sprint 6 (Passenger Entry-Path Failure Handling): same defect as
@@ -131,5 +131,99 @@ describe('RideRequest', () => {
 
     expect(await screen.findByText(/больше не активен/)).toBeInTheDocument()
     expect(screen.queryByText(/свяжется с вами/)).not.toBeInTheDocument()
+  })
+
+  // --- P0-1: "Заказать ещё раз" at a terminal ride state (docs/SPRINT_PILOT_BLOCKERS.md) ---
+
+  it('offers "Заказать ещё раз" when the proposal was declined', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'DECLINED' }])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('button', { name: 'Заказать ещё раз' })).toBeInTheDocument()
+  })
+
+  it('offers "Заказать ещё раз" when the proposal lapsed', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'LAPSED' }])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('button', { name: 'Заказать ещё раз' })).toBeInTheDocument()
+  })
+
+  it('offers "Заказать ещё раз" when the ride completed', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('button', { name: 'Заказать ещё раз' })).toBeInTheDocument()
+  })
+
+  it('does not offer "Заказать ещё раз" while still waiting for the driver', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'OPEN' }])
+
+    renderAt('driver-1')
+
+    await screen.findByText(/Ждём ответа водителя/)
+    expect(screen.queryByRole('button', { name: 'Заказать ещё раз' })).not.toBeInTheDocument()
+  })
+
+  it('does not offer "Заказать ещё раз" while the ride is accepted but not yet completed', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
+
+    renderAt('driver-1')
+
+    await screen.findByText(/принял ваш заказ/)
+    expect(screen.queryByRole('button', { name: 'Заказать ещё раз' })).not.toBeInTheDocument()
+  })
+
+  it('clicking "Заказать ещё раз" clears only this driver\'s stored order id and returns to the form', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    saveCurrentOrderId('driver-2', 'order-2')
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'DECLINED' }])
+
+    renderAt('driver-1')
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Заказать ещё раз' }))
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    expect(getCurrentOrderId('driver-1')).toBeNull()
+    // A different driver's own current order, on the same passenger identity, is untouched.
+    expect(getCurrentOrderId('driver-2')).toBe('order-2')
+  })
+
+  it('submitting a new ride after "Заказать ещё раз" creates a new order, independent of the previous one', async () => {
+    saveCurrentOrderId('driver-1', 'order-old')
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'DECLINED' }])
+
+    renderAt('driver-1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Заказать ещё раз' }))
+    await screen.findByRole('heading', { name: 'Заказать поездку' })
+
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Новый адрес отправления')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Новый адрес назначения')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-new' })
+    mockedRequest.mockResolvedValueOnce({}) // attemptProposal's own POST /v1/proposals
+    mockedRequest.mockResolvedValue([{ status: 'OPEN' }]) // the new order's own status poll, from here on
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
+    expect(getCurrentOrderId('driver-1')).toBe('order-new')
   })
 })

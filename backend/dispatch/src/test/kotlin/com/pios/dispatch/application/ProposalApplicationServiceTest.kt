@@ -190,6 +190,44 @@ class ProposalApplicationServiceTest {
         }
     }
 
+    // --- Withdraw (ADR-053, Proposal Resolution on Order Cancellation) ---
+
+    @Test
+    fun `withdrawing a proposal matching the command produces a ProposalWithdrawn event`() {
+        val proposal = service.handle(ProposeDriverCommand(order, driver)).proposal
+        val command = WithdrawProposalCommand(proposal.id)
+
+        val event = service.withdrawProposal(proposal, command)
+
+        assertEquals(order, event.orderId)
+        assertEquals(driver, event.driverId)
+    }
+
+    @Test
+    fun `withdrawing a proposal persists its WITHDRAWN status through the repository`() {
+        val proposal = service.handle(ProposeDriverCommand(order, driver)).proposal
+
+        service.withdrawProposal(proposal, WithdrawProposalCommand(proposal.id))
+
+        assertEquals(ProposalStatus.WITHDRAWN, repository.findById(proposal.id)?.status)
+    }
+
+    @Test
+    fun `withdrawing a proposal by command only restores it from the repository first`() {
+        val proposal = service.handle(ProposeDriverCommand(order, driver)).proposal
+
+        service.withdrawProposal(WithdrawProposalCommand(proposal.id))
+
+        assertEquals(ProposalStatus.WITHDRAWN, repository.findById(proposal.id)?.status)
+    }
+
+    @Test
+    fun `withdrawing a proposal by command only throws ProposalNotFoundException when nothing was saved`() {
+        assertFailsWith<ProposalNotFoundException> {
+            service.withdrawProposal(WithdrawProposalCommand(ProposalId("never-saved")))
+        }
+    }
+
     @Test
     fun `accepting a proposal with a statedPrice persists it through the repository`() {
         val proposal = service.handle(ProposeDriverCommand(order, driver)).proposal

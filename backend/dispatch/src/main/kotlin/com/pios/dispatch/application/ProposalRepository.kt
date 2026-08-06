@@ -26,6 +26,21 @@ import com.pios.dispatch.domain.ProposalId
  * up a driver's own proposals by driver identity, a query no existing
  * caller needed before this sprint's UI.
  *
+ * [findOpen] was added for P0-3 (ADR-051, Proposal Lifecycle Resolution
+ * Ownership; ADR-052, Proposal Lapse Resolution Mechanism) — the
+ * architectural prerequisite ADR-052 itself names: a periodic sweep for
+ * `OPEN` Proposals whose waiting period may have elapsed has no way to
+ * enumerate its own targets without it, since [findByOrder]/[findByDriver]
+ * both require already knowing a specific order or driver in advance.
+ * Unbounded, no status or age filter beyond `OPEN` itself — mirroring
+ * [com.pios.dispatch.application.OutboxRepository.findUnpublished]'s own
+ * established convention of leaving row-count bounding undecided until a
+ * demonstrated need exists (No Premature Optimization). Age comparison
+ * against the configured timeout is an application-layer decision
+ * (ADR-051 Part 2), not this repository's concern — this method returns
+ * every currently `OPEN` Proposal and lets the caller decide which, if
+ * any, are stale.
+ *
  * Only Dispatch persists or changes Proposal information
  * (PERSISTENCE_ARCHITECTURE.md Section 3's "Domain-Owned Persistence"
  * principle, applied identically to this second logical entity); no
@@ -36,4 +51,5 @@ interface ProposalRepository {
     fun findById(id: ProposalId): Proposal?
     fun findByOrder(order: OrderReference): List<Proposal>
     fun findByDriver(driver: DriverReference): List<Proposal>
+    fun findOpen(): List<Proposal>
 }

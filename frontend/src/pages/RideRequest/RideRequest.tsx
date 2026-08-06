@@ -5,7 +5,7 @@ import { ActionButton } from '../../components/ActionButton'
 import { Spinner } from '../../components/Spinner'
 import { getInvitationByDriverCode } from '../PassengerLanding/invitationSource'
 import { getPassengerIdentity } from '../../persistence/localPassengerIdentity'
-import { getCurrentOrderId, saveCurrentOrderId } from '../../persistence/localCurrentOrder'
+import { clearCurrentOrderId, getCurrentOrderId, saveCurrentOrderId } from '../../persistence/localCurrentOrder'
 import { request } from '../../api/apiClient'
 import styles from './RideRequest.module.css'
 
@@ -126,6 +126,17 @@ const RIDE_STATUS_LABEL: Record<RideStatus, string> = {
  * used to describe ("Водитель свяжется с вами, чтобы уточнить место
  * посадки"): the address is now collected directly, so that copy is
  * removed rather than left inaccurate.
+ *
+ * P0-1 (`docs/SPRINT_PILOT_BLOCKERS.md`): `localCurrentOrder.ts` never
+ * cleared its own entry, so once this driver's current order reached
+ * `'DECLINED'`, `'LAPSED'`, or `'COMPLETED'`, this screen showed the
+ * correct terminal status but had no way back to the order form — ever,
+ * for this driver, from this device. [handleOrderAgain] is that way back:
+ * shown only for those three terminal `rideStatus` values, it clears this
+ * driver's own stored order id and resets straight to `'form'`. `'OPEN'`,
+ * `'ACCEPTED'`, `'ARRIVED'`, `'IN_PROGRESS'` are unchanged — a ride still
+ * pending or under way must not offer a second, concurrent order with the
+ * same driver.
  */
 export function RideRequest() {
   const { driverCode } = useParams<{ driverCode: string }>()
@@ -338,6 +349,23 @@ export function RideRequest() {
     }
   }
 
+  /**
+   * P0-1 (`docs/SPRINT_PILOT_BLOCKERS.md`): the passenger's own way back to
+   * the order form once this driver's current order has reached a state
+   * from which no further server-side progress is possible ('DECLINED',
+   * 'LAPSED', 'COMPLETED' -- see the `rideStatus` gate below). Clears only
+   * this driver's own stored order id (`localCurrentOrder.ts`'s own
+   * per-driver scope) -- a current order held with a different driver, on
+   * this same passenger identity, is untouched.
+   */
+  function handleOrderAgain() {
+    clearCurrentOrderId(driverCode ?? '')
+    setOrderId(null)
+    setProposalStatus(null)
+    setRideStatus('OPEN')
+    setStep('form')
+  }
+
   return (
     <div className={styles.screen}>
       <Header />
@@ -439,7 +467,21 @@ export function RideRequest() {
                 just submitted (proposalStatus 'proposed') or resumed after
                 a reload (proposalStatus never set at all). */}
             {(proposalStatus === 'proposed' || proposalStatus === null) && (
-              <p className={styles.status}>{RIDE_STATUS_LABEL[rideStatus]}</p>
+              <>
+                <p className={styles.status}>{RIDE_STATUS_LABEL[rideStatus]}</p>
+                {/* P0-1: a terminal ride state ('DECLINED', 'LAPSED',
+                    'COMPLETED') is exactly where this driver's link
+                    otherwise dead-ended forever -- 'OPEN', 'ACCEPTED',
+                    'ARRIVED', 'IN_PROGRESS' keep today's behavior
+                    unchanged, since a ride still in progress must not
+                    offer a second, concurrent order with the same
+                    driver. */}
+                {(rideStatus === 'DECLINED' || rideStatus === 'LAPSED' || rideStatus === 'COMPLETED') && (
+                  <div className={styles.actionRow}>
+                    <ActionButton label="Заказать ещё раз" variant="primary" onClick={handleOrderAgain} />
+                  </div>
+                )}
+              </>
             )}
           </>
         )}

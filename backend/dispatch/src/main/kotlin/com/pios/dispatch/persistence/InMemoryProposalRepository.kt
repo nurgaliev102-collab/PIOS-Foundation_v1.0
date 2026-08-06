@@ -5,6 +5,7 @@ import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import com.pios.dispatch.domain.Proposal
 import com.pios.dispatch.domain.ProposalId
+import com.pios.dispatch.domain.ProposalStatus
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -25,4 +26,6 @@ class InMemoryProposalRepository : ProposalRepository {
     override fun findByOrder(order: OrderReference): List<Proposal> = store.values.filter { it.order == order }
 
     override fun findByDriver(driver: DriverReference): List<Proposal> = store.values.filter { it.driver == driver }
+
+    override fun findOpen(): List<Proposal> = store.values.filter { it.status == ProposalStatus.OPEN }
 }

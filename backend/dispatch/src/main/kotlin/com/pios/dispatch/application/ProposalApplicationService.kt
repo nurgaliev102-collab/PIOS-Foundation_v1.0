@@ -5,15 +5,23 @@ import com.pios.dispatch.domain.ProposalAccepted
 import com.pios.dispatch.domain.ProposalCreated
 import com.pios.dispatch.domain.ProposalDeclined
 import com.pios.dispatch.domain.ProposalLapsed
+import com.pios.dispatch.domain.ProposalWithdrawn
 import org.springframework.stereotype.Service
 
 /**
  * Application-layer coordination for the Propose Driver, Accept Proposal,
- * Decline Proposal, and Lapse Proposal commands. This service sequences
- * each command into the Proposal aggregate's own behavior; it does not
- * decide the proposal or its resolution itself
+ * Decline Proposal, Lapse Proposal, and Withdraw Proposal commands. This
+ * service sequences each command into the Proposal aggregate's own
+ * behavior; it does not decide the proposal or its resolution itself
  * (APPLICATION_ARCHITECTURE.md Section 2, "Domain Decides Business
  * Meaning").
+ *
+ * [withdrawProposal] (ADR-053, Proposal Resolution on Order Cancellation)
+ * is invoked only by [OrderCancelledApplicationService], Dispatch's own
+ * application-layer consumer of Order Management's `OrderCancelled` —
+ * never directly by a controller, since ADR-053 authorizes no manual
+ * withdraw endpoint (Part 4: "Not authorized by this ADR: a manual
+ * `POST /v1/proposals/{id}/withdraw` endpoint").
  *
  * [handle] loads [ProposalRepository.findByOrder] itself, rather than
  * requiring the caller to supply the order's existing proposals as
@@ -179,5 +187,30 @@ class ProposalApplicationService(
         val proposal = proposalRepository.findById(command.proposalId)
             ?: throw ProposalNotFoundException(command.proposalId)
         lapseProposal(proposal, command)
+    }
+
+    /**
+     * Withdraws the given [proposal], per the Withdraw Proposal command
+     * (ADR-053). [proposal] must be the one referenced by [command].
+     */
+    fun withdrawProposal(proposal: Proposal, command: WithdrawProposalCommand): ProposalWithdrawn = transactionRunner.run {
+        require(proposal.id == command.proposalId) {
+            "Proposal ${proposal.id.value} does not match command target ${command.proposalId.value}"
+        }
+        val event = proposal.withdraw()
+        proposalRepository.save(proposal)
+        event
+    }
+
+    /**
+     * Withdraws the proposal referenced by [command] by first restoring it
+     * through [proposalRepository]. Throws [ProposalNotFoundException] if
+     * no Proposal identified by [WithdrawProposalCommand.proposalId] has
+     * been saved.
+     */
+    fun withdrawProposal(command: WithdrawProposalCommand): ProposalWithdrawn = transactionRunner.run {
+        val proposal = proposalRepository.findById(command.proposalId)
+            ?: throw ProposalNotFoundException(command.proposalId)
+        withdrawProposal(proposal, command)
     }
 }

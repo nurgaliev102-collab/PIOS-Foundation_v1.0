@@ -96,6 +96,23 @@ abstract class ProposalRepositoryContractTest {
     }
 
     @Test
+    fun `a withdrawn proposal can be found by its id with its status intact (ADR-053)`() {
+        // This is the specific regression this test exists to catch: the
+        // Architectural Prerequisite ADR-053 named -- PostgreSQLProposalRepository.reconstruct()'s
+        // own `when (status)` block is a statement, not an expression, so
+        // Kotlin does not force it to handle WITHDRAWN. Without the
+        // corresponding branch, this assertion would silently see OPEN
+        // instead, with no compile error.
+        val repository = createRepository()
+        val created = Proposal.propose(OrderReference("contract-test-order-5"), DriverReference("contract-test-driver-5"))
+        created.proposal.withdraw()
+
+        repository.save(created.proposal)
+
+        assertEquals(ProposalStatus.WITHDRAWN, repository.findById(created.proposal.id)?.status)
+    }
+
+    @Test
     fun `findByDriver returns only proposals for that driver`() {
         val repository = createRepository()
         val driver = DriverReference("contract-test-findbydriver-driver")

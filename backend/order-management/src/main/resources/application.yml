@@ -18,6 +18,23 @@ spring:
 server:
   port: 8083
 
+# T-1 (ENGINEERING_EXECUTION_PLAN_SPRINT_1_PLATFORM_OPERATIONS_MVP.md): a
+# rolling log file, so one exists before this module becomes a Windows
+# service (ADR-049 Decision 5 -- once that happens, the bootRun console
+# disappears entirely, not just becomes inconvenient, and this file is all
+# that is left). Shared directory: `backend/logs/`, one level above every
+# module's own working directory, so a future reader (ADR-050's tier-3
+# endpoint, or a human) finds all five logs in one place. Retention is O-8's
+# own recommendation, not yet a separately ratified number.
+logging:
+  file:
+    name: ../logs/order-management.log
+  logback:
+    rollingpolicy:
+      max-file-size: 20MB
+      max-history: 14
+      total-size-cap: 500MB
+
 # Implementation Plan: Production Outbox Relay Trigger v1.0. Interval, in
 # milliseconds, between the end of one OutboxRelayScheduler tick and the
 # start of the next -- a configuration default, not a product invariant.
