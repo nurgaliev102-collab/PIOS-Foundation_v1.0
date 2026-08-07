@@ -8,7 +8,7 @@
   <!-- Preserves the working-directory invariant LOG_DIRECTORY_POLICY.md requires:
        must match gradlew bootRun's own default so `logging.file.name: ../logs/...`
        (T-1) keeps resolving to backend/logs/ unchanged. -->
-  <env name="PIOS_PILOT_FRONTEND_ORIGIN" value="http://192.168.0.102:5173"/>
+  <env name="PIOS_PILOT_FRONTEND_ORIGIN" value="https://piosapp.ru"/>
   <!-- The application already writes its own rolling file log (T-1, ADR-049
        Decision 5) via Logback. WinSW's own wrapper log is disabled so there
        is exactly one log file per module, not two divergent copies. -->

@@ -1,0 +1,20 @@
+<service>
+  <id>pios-cloudflared</id>
+  <name>PIOS Cloudflare Tunnel</name>
+  <description>Named Cloudflare Tunnel exposing the PIOS pilot surface (frontend on 127.0.0.1:4173) at a stable public HTTPS hostname, so driver invitation links survive a restart. Decision and full setup: docs/PIOS_NAMED_TUNNEL_DEPLOYMENT.md. Deliberately points only at the frontend, never directly at any of the five backend modules -- exactly as `frontend/vite.config.ts`'s own `preview.proxy` table already fans requests out to them (PIOS_PILOT_INFRASTRUCTURE_DECISION.md; PILOT_INFRASTRUCTURE_ROUTING_DECISION.md Variant A). Does not touch, replace, or route to `platform-ops` -- that hostname, if it is ever added, is separate, unratified work under ADR-048 and is explicitly out of scope of this service.</description>
+  <executable>C:\Program Files (x86)\cloudflared\cloudflared.exe</executable>
+  <arguments>tunnel --config C:\Projects\PIOS-Foundation_v1.0\windows-services\cloudflared\config.yml run</arguments>
+  <workingdirectory>C:\Projects\PIOS-Foundation_v1.0\windows-services\cloudflared</workingdirectory>
+  <!-- config.yml is deliberately NOT checked into git (see .gitignore) --
+       it is created once, by hand, during setup
+       (docs/PIOS_NAMED_TUNNEL_DEPLOYMENT.md), and its own
+       credentials-file reference points at the tunnel's private key
+       material, which must never leave this machine or enter version
+       control. -->
+  <log mode="none"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <onfailure action="restart" delay="120 sec"/>
+  <resetfailure>24 hours</resetfailure>
+  <startmode>Automatic</startmode>
+</service>

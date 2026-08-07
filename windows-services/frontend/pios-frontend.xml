@@ -3,7 +3,7 @@
   <name>PIOS Frontend</name>
   <description>PIOS frontend, served from the production build via `vite preview`. T-2 of ENGINEERING_EXECUTION_PLAN_SPRINT_1_PLATFORM_OPERATIONS_MVP.md; grounded in ADR-049 Decisions 1-2. Runs `node.exe` directly against Vite's own CLI script rather than through npm.cmd, so WinSW's stop signal reaches the actual Node process instead of an intermediate cmd shell.</description>
   <executable>C:\Program Files\nodejs\node.exe</executable>
-  <arguments>node_modules\vite\bin\vite.js preview --host 0.0.0.0 --port 5173</arguments>
+  <arguments>node_modules\vite\bin\vite.js preview --host 0.0.0.0 --port 4173 --strictPort</arguments>
   <workingdirectory>C:\Projects\PIOS-Foundation_v1.0\frontend</workingdirectory>
   <!-- The host argument above (0.0.0.0) is not optional: this machine's
        IPv6 loopback is broken, diagnosed earlier this session as a
@@ -12,7 +12,16 @@
        broken IPv6 address, exactly as happened with the plain dev server
        before an explicit host override proved the fix. 0.0.0.0 here, not
        127.0.0.1, is deliberate: O-2 requires phone and LAN reachability,
-       not just localhost. -->
+       not just localhost.
+
+       Port 4173, not 5173: this is `PIOS_PILOT_INFRASTRUCTURE_DECISION.md`
+       Section 4's own port for the tunnelled pilot surface, not the
+       LAN-only port used before the named-tunnel decision
+       (docs/PIOS_NAMED_TUNNEL_DEPLOYMENT.md records that decision).
+       `--strictPort` matches the same document's own launch command
+       exactly: if 4173 is already taken, this service must fail loudly
+       rather than silently bind a different port `vite.config.ts`'s
+       `preview.allowedHosts` and the tunnel's own config do not expect. -->
   <log mode="none"/>
   <onfailure action="restart" delay="30 sec"/>
   <onfailure action="restart" delay="60 sec"/>

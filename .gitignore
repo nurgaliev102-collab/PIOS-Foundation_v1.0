@@ -246,5 +246,15 @@ yarn-error.log*
 # configuration next to it is committed.
 windows-services/**/*.exe
 
+# Cloudflare named tunnel (docs/PIOS_NAMED_TUNNEL_DEPLOYMENT.md): config.yml
+# and the tunnel credentials JSON are created once, by hand, on the machine
+# that runs the tunnel. The credentials file is the tunnel's private key
+# material -- it must never enter version control. config.yml itself isn't
+# secret, but it's machine-specific (absolute paths, tunnel ID) and kept
+# alongside it rather than split across "committed" and "not committed"
+# halves of the same setup step.
+windows-services/cloudflared/config.yml
+windows-services/cloudflared/*.json
+
 # Rolling log files (T-1, ADR-049 Decision 5) -- runtime output, not source.
 backend/logs/
