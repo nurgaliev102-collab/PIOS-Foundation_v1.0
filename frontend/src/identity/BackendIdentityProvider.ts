@@ -8,6 +8,15 @@ const IDENTITY_BASE_URL = import.meta.env.VITE_IDENTITY_BASE_URL ?? 'http://loca
 
 const STORAGE_KEY = 'pios.identity'
 
+/** `POST /v1/identities/register|login`'s own response shape (ADR-055 Decision 3). */
+interface AuthResponse {
+  identityId: string
+  driverId: string | null
+  token: string
+  expiresAt: string
+}
+
+/** `GET /v1/identities/me` and `POST /v1/identities/{id}/driver`'s own response shape (ADR-055 Decision 3). */
 interface IdentityApiResponse {
   id: string
   phone: string | null
@@ -15,20 +24,11 @@ interface IdentityApiResponse {
 }
 
 /**
- * Today's only [IdentityProvider] (ADR-039). Storage on this device
- * remembers *which* identity is this device's own — the identity itself,
- * and its driver association, are real records on the `identity` backend,
- * not fabricated locally. This is still not authentication: nothing here
- * proves the person using this device is who the stored identity claims to
- * be, the same honesty `ADR-038`/`ADR-039` already state as their explicit
- * scope boundary.
- *
- * Sprint 2 (Identity MVP): [restoreIdentity] is the only method that reads
- * the local pointer and then calls the backend to confirm it — every
- * other read (`getStoredIdentity`) stays a synchronous local cache read.
- * Re-entry ("повторный вход") therefore reflects `identity`'s own current,
- * real state, not a value cached indefinitely on a device that could go
- * stale.
+ * Today's only [IdentityProvider] (ADR-039, extended by ADR-055). Storage
+ * on this device holds a real, verifiable session — a signed token the
+ * backend actually checks, not just an id it hands back to whoever asks
+ * (that was the gap ADR-055 closed; `POST /v1/identities` with no
+ * credential no longer exists).
  */
 export class BackendIdentityProvider implements IdentityProvider {
   getStoredIdentity(): StoredIdentity | null {
@@ -44,65 +44,90 @@ export class BackendIdentityProvider implements IdentityProvider {
     }
   }
 
-  async createIdentity(): Promise<StoredIdentity> {
-    const response = await request<IdentityApiResponse>('/v1/identities', {
+  async register(phone: string, password: string): Promise<StoredIdentity> {
+    const response = await request<AuthResponse>('/v1/identities/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ phone, password }),
       baseUrl: IDENTITY_BASE_URL,
     })
-    const identity: StoredIdentity = { identityId: response.id, driverId: response.driverId }
-    this.persist(identity)
-    return identity
+    return this.persistAuthResponse(response)
+  }
+
+  async login(phone: string, password: string): Promise<StoredIdentity> {
+    const response = await request<AuthResponse>('/v1/identities/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, password }),
+      baseUrl: IDENTITY_BASE_URL,
+    })
+    return this.persistAuthResponse(response)
+  }
+
+  logout(): void {
+    this.clear()
   }
 
   async attachDriver(driverId: string): Promise<StoredIdentity> {
     const current = this.getStoredIdentity()
     if (!current) {
-      throw new Error('attachDriver called before an identity exists')
+      throw new Error('attachDriver called before a session exists')
     }
     const response = await request<IdentityApiResponse>(`/v1/identities/${current.identityId}/driver`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${current.token}` },
       body: JSON.stringify({ driverId }),
       baseUrl: IDENTITY_BASE_URL,
     })
-    const identity: StoredIdentity = { identityId: response.id, driverId: response.driverId }
+    const identity: StoredIdentity = { ...current, driverId: response.driverId }
     this.persist(identity)
     return identity
   }
 
-  /**
-   * Sprint 2 (Identity MVP): see [IdentityProvider.restoreIdentity]'s own
-   * KDoc for the contract. This is the only place `getStoredIdentity`'s
-   * cache is cross-checked against the backend — every other read in this
-   * class stays synchronous and local, unchanged.
-   */
+  /** See [IdentityProvider.restoreIdentity]'s own KDoc for the contract. */
   async restoreIdentity(): Promise<StoredIdentity | null> {
     const cached = this.getStoredIdentity()
     if (!cached) {
       return null
     }
+    if (new Date(cached.expiresAt).getTime() <= Date.now()) {
+      // Expired on this device's own clock -- no point spending a round
+      // trip to learn what a local check already knows.
+      this.clear()
+      return null
+    }
     try {
-      const response = await request<IdentityApiResponse>(`/v1/identities/${cached.identityId}`, {
+      const response = await request<IdentityApiResponse>('/v1/identities/me', {
+        headers: { Authorization: `Bearer ${cached.token}` },
         baseUrl: IDENTITY_BASE_URL,
       })
-      const identity: StoredIdentity = { identityId: response.id, driverId: response.driverId }
+      const identity: StoredIdentity = { ...cached, driverId: response.driverId }
       this.persist(identity)
       return identity
     } catch (error) {
-      if (error instanceof ApiError && error.status === 404) {
-        // This device's own pointer no longer resolves to anything the
-        // backend recognizes -- clear it so the welcome screen offers a
-        // fresh start instead of getting stuck pointing at nothing.
+      if (error instanceof ApiError && (error.status === 401 || error.status === 404)) {
+        // This device's own session no longer resolves to anything the
+        // backend accepts -- clear it so the welcome screen offers a fresh
+        // sign-in instead of getting stuck pointing at nothing.
         this.clear()
         return null
       }
       // Any other failure (offline, backend briefly down): keep the
-      // cached pointer and let the caller use it, rather than force a
-      // person back into onboarding over a momentary network problem.
+      // cached session and let the caller use it, rather than sign a
+      // person out over a momentary network problem.
       return cached
     }
+  }
+
+  private persistAuthResponse(response: AuthResponse): StoredIdentity {
+    const identity: StoredIdentity = {
+      identityId: response.identityId,
+      driverId: response.driverId,
+      token: response.token,
+      expiresAt: response.expiresAt,
+    }
+    this.persist(identity)
+    return identity
   }
 
   private persist(identity: StoredIdentity): void {
@@ -110,9 +135,8 @@ export class BackendIdentityProvider implements IdentityProvider {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(identity))
     } catch {
       // Storage may be unavailable (private browsing, quota exceeded). The
-      // identity still exists on the backend; only this device's own
-      // pointer to it fails to survive a reload — same accepted limitation
-      // `localPassengerIdentity.ts` already documents for its own case.
+      // session still exists on the backend; only this device's own
+      // pointer to it fails to survive a reload.
     }
   }
 
@@ -130,5 +154,10 @@ function isStoredIdentity(value: unknown): value is StoredIdentity {
     return false
   }
   const candidate = value as Record<string, unknown>
-  return typeof candidate.identityId === 'string' && (candidate.driverId === null || typeof candidate.driverId === 'string')
+  return (
+    typeof candidate.identityId === 'string' &&
+    (candidate.driverId === null || typeof candidate.driverId === 'string') &&
+    typeof candidate.token === 'string' &&
+    typeof candidate.expiresAt === 'string'
+  )
 }

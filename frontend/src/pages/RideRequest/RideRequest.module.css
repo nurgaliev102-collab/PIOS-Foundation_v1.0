@@ -110,6 +110,86 @@
   color: #0f172a;
 }
 
+/* Sprint "My Business + Circle of Trust" (ADR-054): the circle-of-trust
+   step needs left-aligned rows, unlike this screen's own centered default
+   (.content above) -- each card stretches to the full content width. */
+.circleCard {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.875rem 1rem;
+  margin-top: 0.5rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.circleSectionLabel {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.circleName {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.circleMemberRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0;
+  border-top: 1px solid #f1f5f9;
+}
+
+.circleMemberRow:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.circleMemberActions {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.textAction {
+  padding: 0;
+  font-size: 0.8125rem;
+  color: #64748b;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.confirmBox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.875rem 1rem;
+  margin-top: 0.5rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-sizing: border-box;
+}
+
 @media (min-width: 640px) {
   .content {
     gap: 0.625rem;

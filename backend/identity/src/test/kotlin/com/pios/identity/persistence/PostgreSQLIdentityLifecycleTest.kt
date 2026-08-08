@@ -58,7 +58,16 @@ class PostgreSQLIdentityLifecycleTest {
     @Test
     fun `re-registering a driver association on reopen overwrites the previous one, not duplicates it`() {
         val repository = freshRepository()
-        val created = CreateIdentityApplicationService(repository).handle(CreateIdentityCommand("+79991234567"))
+        // ADR-055 added a unique index on `identities.phone`; this test's
+        // own phone value must therefore be unique per run, not a shared
+        // literal -- the same database persists across repeated runs of
+        // this suite (no per-test rollback, per this class's own KDoc), so
+        // a fixed literal would collide with a row a previous run already
+        // committed. The specific phone value is otherwise incidental to
+        // what this test actually proves (driver reassociation, not phone
+        // uniqueness).
+        val phone = uniqueTestPhone()
+        val created = CreateIdentityApplicationService(repository).handle(CreateIdentityCommand(phone))
         AssociateDriverApplicationService(repository)
             .handle(AssociateDriverCommand(created.id.value, "postgres-identity-lifecycle-driver-2a"))
 
@@ -71,6 +80,8 @@ class PostgreSQLIdentityLifecycleTest {
 
         val reopened = RetrieveIdentityHandler(freshRepository()).handle(created.id)
         assertEquals("postgres-identity-lifecycle-driver-2b", reopened.driverId)
-        assertEquals("+79991234567", reopened.phone?.value)
+        assertEquals(phone, reopened.phone?.value)
     }
+
+    private fun uniqueTestPhone(): String = "+7999" + System.nanoTime().toString().takeLast(7)
 }

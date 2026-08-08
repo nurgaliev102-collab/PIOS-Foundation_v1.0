@@ -15,6 +15,18 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
  * Sprint 8.5 (Pilot Deployment Preparation): an additional origin read
  * from `PIOS_PILOT_FRONTEND_ORIGIN`, when set, is allowed alongside the
  * local dev origin — see that class's own KDoc for the reasoning.
+ *
+ * Bug found and fixed during the "Final Pre-Pilot Sprint" security review:
+ * `DELETE` was missing here even though `ConnectionController`'s own
+ * `DELETE /v1/connections/{connectionId}` (ADR-054, Circle of Trust) has
+ * existed since the previous Sprint. `DELETE` is never a CORS "simple"
+ * method, so a browser always preflights it — with `DELETE` absent from
+ * `allowedMethods`, that preflight failed and the browser blocked the real
+ * request before it ever reached this server. Backend unit/integration
+ * tests never exercise CORS at all (it is purely a browser-enforced
+ * mechanism), which is why this shipped unnoticed; it would only have
+ * surfaced the first time a real browser tried "Удалить" from the circle
+ * of trust.
  */
 @Configuration
 class WebCorsConfiguration : WebMvcConfigurer {
@@ -22,7 +34,7 @@ class WebCorsConfiguration : WebMvcConfigurer {
         val origins = listOfNotNull(FRONTEND_DEV_ORIGIN, System.getenv("PIOS_PILOT_FRONTEND_ORIGIN"))
         registry.addMapping("/v1/**")
             .allowedOrigins(*origins.toTypedArray())
-            .allowedMethods("GET", "POST")
+            .allowedMethods("GET", "POST", "DELETE")
             .allowedHeaders("*")
     }
 

@@ -4,13 +4,15 @@ import java.time.Instant
 
 /**
  * Documents the future shape of "an active, logged-in session for an
- * [Identity] on a [Device]" (ADR-038, Этап 3). Deliberately not decided
- * here whether a real implementation would persist sessions in a table
- * like this one, or issue stateless signed tokens instead (a JWT-style
- * credential needs no server-side row at all) — that choice belongs to
- * whichever future ADR actually implements login, not to this one, which
- * only records that the question exists. Unreferenced by any application
- * service; no database table backs it.
+ * [Identity] on a [Device]" (ADR-038, Этап 3). Originally left the choice
+ * of persisted-table-vs-stateless-token open for whichever future ADR
+ * implemented login. ADR-055 (Session Authentication and Password
+ * Credential) is that ADR, and answers: stateless signed tokens, no
+ * table — see `com.pios.identity.application.SessionTokenIssuer` and
+ * `com.pios.identity.api.SessionTokenVerifier`. This class itself remains
+ * unreferenced by any application service and no database table backs
+ * it; the resolved answer is implemented elsewhere, not by wiring this
+ * type to a real mechanism.
  */
 data class Session(
     val id: SessionId,

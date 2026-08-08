@@ -57,6 +57,13 @@ export class ApiError extends Error {
  * file's own config already anticipated. Omitting it keeps every
  * existing caller (e.g. Driver Home's `GET /v1/drivers/...`) unchanged,
  * defaulting to [apiClientConfig.baseUrl] as before.
+ *
+ * Sprint "My Business + Circle of Trust" (ADR-054): `DELETE
+ * /v1/connections/{id}` is this project's first endpoint to ever answer
+ * 204 No Content — every caller before it returned a JSON body on success.
+ * `Response.json()` throws on an empty body, so a 204 is returned as
+ * `undefined` without attempting to parse one; every existing caller is
+ * unaffected, since none of them receives 204 today.
  */
 export async function request<T>(path: string, init?: RequestInit & { baseUrl?: string }): Promise<T> {
   const { baseUrl, ...fetchInit } = init ?? {}
@@ -69,6 +76,9 @@ export async function request<T>(path: string, init?: RequestInit & { baseUrl?: 
   })
   if (!response.ok) {
     throw new ApiError(response.status, path)
+  }
+  if (response.status === 204) {
+    return undefined as T
   }
   return (await response.json()) as T
 }

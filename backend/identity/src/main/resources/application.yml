@@ -48,3 +48,25 @@ logging:
 #       failure-delay-ms: 500
 #       max-failures-per-window: 20
 #       window-ms: 900000
+
+# ADR-055 (Session Authentication and Password Credential): the shared
+# HMAC secret SessionTokenIssuer signs with and SessionTokenVerifier
+# checks against. Deliberately left unset here -- an unset
+# pios.session.secret makes SessionTokenIssuer.issue() throw (register/
+# login cannot succeed) and every SessionTokenVerifier.verify() return
+# null (every protected endpoint returns 401), the same fail-closed
+# posture pios.owner.* already establishes above. Every module that
+# verifies a session token (today: identity itself and
+# passenger-experience) must be configured with the exact same
+# pios.session.secret -- issuing and verifying share one secret
+# (ADR-055's own disclosed Consequence).
+# pios:
+#   session:
+#     secret: ""
+#     ttl-seconds: 2592000
+#   identity:
+#     password-iterations: 210000
+#     login:
+#       failure-delay-ms: 500
+#       max-failures-per-window: 20
+#       window-ms: 900000

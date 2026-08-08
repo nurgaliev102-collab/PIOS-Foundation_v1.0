@@ -48,6 +48,29 @@ class PostgreSQLConnectionRepository(
             driverId.driverId
         )
 
+    override fun findByPassenger(passengerReference: PassengerReference): List<Connection> =
+        jdbcTemplate.query(
+            "SELECT id, driver_id, passenger_reference, created_at FROM connections WHERE passenger_reference = ?",
+            { rs, _ -> rs.toConnection() },
+            passengerReference.passengerId
+        )
+
+    override fun findById(id: ConnectionId): Connection? {
+        val rows = jdbcTemplate.query(
+            "SELECT id, driver_id, passenger_reference, created_at FROM connections WHERE id = ?",
+            { rs, _ -> rs.toConnection() },
+            id.value
+        )
+        return rows.firstOrNull()
+    }
+
+    override fun deleteById(id: ConnectionId) {
+        // The database's own ON DELETE CASCADE (V2__create_primary_connections.sql)
+        // removes any primary_connections row pointing at this connection --
+        // no application-layer cleanup step here, per ADR-054 Part 2.
+        jdbcTemplate.update("DELETE FROM connections WHERE id = ?", id.value)
+    }
+
     private fun java.sql.ResultSet.toConnection(): Connection = Connection(
         id = ConnectionId(getString("id")),
         driverId = DriverReference(getString("driver_id")),

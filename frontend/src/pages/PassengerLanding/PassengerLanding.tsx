@@ -5,12 +5,21 @@ import { ActionButton } from '../../components/ActionButton'
 import { Spinner } from '../../components/Spinner'
 import { getInvitationByDriverCode } from './invitationSource'
 import type { InvitationInfo } from './invitationSource'
-import { getPassengerIdentity, savePassengerIdentity } from '../../persistence/localPassengerIdentity'
-import type { PassengerIdentity } from '../../persistence/localPassengerIdentity'
-import { request } from '../../api/apiClient'
+import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
+import type { StoredIdentity } from '../../identity/IdentityProvider'
+import { saveDisplayName } from '../../persistence/localDisplayName'
+import { ApiError, request } from '../../api/apiClient'
 import styles from './PassengerLanding.module.css'
 
+// ADR-038/ADR-039/ADR-055: today's only IdentityProvider — see its own
+// KDoc for why this is safe to instantiate once, module-level, exactly
+// like `DriverHome.tsx`'s own copy already does. The same backend account
+// serves both roles this app has; a passenger simply never calls
+// `attachDriver`.
+const identityProvider = new BackendIdentityProvider()
+
 const MAX_NAME_LENGTH = 50
+const MIN_PASSWORD_LENGTH = 8
 
 // Passenger Experience's own local port (INTERFACE_CONTRACTS.md) — Sprint
 // 7B (Personal Network Flow MVP): this page now also calls that module
@@ -18,7 +27,13 @@ const MAX_NAME_LENGTH = 50
 // driver's own invitation link.
 const PASSENGER_EXPERIENCE_BASE_URL = import.meta.env.VITE_PASSENGER_EXPERIENCE_BASE_URL ?? 'http://localhost:8082'
 
-type Step = 'loading' | 'not-found' | 'error' | 'invited' | 'onboarding' | 'confirmed'
+type Step = 'loading' | 'not-found' | 'error' | 'invited' | 'auth' | 'confirmed' | 'confirm-add'
+type AuthMode = 'register' | 'login'
+
+/** The one field this page needs from `GET /v1/connections?passengerReference=...` (ADR-054) — just enough to check membership. */
+interface CircleMembership {
+  driverId: string
+}
 
 const FAQ_ITEMS: Array<{ question: string; answer: string }> = [
   {
@@ -43,10 +58,10 @@ const FAQ_ITEMS: Array<{ question: string; answer: string }> = [
  * rule, it must answer three questions before any registration form
  * appears: who invited them, what they get, and what to do next.
  *
- * A returning passenger (a local identity already exists,
- * `persistence/localPassengerIdentity.ts`) never sees any of this again —
- * this page redirects straight to Ride Request instead, per this sprint's
- * own explicit "не показывать инструкцию повторно" rule.
+ * A returning passenger (a real, backend-verified session already exists —
+ * ADR-055) never sees any of this again — this page redirects straight to
+ * Ride Request instead, per this sprint's own explicit "не показывать
+ * инструкцию повторно" rule.
  *
  * No internal term (Connection, Proposal, Assignment, Dispatch,
  * Passenger, Driver ID) appears in any user-facing string on this page —
@@ -57,9 +72,14 @@ export function PassengerLanding() {
   const navigate = useNavigate()
   const [step, setStep] = useState<Step>('loading')
   const [invitation, setInvitation] = useState<InvitationInfo | null>(null)
-  const [identity, setIdentity] = useState<PassengerIdentity | null>(null)
+  const [identity, setIdentity] = useState<StoredIdentity | null>(null)
+  const [authMode, setAuthMode] = useState<AuthMode>('register')
   const [name, setName] = useState('')
-  const [nameError, setNameError] = useState<string | null>(null)
+  const [phone, setPhone] = useState('')
+  const [password, setPassword] = useState('')
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
+  const [addStatus, setAddStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
 
   // Sprint 6 (Passenger Entry-Path Failure Handling): pulled out of the
   // effect (mirrors DriverHome.tsx's own loadDriver) so the same fetch can
@@ -80,16 +100,84 @@ export function PassengerLanding() {
         return
       }
       setInvitation(result.invitation)
-      const existingIdentity = getPassengerIdentity()
-      if (existingIdentity) {
-        // Returning passenger: the welcome screen and its instructions
-        // already did their job on a previous visit — go straight to
-        // creating an order.
-        navigate(`/i/${forDriverCode}/request`, { replace: true })
-        return
-      }
-      setStep('invited')
+      identityProvider.restoreIdentity().then((restored) => {
+        if (!active) {
+          return
+        }
+        if (restored) {
+          // Returning passenger: the welcome screen and its instructions
+          // already did their job on a previous visit. Whether this specific
+          // driver is already in their circle of trust still needs checking
+          // (Rule 9, `PRODUCT_DECISION_CIRCLE_OF_TRUST.md`: adding one is
+          // never silent) — see [checkCircleThenAdvance].
+          setIdentity(restored)
+          checkCircleThenAdvance(active, restored, forDriverCode)
+          return
+        }
+        setStep('invited')
+      })
     })
+  }
+
+  /**
+   * Rule 9 (`PRODUCT_DECISION_CIRCLE_OF_TRUST.md`): a returning passenger
+   * opening a driver's link for the first time must not be silently added
+   * to that driver's circle — only opening a link they already recognize
+   * (already a member) skips straight through, exactly as before this
+   * Sprint. Best-effort: if membership can't be determined, this falls back
+   * to today's own behavior rather than blocking the passenger from
+   * ordering at all.
+   */
+  function checkCircleThenAdvance(active: boolean, forIdentity: StoredIdentity, forDriverCode: string) {
+    request<CircleMembership[]>(`/v1/connections?passengerReference=${forIdentity.identityId}`, {
+      headers: { Authorization: `Bearer ${forIdentity.token}` },
+      baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
+    })
+      .then((members) => {
+        if (!active) {
+          return
+        }
+        const alreadyConnected = members.some((member) => member.driverId === forDriverCode)
+        if (alreadyConnected) {
+          navigate(`/i/${forDriverCode}/request`, { replace: true })
+        } else {
+          setStep('confirm-add')
+        }
+      })
+      .catch(() => {
+        if (active) {
+          navigate(`/i/${forDriverCode}/request`, { replace: true })
+        }
+      })
+  }
+
+  /**
+   * P0 (Section 16, "Final Pre-Pilot Sprint"): this used to be fire-and-
+   * forget — a failed create silently sent the passenger straight to the
+   * order form as if it had worked. A passenger explicitly asked to add
+   * someone to their circle of trust must be told honestly whether that
+   * actually happened.
+   */
+  async function handleAddToCircle() {
+    if (!identity) {
+      return
+    }
+    setAddStatus('submitting')
+    try {
+      await request('/v1/connections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity.token}` },
+        body: JSON.stringify({ driverId: driverCode ?? '', passengerReference: identity.identityId }),
+        baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
+      })
+      navigate(`/i/${driverCode ?? ''}/request`)
+    } catch {
+      setAddStatus('error')
+    }
+  }
+
+  function handleSkipAdd() {
+    navigate(`/i/${driverCode ?? ''}/request`)
   }
 
   useEffect(() => {
@@ -101,47 +189,112 @@ export function PassengerLanding() {
   }, [driverCode, navigate])
 
   function handleContinue() {
-    setStep('onboarding')
+    setStep('auth')
   }
 
-  function handleNameChange(value: string) {
-    setName(value)
-    if (nameError) {
-      setNameError(null)
+  function handleFieldChange(setter: (value: string) => void) {
+    return (value: string) => {
+      setter(value)
+      if (authError) {
+        setAuthError(null)
+      }
     }
   }
 
-  async function handleNameSubmit() {
-    const trimmed = name.trim()
-    if (!trimmed) {
-      setNameError('Пожалуйста, введите имя.')
-      return
-    }
-    if (trimmed.length > MAX_NAME_LENGTH) {
-      setNameError(`Имя должно быть короче ${MAX_NAME_LENGTH} символов.`)
-      return
-    }
-    const saved = savePassengerIdentity(trimmed)
-    setIdentity(saved)
-    setStep('confirmed')
+  function toggleAuthMode() {
+    setAuthMode((current) => (current === 'register' ? 'login' : 'register'))
+    setAuthError(null)
+  }
 
-    // Sprint 7B (Personal Network Flow MVP): records the connection this
-    // invitation just created. Idempotent on the backend (opening the same
-    // link again returns 200, not a duplicate), so no local guard against
-    // calling this more than once is needed. Deliberately not blocking or
-    // surfaced to the passenger on failure: this is bookkeeping for a
-    // feature (Ride Request auto-proposing to this driver) the passenger
-    // has not reached yet, not something their own onboarding should stall
-    // on.
+  /**
+   * ADR-055: a brand-new account, created specifically through this
+   * driver's own invitation link — the intent to connect with them is
+   * already obvious, so this bootstraps the connection (and, since it is
+   * necessarily this account's first, sets it primary — Rule 4 governs
+   * *changing* an existing primary, and there is none yet here) without a
+   * separate "Добавить" confirmation. Best-effort, same tolerance
+   * `PRODUCT_DECISION_CIRCLE_OF_TRUST.md` already accepted for this
+   * bootstrap step; the *explicit* "Добавить в круг доверия" action
+   * ([handleAddToCircle]) is the one Section 16 requires to be honest about
+   * failure, not this implicit one.
+   */
+  async function handleRegisterSubmit() {
+    const trimmedName = name.trim()
+    if (!trimmedName) {
+      setAuthError('Пожалуйста, введите имя.')
+      return
+    }
+    if (trimmedName.length > MAX_NAME_LENGTH) {
+      setAuthError(`Имя должно быть короче ${MAX_NAME_LENGTH} символов.`)
+      return
+    }
+    const trimmedPhone = phone.trim()
+    if (!trimmedPhone) {
+      setAuthError('Пожалуйста, укажите номер телефона.')
+      return
+    }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setAuthError(`Пароль должен быть не короче ${MIN_PASSWORD_LENGTH} символов.`)
+      return
+    }
+    setAuthError(null)
+    setIsSubmittingAuth(true)
     try {
-      await request('/v1/connections', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ driverId: driverCode ?? '', passengerReference: saved.id }),
-        baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
-      })
-    } catch {
-      // Known, accepted limitation — see comment above.
+      const created = await identityProvider.register(trimmedPhone, password)
+      saveDisplayName(trimmedName)
+      setIdentity(created)
+      setStep('confirmed')
+
+      try {
+        const connection = await request<{ connectionId: string }>('/v1/connections', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${created.token}` },
+          body: JSON.stringify({ driverId: driverCode ?? '', passengerReference: created.identityId }),
+          baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
+        })
+        await request(`/v1/connections/${connection.connectionId}/primary`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${created.token}` },
+          baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
+        })
+      } catch {
+        // Best-effort bootstrap -- see this function's own KDoc.
+      }
+    } catch (error) {
+      setAuthError(
+        error instanceof ApiError && error.status === 409
+          ? 'Этот номер телефона уже зарегистрирован. Попробуйте войти.'
+          : 'Не удалось создать аккаунт. Проверьте связь с интернетом и попробуйте ещё раз.'
+      )
+    } finally {
+      setIsSubmittingAuth(false)
+    }
+  }
+
+  async function handleLoginSubmit() {
+    const trimmedPhone = phone.trim()
+    if (!trimmedPhone) {
+      setAuthError('Пожалуйста, укажите номер телефона.')
+      return
+    }
+    if (!password) {
+      setAuthError('Пожалуйста, введите пароль.')
+      return
+    }
+    setAuthError(null)
+    setIsSubmittingAuth(true)
+    try {
+      const loggedIn = await identityProvider.login(trimmedPhone, password)
+      setIdentity(loggedIn)
+      checkCircleThenAdvance(true, loggedIn, driverCode ?? '')
+    } catch (error) {
+      setAuthError(
+        error instanceof ApiError && error.status === 401
+          ? 'Неверный номер телефона или пароль.'
+          : 'Не удалось войти. Проверьте связь с интернетом и попробуйте ещё раз.'
+      )
+    } finally {
+      setIsSubmittingAuth(false)
     }
   }
 
@@ -235,31 +388,91 @@ export function PassengerLanding() {
           </>
         )}
 
-        {step === 'onboarding' && (
+        {step === 'confirm-add' && invitation && (
           <>
-            <h1 className={styles.question}>Как к вам обращаться?</h1>
+            <h1 className={styles.title}>Добавить {invitation.driverName} в круг доверия?</h1>
+            <p className={styles.subtitle}>
+              Вы сможете заказывать поездки у {invitation.driverName} — он останется в списке ваших доверенных
+              предпринимателей, и вы сможете выбрать его снова в любой момент.
+            </p>
+            <div className={styles.actionRow}>
+              <ActionButton
+                label={addStatus === 'submitting' ? 'Добавляем…' : 'Добавить'}
+                variant="primary"
+                onClick={() => void handleAddToCircle()}
+                disabled={addStatus === 'submitting'}
+              />
+              <ActionButton label="Не сейчас" variant="secondary" onClick={handleSkipAdd} />
+            </div>
+            {addStatus === 'error' && (
+              <p className={styles.error} role="alert">
+                Не удалось добавить. Проверьте связь с интернетом и попробуйте ещё раз.
+              </p>
+            )}
+          </>
+        )}
+
+        {step === 'auth' && (
+          <>
+            <h1 className={styles.question}>
+              {authMode === 'register' ? 'Создайте свой аккаунт PIOS' : 'Войти в PIOS'}
+            </h1>
+            {authMode === 'register' && (
+              <input
+                className={styles.input}
+                type="text"
+                value={name}
+                maxLength={MAX_NAME_LENGTH}
+                placeholder="Ваше имя"
+                aria-label="Ваше имя"
+                onChange={(event) => handleFieldChange(setName)(event.target.value)}
+              />
+            )}
             <input
               className={styles.input}
-              type="text"
-              value={name}
-              maxLength={MAX_NAME_LENGTH}
-              placeholder="Ваше имя"
-              aria-label="Ваше имя"
-              onChange={(event) => handleNameChange(event.target.value)}
+              type="tel"
+              value={phone}
+              placeholder="Номер телефона"
+              aria-label="Номер телефона"
+              onChange={(event) => handleFieldChange(setPhone)(event.target.value)}
+            />
+            <input
+              className={styles.input}
+              type="password"
+              value={password}
+              placeholder="Пароль"
+              aria-label="Пароль"
+              onChange={(event) => handleFieldChange(setPassword)(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
-                  void handleNameSubmit()
+                  void (authMode === 'register' ? handleRegisterSubmit() : handleLoginSubmit())
                 }
               }}
             />
-            {nameError && (
+            {authError && (
               <p className={styles.error} role="alert">
-                {nameError}
+                {authError}
               </p>
             )}
             <div className={styles.actionRow}>
-              <ActionButton label="Продолжить" variant="primary" onClick={() => void handleNameSubmit()} />
+              <ActionButton
+                label={
+                  isSubmittingAuth
+                    ? authMode === 'register'
+                      ? 'Создаём…'
+                      : 'Входим…'
+                    : authMode === 'register'
+                      ? 'Создать аккаунт'
+                      : 'Войти'
+                }
+                variant="primary"
+                onClick={() => void (authMode === 'register' ? handleRegisterSubmit() : handleLoginSubmit())}
+                disabled={isSubmittingAuth}
+              />
             </div>
+            <button type="button" className={styles.linkAction} onClick={toggleAuthMode}>
+              {authMode === 'register' ? 'Уже есть аккаунт? Войти' : 'Ещё нет аккаунта? Создать'}
+            </button>
           </>
         )}
 

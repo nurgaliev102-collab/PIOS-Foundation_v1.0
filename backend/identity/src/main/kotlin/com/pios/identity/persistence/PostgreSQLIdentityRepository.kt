@@ -47,4 +47,20 @@ class PostgreSQLIdentityRepository(
         )
         return rows.firstOrNull()
     }
+
+    override fun findByPhone(phone: Phone): Identity? {
+        val rows = jdbcTemplate.query(
+            "SELECT id, phone, driver_id, created_at FROM identities WHERE phone = ?",
+            { rs, _ ->
+                Identity(
+                    id = IdentityId(rs.getString("id")),
+                    phone = rs.getString("phone")?.let(::Phone),
+                    driverId = rs.getString("driver_id"),
+                    createdAt = rs.getTimestamp("created_at").toInstant()
+                )
+            },
+            phone.value
+        )
+        return rows.firstOrNull()
+    }
 }

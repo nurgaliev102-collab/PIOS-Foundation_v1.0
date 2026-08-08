@@ -10,6 +10,8 @@ import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
 import { LocalInvitationProvider } from '../../identity/InvitationProvider'
 import styles from './DriverHome.module.css'
 
+const MIN_PASSWORD_LENGTH = 8
+
 // ADR-038/ADR-039: today's only IdentityProvider/InvitationProvider — see
 // those files' own KDoc for why this is safe to instantiate once,
 // module-level, exactly like `apiClientConfig` already is.
@@ -36,6 +38,12 @@ const DISPATCH_BASE_URL = import.meta.env.VITE_DISPATCH_BASE_URL ?? 'http://loca
 // Management directly, to read each open proposal's own order destination.
 const ORDER_MANAGEMENT_BASE_URL = import.meta.env.VITE_ORDER_MANAGEMENT_BASE_URL ?? 'http://localhost:8083'
 
+// Passenger Experience's own local port (INTERFACE_CONTRACTS.md) — same
+// constant as `PassengerLanding.tsx` (Sprint "Driver Growth Snapshot", H6):
+// this page now also calls that module directly, to read how many
+// passengers connected through this driver's own invitation link.
+const PASSENGER_EXPERIENCE_BASE_URL = import.meta.env.VITE_PASSENGER_EXPERIENCE_BASE_URL ?? 'http://localhost:8082'
+
 const MAX_NAME_LENGTH = 50
 
 type Status = 'loading' | 'error' | 'ready'
@@ -46,6 +54,22 @@ interface DriverInfo {
   availability: 'AVAILABLE' | 'UNAVAILABLE'
   displayName: string | null
 }
+
+/**
+ * `POST /v1/drivers/:id/availability`'s own response shape
+ * (`DriverController.declareAvailability`, Driver Management) — note it
+ * omits `displayName`/`registeredAt` (both default to `null` on that
+ * endpoint specifically), unlike `GET /v1/drivers/:id`'s full
+ * [DriverInfo]. [toggleAvailability] below merges only `availability` from
+ * this response into the existing [DriverInfo] state for exactly that
+ * reason — replacing the whole object would silently wipe a real driver's
+ * own `displayName` back to `null` on screen after every toggle.
+ */
+interface AvailabilityResponse {
+  availability: 'AVAILABLE' | 'UNAVAILABLE'
+}
+
+type AvailabilityActionStatus = 'idle' | 'submitting' | 'error'
 
 interface ProposalListItem {
   proposalId: string
@@ -85,6 +109,13 @@ interface AssignmentInfo {
 
 interface OrderListItem {
   id: string
+  // Sprint "My Business + Circle of Trust": `GET /v1/orders`'s own
+  // `OrderResponse.origin` already carries the order's passenger reference
+  // (`OrderOrigin`, Order Management -- see `Coordinator.tsx`'s own note on
+  // the same field) -- this page reads it only to build a best-effort
+  // passengerReference -> passengerName map for [MyPassengersSection] below,
+  // not to render it directly anywhere.
+  origin: string
   destination: string | null
   // First-pilot feedback: the backend now carries these two (Order
   // Management's own `passengerName`/`createdAt`, both optional — an order
@@ -100,6 +131,18 @@ interface OrderListItem {
   // previously had no way to know where to pick a passenger up short of
   // calling them.
   pickupAddress: string | null
+}
+
+/**
+ * `GET /v1/connections?driverId=...`'s own response shape (Passenger
+ * Experience, Sprint 7B) -- one entry per passenger who has ever opened
+ * this driver's invitation link. [createdAt] (Sprint "Driver Growth
+ * Snapshot", H6) is what lets [todaysNewClientCount] below tell today's
+ * connections from every earlier one.
+ */
+interface ConnectionListItem {
+  passengerReference: string
+  createdAt: string
 }
 
 /**
@@ -127,12 +170,42 @@ function formatOrderTime(createdAt: string | null): string | null {
 }
 
 /**
+ * Sprint "My Business + Circle of Trust", journey item 8 ("Просмотр своих
+ * пассажиров"): best-effort passengerReference -> passengerName lookup,
+ * built entirely from this driver's own already-fetched orders (no new
+ * backend call) -- `Order.passengerName` and `Order.origin` (the
+ * passenger's own reference, see [OrderListItem]'s own KDoc) are both
+ * already returned by `GET /v1/orders`. A passenger who connected but has
+ * not yet placed an order with this driver has no name here yet -- that is
+ * a real, honest gap, not something to paper over with a placeholder name.
+ */
+function passengerNamesByReference(orders: Record<string, OrderListItem>): Record<string, string> {
+  const names: Record<string, string> = {}
+  for (const order of Object.values(orders)) {
+    if (order.passengerName) {
+      names[order.origin] = order.passengerName
+    }
+  }
+  return names
+}
+
+/**
+ * H6 ("Driver Growth Snapshot"): how many passengers connected through this
+ * driver's own link today, by this device's own local calendar day --
+ * deliberately simple (no timezone reconciliation with the server) since
+ * this is a same-day glance, not a report. Same, one true number every
+ * time; a day with none shows 0, not hidden or softened.
+ */
+function todaysNewClientCount(connections: ConnectionListItem[]): number {
+  const today = new Date().toDateString()
+  return connections.filter((connection) => new Date(connection.createdAt).toDateString() === today).length
+}
+
+/**
  * Generates the internal id a new driver profile needs
  * (`driver-management`'s `POST /v1/drivers` still requires a caller-
  * supplied id — ADR-039 does not change that contract). Never shown to
  * the person creating the profile; they only ever provide a display name.
- * Same generator `persistence/localPassengerIdentity.ts` already uses for
- * the same reason.
  */
 function generateDriverId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -155,15 +228,13 @@ function generateDriverId(): string {
  * ADR-038 (Identity Module Foundation) removed the hardcoded
  * `CURRENT_DRIVER_ID` constant. ADR-039 (Identity-Driver Association)
  * removes what ADR-038 replaced it with — a screen asking a person to type
- * an internal driver code — entirely. First run is now a real product
- * lifecycle: welcome → an [identityProvider]-issued Identity is created
- * silently → the person provides only their name → a Driver profile is
- * created and linked to that Identity → main app. Reopening the app
- * restores the same identity+driver from this device's own stored
- * pointer, not from a typed code. This still is not authentication
- * (ADR-038/ADR-039's own explicit scope boundary) — it removes the
- * single-driver ceiling and the technical prompt, it does not prove
- * anyone is who they claim to be.
+ * an internal driver code — entirely. ADR-055 ("Final Pre-Pilot Sprint")
+ * replaces the identity this used to create silently with a real account
+ * (phone + password): welcome → register or log in → the person provides
+ * their own name → a Driver profile is created and linked to that account
+ * → main app. Reopening the app restores the same account+driver from this
+ * device's own stored, backend-verified session, not from a typed code or
+ * a credential-less pointer.
  *
  * Sprint 2 (Identity MVP): re-entry now calls
  * `identityProvider.restoreIdentity()`, not the synchronous
@@ -197,6 +268,13 @@ function generateDriverId(): string {
  * Sprint H5 (Entrepreneur Working Cycle Integrity) adds each order's own
  * `pickupAddress`, read from the same `GET /v1/orders` response, rendered
  * next to `destination` exactly like it.
+ *
+ * Pilot-readiness fix: this screen previously only *displayed* a driver's
+ * own state (via [DriverCard], read-only) — there was no way for a driver
+ * to change it themselves from here at all. A toggle at the top of the
+ * ready screen now calls the existing, already-tested
+ * `POST /v1/drivers/:id/availability` (see [toggleAvailability]'s own
+ * KDoc). No new backend endpoint or state was introduced by this fix.
  */
 export function DriverHome() {
   const [identity, setIdentity] = useState<StoredIdentity | null>(null)
@@ -205,8 +283,12 @@ export function DriverHome() {
   // welcome/onboarding screen before their real, backend-confirmed
   // identity is known.
   const [isRestoringIdentity, setIsRestoringIdentity] = useState(true)
-  const [isCreatingIdentity, setIsCreatingIdentity] = useState(false)
-  const [onboardingError, setOnboardingError] = useState<string | null>(null)
+  const [authStep, setAuthStep] = useState<'intro' | 'auth'>('intro')
+  const [authMode, setAuthMode] = useState<'register' | 'login'>('register')
+  const [phone, setPhone] = useState('')
+  const [password, setPassword] = useState('')
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
 
   const [nameInput, setNameInput] = useState('')
   const [nameError, setNameError] = useState<string | null>(null)
@@ -215,6 +297,12 @@ export function DriverHome() {
 
   const [status, setStatus] = useState<Status>('loading')
   const [driver, setDriver] = useState<DriverInfo | null>(null)
+  // Pilot-readiness fix: this driver's own control over whether they
+  // currently receive new orders — previously this screen had no way to
+  // change it at all, only `Coordinator.tsx` (an operator-facing screen)
+  // could. Idle/submitting/error mirrors [proposalActions]'s own
+  // convention for a single in-flight action.
+  const [availabilityAction, setAvailabilityAction] = useState<AvailabilityActionStatus>('idle')
   const [feedback, setFeedback] = useState<string | null>(null)
   const feedbackTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -227,6 +315,7 @@ export function DriverHome() {
   // only if non-blank -- see `respondToProposal`.
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({})
   const [orderDetails, setOrderDetails] = useState<Record<string, OrderListItem>>({})
+  const [connections, setConnections] = useState<ConnectionListItem[]>([])
   // ADR-040 (Assignment Ride Lifecycle): keyed by orderId, one entry per
   // ACCEPTED proposal that already has an Assignment — an OPEN proposal
   // has none yet, so never appears here.
@@ -277,15 +366,21 @@ export function DriverHome() {
     let active = true
     loadProposals(active, driverId, { silent: false })
     loadOrderDetails(active)
+    if (identity) {
+      loadConnections(active, driverId, identity.token)
+    }
     const interval = setInterval(() => {
       loadProposals(active, driverId, { silent: true })
       loadOrderDetails(active)
+      if (identity) {
+        loadConnections(active, driverId, identity.token)
+      }
     }, PROPOSALS_POLL_INTERVAL_MS)
     return () => {
       active = false
       clearInterval(interval)
     }
-  }, [driverId])
+  }, [driverId, identity])
 
   function loadOrderDetails(active: boolean) {
     request<OrderListItem[]>('/v1/orders', { baseUrl: ORDER_MANAGEMENT_BASE_URL })
@@ -298,6 +393,23 @@ export function DriverHome() {
       .catch(() => {
         // Best-effort: proposals remain visible and actionable without
         // address/name/time shown (see this component's own KDoc).
+      })
+  }
+
+  /** H6 ("Driver Growth Snapshot"): best-effort, same tolerance as [loadOrderDetails] -- a failure here only hides today's client count, nothing actionable on this screen depends on it. ADR-055: this endpoint now requires this driver's own session token. */
+  function loadConnections(active: boolean, forDriverId: string, token: string) {
+    request<ConnectionListItem[]>(`/v1/connections?driverId=${forDriverId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
+    })
+      .then((result) => {
+        if (!active) {
+          return
+        }
+        setConnections(result)
+      })
+      .catch(() => {
+        // Best-effort: see this function's own KDoc.
       })
   }
 
@@ -390,17 +502,86 @@ export function DriverHome() {
     }
   }
 
-  async function handleWelcomeContinue() {
-    setOnboardingError(null)
-    setIsCreatingIdentity(true)
-    try {
-      const created = await identityProvider.createIdentity()
-      setIdentity(created)
-    } catch {
-      setOnboardingError('Не удалось начать работу. Проверьте связь с интернетом и попробуйте ещё раз.')
-    } finally {
-      setIsCreatingIdentity(false)
+  function handleWelcomeContinue() {
+    setAuthStep('auth')
+  }
+
+  function handleAuthFieldChange(setter: (value: string) => void) {
+    return (value: string) => {
+      setter(value)
+      if (authError) {
+        setAuthError(null)
+      }
     }
+  }
+
+  function toggleAuthMode() {
+    setAuthMode((current) => (current === 'register' ? 'login' : 'register'))
+    setAuthError(null)
+  }
+
+  async function handleRegisterSubmit() {
+    const trimmedPhone = phone.trim()
+    if (!trimmedPhone) {
+      setAuthError('Пожалуйста, укажите номер телефона.')
+      return
+    }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setAuthError(`Пароль должен быть не короче ${MIN_PASSWORD_LENGTH} символов.`)
+      return
+    }
+    setAuthError(null)
+    setIsSubmittingAuth(true)
+    try {
+      const created = await identityProvider.register(trimmedPhone, password)
+      setIdentity(created)
+    } catch (error) {
+      setAuthError(
+        error instanceof ApiError && error.status === 409
+          ? 'Этот номер телефона уже зарегистрирован. Попробуйте войти.'
+          : 'Не удалось создать аккаунт. Проверьте связь с интернетом и попробуйте ещё раз.'
+      )
+    } finally {
+      setIsSubmittingAuth(false)
+    }
+  }
+
+  async function handleLoginSubmit() {
+    const trimmedPhone = phone.trim()
+    if (!trimmedPhone) {
+      setAuthError('Пожалуйста, укажите номер телефона.')
+      return
+    }
+    if (!password) {
+      setAuthError('Пожалуйста, введите пароль.')
+      return
+    }
+    setAuthError(null)
+    setIsSubmittingAuth(true)
+    try {
+      const loggedIn = await identityProvider.login(trimmedPhone, password)
+      setIdentity(loggedIn)
+    } catch (error) {
+      setAuthError(
+        error instanceof ApiError && error.status === 401
+          ? 'Неверный номер телефона или пароль.'
+          : 'Не удалось войти. Проверьте связь с интернетом и попробуйте ещё раз.'
+      )
+    } finally {
+      setIsSubmittingAuth(false)
+    }
+  }
+
+  /** Section 6 ("Final Pre-Pilot Sprint"): the account itself is untouched — only this device forgets its own session. */
+  function handleLogout() {
+    identityProvider.logout()
+    setIdentity(null)
+    setAuthStep('intro')
+    setDriver(null)
+    setStatus('loading')
+    setProposals([])
+    setProposalsStatus('loading')
+    setConnections([])
   }
 
   async function handleNameSubmit() {
@@ -482,6 +663,32 @@ export function DriverHome() {
     }
   }
 
+  /**
+   * Flips this driver's own state via the existing, already-tested
+   * `POST /v1/drivers/:id/availability` (`DriverController.declareAvailability`,
+   * Driver Management — untouched by this change). Only `availability`
+   * from the response is merged into [driver] (see [AvailabilityResponse]'s
+   * own KDoc for why the response is not used wholesale).
+   */
+  async function toggleAvailability() {
+    if (!driver || availabilityAction === 'submitting') {
+      return
+    }
+    const nextAvailability = driver.availability === 'AVAILABLE' ? 'UNAVAILABLE' : 'AVAILABLE'
+    setAvailabilityAction('submitting')
+    try {
+      const response = await request<AvailabilityResponse>(`/v1/drivers/${driver.id}/availability`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ availability: nextAvailability }),
+      })
+      setDriver((current) => (current ? { ...current, availability: response.availability } : current))
+      setAvailabilityAction('idle')
+    } catch {
+      setAvailabilityAction('error')
+    }
+  }
+
   function showFeedback(message: string) {
     setFeedback(message)
     clearTimeout(feedbackTimeout.current)
@@ -532,45 +739,91 @@ export function DriverHome() {
     )
   }
 
-  // Phase 1: no Identity yet on this device — welcome, explain, and create
-  // one silently in the background. No internal id is ever shown here.
+  // Phase 1: no session on this device yet — welcome and explain, then
+  // register or log in for real (ADR-055). No internal id is ever shown here.
   if (!identity) {
     return (
       <div className={styles.screen}>
         <Header />
         <main className={styles.content}>
-          <h1 className={styles.welcomeTitle}>Добро пожаловать!</h1>
-          <p className={styles.welcomeText}>PIOS помогает вам строить собственную клиентскую сеть.</p>
+          {authStep === 'intro' && (
+            <>
+              <h1 className={styles.welcomeTitle}>Добро пожаловать!</h1>
+              <p className={styles.welcomeText}>PIOS помогает вам строить собственную клиентскую сеть.</p>
 
-          <section className={styles.welcomeCard}>
-            <p className={styles.welcomeCardTitle}>Ваши постоянные клиенты смогут:</p>
-            <p className={styles.welcomeCardItem}>• быстро находить вас;</p>
-            <p className={styles.welcomeCardItem}>• заказывать поездки через вашу ссылку;</p>
-            <p className={styles.welcomeCardItem}>• оставаться вашими клиентами.</p>
-          </section>
+              <section className={styles.welcomeCard}>
+                <p className={styles.welcomeCardTitle}>Ваши постоянные клиенты смогут:</p>
+                <p className={styles.welcomeCardItem}>• быстро находить вас;</p>
+                <p className={styles.welcomeCardItem}>• заказывать поездки через вашу ссылку;</p>
+                <p className={styles.welcomeCardItem}>• оставаться вашими клиентами.</p>
+              </section>
 
-          <section className={styles.welcomeCard}>
-            <p className={styles.welcomeCardTitle}>Что нужно сделать</p>
-            <p className={styles.welcomeCardItem}>1. Создайте свой профиль.</p>
-            <p className={styles.welcomeCardItem}>2. Получите свою ссылку.</p>
-            <p className={styles.welcomeCardItem}>3. Отправьте её своим постоянным клиентам.</p>
-            <p className={styles.welcomeCardItem}>4. Принимайте новые заказы.</p>
-          </section>
+              <section className={styles.welcomeCard}>
+                <p className={styles.welcomeCardTitle}>Что нужно сделать</p>
+                <p className={styles.welcomeCardItem}>1. Создайте свой аккаунт PIOS.</p>
+                <p className={styles.welcomeCardItem}>2. Получите свою ссылку.</p>
+                <p className={styles.welcomeCardItem}>3. Отправьте её своим постоянным клиентам.</p>
+                <p className={styles.welcomeCardItem}>4. Принимайте новые заказы.</p>
+              </section>
 
-          {onboardingError && (
-            <p className={styles.error} role="alert">
-              {onboardingError}
-            </p>
+              <div className={styles.actionRow}>
+                <ActionButton label="Начать" variant="primary" onClick={handleWelcomeContinue} />
+              </div>
+            </>
           )}
 
-          <div className={styles.actionRow}>
-            <ActionButton
-              label={isCreatingIdentity ? 'Начинаем…' : 'Начать'}
-              variant="primary"
-              onClick={handleWelcomeContinue}
-              disabled={isCreatingIdentity}
-            />
-          </div>
+          {authStep === 'auth' && (
+            <>
+              <h1 className={styles.welcomeTitle}>
+                {authMode === 'register' ? 'Создайте свой аккаунт PIOS' : 'Войти в PIOS'}
+              </h1>
+              <input
+                className={styles.driverCodeInput}
+                type="tel"
+                value={phone}
+                placeholder="Номер телефона"
+                aria-label="Номер телефона"
+                onChange={(event) => handleAuthFieldChange(setPhone)(event.target.value)}
+              />
+              <input
+                className={styles.driverCodeInput}
+                type="password"
+                value={password}
+                placeholder="Пароль"
+                aria-label="Пароль"
+                onChange={(event) => handleAuthFieldChange(setPassword)(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    void (authMode === 'register' ? handleRegisterSubmit() : handleLoginSubmit())
+                  }
+                }}
+              />
+              {authError && (
+                <p className={styles.error} role="alert">
+                  {authError}
+                </p>
+              )}
+              <div className={styles.actionRow}>
+                <ActionButton
+                  label={
+                    isSubmittingAuth
+                      ? authMode === 'register'
+                        ? 'Создаём…'
+                        : 'Входим…'
+                      : authMode === 'register'
+                        ? 'Создать аккаунт'
+                        : 'Войти'
+                  }
+                  variant="primary"
+                  onClick={() => void (authMode === 'register' ? handleRegisterSubmit() : handleLoginSubmit())}
+                  disabled={isSubmittingAuth}
+                />
+              </div>
+              <button type="button" className={styles.linkAction} onClick={toggleAuthMode}>
+                {authMode === 'register' ? 'Уже есть аккаунт? Войти' : 'Ещё нет аккаунта? Создать'}
+              </button>
+            </>
+          )}
         </main>
       </div>
     )
@@ -649,6 +902,56 @@ export function DriverHome() {
 
         {status === 'ready' && driver && (
           <>
+            {/* Sprint "My Business + Circle of Trust", Section 5/6: this
+                screen is gradually becoming "Мой бизнес", not a technical
+                dashboard -- one plain heading at the top, same weight
+                Coordinator.tsx already gives its own section titles. */}
+            <h1 className={styles.pageTitle}>Мой бизнес</h1>
+
+            <section className={styles.availabilityCard}>
+              <p className={styles.availabilityTitle}>
+                {driver.availability === 'AVAILABLE' ? '🟢 Я на линии' : '🔴 Сегодня не работаю'}
+              </p>
+              <p className={styles.availabilityHint}>
+                {driver.availability === 'AVAILABLE'
+                  ? 'Вы можете получать заказы'
+                  : 'Вы не получаете новые заказы'}
+              </p>
+              <ActionButton
+                label={
+                  availabilityAction === 'submitting'
+                    ? 'Обновляем…'
+                    : driver.availability === 'AVAILABLE'
+                      ? 'Уйти с линии'
+                      : 'Выйти на линию'
+                }
+                variant="primary"
+                onClick={() => void toggleAvailability()}
+                disabled={availabilityAction === 'submitting'}
+              />
+              {availabilityAction === 'error' && (
+                <p className={styles.error} role="alert">
+                  Не удалось обновить. Попробуйте ещё раз.
+                </p>
+              )}
+            </section>
+
+            {/* H6 ("Driver Growth Snapshot"): one honest number, deliberately --
+                see PIOS_PRODUCT_HYPOTHESES.md's own note on what this Sprint
+                does not do (no congratulatory wording, no hiding a zero).
+                "Новых клиентов" (fixed genitive plural), not a declined
+                phrase that changes with the count -- same convention
+                TodayCard.tsx already uses ("Заказов создано"), which avoids
+                Russian's noun declension by number entirely rather than
+                getting it subtly wrong. */}
+            <section className={styles.growthCard}>
+              <p className={styles.growthTitle}>Сегодня</p>
+              <div className={styles.growthRow}>
+                <span className={styles.growthLabel}>Новых клиентов</span>
+                <span className={styles.growthCount}>{todaysNewClientCount(connections)}</span>
+              </div>
+            </section>
+
             <DriverCard
               driverCode={driver.id}
               displayName={driver.displayName}
@@ -664,6 +967,29 @@ export function DriverHome() {
               feedback={feedback}
             />
             <p className={styles.hint}>Отправьте эту ссылку клиенту — он сможет заказать поездку прямо у вас.</p>
+
+            {/* Sprint "My Business + Circle of Trust", journey item 8 --
+                "Мои пассажиры", not "Пассажиры PIOS" (Section 14 of the
+                brief): these are this driver's own connections
+                (`GET /v1/connections?driverId=...`, already loaded above
+                for the "Сегодня" card), named where a past order already
+                revealed a name, otherwise honestly labelled as not yet
+                named rather than guessed. */}
+            {connections.length > 0 && (
+              <section className={styles.growthCard}>
+                <p className={styles.growthTitle}>Мои пассажиры</p>
+                <div className={styles.passengerList}>
+                  {connections.map((connection) => {
+                    const name = passengerNamesByReference(orderDetails)[connection.passengerReference]
+                    return (
+                      <span key={connection.passengerReference} className={styles.passengerListItem}>
+                        {name ?? 'Пассажир по вашей ссылке'}
+                      </span>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
           </>
         )}
 
@@ -802,6 +1128,10 @@ export function DriverHome() {
             </section>
             )
           })}
+
+        <button type="button" className={styles.linkAction} onClick={handleLogout}>
+          Выйти
+        </button>
       </main>
     </div>
   )

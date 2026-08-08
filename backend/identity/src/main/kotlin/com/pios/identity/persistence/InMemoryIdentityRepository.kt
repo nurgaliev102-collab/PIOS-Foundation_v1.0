@@ -3,6 +3,7 @@ package com.pios.identity.persistence
 import com.pios.identity.application.IdentityRepository
 import com.pios.identity.domain.Identity
 import com.pios.identity.domain.IdentityId
+import com.pios.identity.domain.Phone
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -19,4 +20,6 @@ class InMemoryIdentityRepository : IdentityRepository {
     }
 
     override fun findById(id: IdentityId): Identity? = store[id]
+
+    override fun findByPhone(phone: Phone): Identity? = store.values.firstOrNull { it.phone == phone }
 }

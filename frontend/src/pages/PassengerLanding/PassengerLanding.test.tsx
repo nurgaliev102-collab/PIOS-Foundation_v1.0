@@ -70,4 +70,120 @@ describe('PassengerLanding', () => {
 
     expect(await screen.findByText(/Вас пригласил Иван/)).toBeInTheDocument()
   })
+
+  // --- Registration and login (ADR-055, "Final Pre-Pilot Sprint") ---
+
+  it('lets a first-time visitor create a real account and lands on the confirmed screen', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderAt('driver-1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Начать' }))
+
+    await userEvent.type(screen.getByLabelText('Ваше имя'), 'Аня')
+    await userEvent.type(screen.getByLabelText('Номер телефона'), '+70000000001')
+    await userEvent.type(screen.getByLabelText('Пароль'), 'password123')
+
+    mockedRequest.mockResolvedValueOnce({
+      identityId: 'passenger-1',
+      driverId: null,
+      token: 'test-token',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    })
+    mockedRequest.mockResolvedValueOnce({ connectionId: 'c1' }) // POST /v1/connections
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/connections/c1/primary
+
+    await userEvent.click(screen.getByRole('button', { name: 'Создать аккаунт' }))
+
+    expect(await screen.findByRole('heading', { name: 'Добро пожаловать!' })).toBeInTheDocument()
+    expect(localStorage.getItem('pios.identity')).not.toBeNull()
+  })
+
+  it('shows a clear message when the phone number is already registered, and does not sign the visitor in', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderAt('driver-1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Начать' }))
+
+    await userEvent.type(screen.getByLabelText('Ваше имя'), 'Аня')
+    await userEvent.type(screen.getByLabelText('Номер телефона'), '+70000000001')
+    await userEvent.type(screen.getByLabelText('Пароль'), 'password123')
+
+    mockedRequest.mockRejectedValueOnce(new ApiError(409, '/v1/identities/register'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Создать аккаунт' }))
+
+    expect(await screen.findByText('Этот номер телефона уже зарегистрирован. Попробуйте войти.')).toBeInTheDocument()
+    expect(localStorage.getItem('pios.identity')).toBeNull()
+  })
+
+  it('shows a clear message on a wrong password, without saying which part was wrong', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderAt('driver-1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Начать' }))
+    await userEvent.click(screen.getByText('Уже есть аккаунт? Войти'))
+
+    await userEvent.type(screen.getByLabelText('Номер телефона'), '+70000000001')
+    await userEvent.type(screen.getByLabelText('Пароль'), 'wrong-password')
+
+    mockedRequest.mockRejectedValueOnce(new ApiError(401, '/v1/identities/login'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Войти' }))
+
+    expect(await screen.findByText('Неверный номер телефона или пароль.')).toBeInTheDocument()
+  })
+
+  it('asks a returning account to confirm before adding a driver whose link is new to them', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-2', availability: 'AVAILABLE', displayName: 'Ахмад' })
+
+    renderAt('driver-2')
+    await userEvent.click(await screen.findByRole('button', { name: 'Начать' }))
+    await userEvent.click(screen.getByText('Уже есть аккаунт? Войти'))
+
+    await userEvent.type(screen.getByLabelText('Номер телефона'), '+70000000001')
+    await userEvent.type(screen.getByLabelText('Пароль'), 'password123')
+
+    mockedRequest.mockResolvedValueOnce({
+      identityId: 'passenger-1',
+      driverId: null,
+      token: 'test-token',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    })
+    mockedRequest.mockResolvedValueOnce([{ driverId: 'driver-1' }]) // GET /v1/connections?passengerReference= -- driver-2 is not in it yet
+
+    await userEvent.click(screen.getByRole('button', { name: 'Войти' }))
+
+    expect(await screen.findByText('Добавить Ахмад в круг доверия?')).toBeInTheDocument()
+  })
+
+  // --- Connection reliability (Section 16, "Final Pre-Pilot Sprint") ---
+
+  it('tells the passenger honestly when "Добавить" fails, instead of proceeding as if it worked', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-2', availability: 'AVAILABLE', displayName: 'Ахмад' })
+
+    renderAt('driver-2')
+    await userEvent.click(await screen.findByRole('button', { name: 'Начать' }))
+    await userEvent.click(screen.getByText('Уже есть аккаунт? Войти'))
+    await userEvent.type(screen.getByLabelText('Номер телефона'), '+70000000001')
+    await userEvent.type(screen.getByLabelText('Пароль'), 'password123')
+
+    mockedRequest.mockResolvedValueOnce({
+      identityId: 'passenger-1',
+      driverId: null,
+      token: 'test-token',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    })
+    mockedRequest.mockResolvedValueOnce([])
+    await userEvent.click(screen.getByRole('button', { name: 'Войти' }))
+    await screen.findByText('Добавить Ахмад в круг доверия?')
+
+    mockedRequest.mockRejectedValueOnce(new Error('network down'))
+    await userEvent.click(screen.getByRole('button', { name: 'Добавить' }))
+
+    expect(
+      await screen.findByText('Не удалось добавить. Проверьте связь с интернетом и попробуйте ещё раз.')
+    ).toBeInTheDocument()
+    // Still on the confirmation screen -- never silently treated as success.
+    expect(screen.getByText('Добавить Ахмад в круг доверия?')).toBeInTheDocument()
+  })
 })

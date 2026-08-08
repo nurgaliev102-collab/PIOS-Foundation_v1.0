@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Navigate, useParams } from 'react-router-dom'
+import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { Header } from '../../components/Header'
 import { ActionButton } from '../../components/ActionButton'
 import { Spinner } from '../../components/Spinner'
 import { getInvitationByDriverCode } from '../PassengerLanding/invitationSource'
-import { getPassengerIdentity } from '../../persistence/localPassengerIdentity'
+import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
+import type { StoredIdentity } from '../../identity/IdentityProvider'
+import { getDisplayName } from '../../persistence/localDisplayName'
 import { clearCurrentOrderId, getCurrentOrderId, saveCurrentOrderId } from '../../persistence/localCurrentOrder'
 import { request } from '../../api/apiClient'
 import styles from './RideRequest.module.css'
+
+// ADR-038/ADR-039/ADR-055: same module-level provider instance `PassengerLanding.tsx` already uses.
+const identityProvider = new BackendIdentityProvider()
 
 // Order Management's own local port (INTERFACE_CONTRACTS.md) — distinct
 // from apiClientConfig's default (Driver Management's port), since this
@@ -22,11 +27,52 @@ const ORDER_MANAGEMENT_BASE_URL = import.meta.env.VITE_ORDER_MANAGEMENT_BASE_URL
 // step for this, invited-passenger path.
 const DISPATCH_BASE_URL = import.meta.env.VITE_DISPATCH_BASE_URL ?? 'http://localhost:8084'
 
-type Step = 'loading' | 'not-found' | 'error' | 'form' | 'confirmed'
+// Passenger Experience's own local port (INTERFACE_CONTRACTS.md) — Sprint
+// "My Business + Circle of Trust" (ADR-054): this page now also calls that
+// module directly, to read this passenger's own circle of trust before
+// asking which driver today's ride goes to.
+const PASSENGER_EXPERIENCE_BASE_URL = import.meta.env.VITE_PASSENGER_EXPERIENCE_BASE_URL ?? 'http://localhost:8082'
+
+type Step = 'loading' | 'not-found' | 'error' | 'circle' | 'form' | 'confirmed'
 type ProposalStatus = 'proposing' | 'proposed' | 'error'
 
 interface SubmitOrderResponse {
   orderId: string
+}
+
+/**
+ * ADR-054 Part 4: `GET /v1/connections?passengerReference=...`'s own
+ * response shape — this passenger's own circle of trust, each entry
+ * carrying whether it is currently the primary designation. No driver name
+ * or availability here (Passenger Experience does not own that data, per
+ * `DriverReference.kt`'s own reference-not-ownership discipline) — see
+ * [EnrichedCircleMember] for where that comes from.
+ */
+interface CircleMember {
+  connectionId: string
+  driverId: string
+  createdAt: string
+  isPrimary: boolean
+}
+
+/** `GET /v1/drivers/:id`'s own response shape (Driver Management) — same fields `invitationSource.ts` already reads. */
+interface DriverSummary {
+  id: string
+  availability: 'AVAILABLE' | 'UNAVAILABLE'
+  displayName: string | null
+}
+
+/**
+ * A [CircleMember] joined, client-side, with Driver Management's own
+ * `displayName`/`availability` — Passenger Experience's response never
+ * carries either (reference-not-ownership), so this page reads Driver
+ * Management directly for each member, the same per-driver lookup
+ * `invitationSource.ts` already performs for the single driver whose link
+ * a passenger arrived through.
+ */
+interface EnrichedCircleMember extends CircleMember {
+  displayName: string
+  availability: 'AVAILABLE' | 'UNAVAILABLE'
 }
 
 interface ProposalStatusItem {
@@ -140,8 +186,16 @@ const RIDE_STATUS_LABEL: Record<RideStatus, string> = {
  */
 export function RideRequest() {
   const { driverCode } = useParams<{ driverCode: string }>()
-  const [identity] = useState(() => getPassengerIdentity())
+  const navigate = useNavigate()
+  const [identity, setIdentity] = useState<StoredIdentity | null>(null)
+  const [identityChecked, setIdentityChecked] = useState(false)
   const [step, setStep] = useState<Step>('loading')
+  const [circle, setCircle] = useState<EnrichedCircleMember[]>([])
+  const [circleError, setCircleError] = useState(false)
+  const [primaryChangeTarget, setPrimaryChangeTarget] = useState<string | null>(null)
+  const [primaryChangeStatus, setPrimaryChangeStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
+  const [removeTarget, setRemoveTarget] = useState<string | null>(null)
+  const [removeStatus, setRemoveStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
   const [pickupAddress, setPickupAddress] = useState('')
   const [pickupAddressError, setPickupAddressError] = useState<string | null>(null)
   const [destination, setDestination] = useState('')
@@ -156,7 +210,7 @@ export function RideRequest() {
   // effect (mirrors DriverHome.tsx's own loadDriver) so the same fetch can
   // also be re-run by the "Попробовать снова" retry action below, without
   // duplicating this logic.
-  function loadInvitation(active: boolean, forDriverCode: string) {
+  function loadInvitation(active: boolean, forDriverCode: string, forIdentity: StoredIdentity) {
     setStep('loading')
     getInvitationByDriverCode(forDriverCode).then((result) => {
       if (!active) {
@@ -179,13 +233,70 @@ export function RideRequest() {
         setStep('confirmed')
         return
       }
-      setStep('form')
+      loadCircleThenAdvance(active, forIdentity)
     })
+  }
+
+  /**
+   * ADR-054 / `PRODUCT_DECISION_CIRCLE_OF_TRUST.md`: before starting a new
+   * order, a passenger with more than one trusted driver sees their circle
+   * of trust first (Section 8 of the Sprint brief) and picks who today's
+   * ride goes to — a passenger with zero or one relationship has nothing to
+   * choose, so this skips straight to the form, unchanged from before this
+   * Sprint. Best-effort throughout: a failure here never blocks ordering
+   * with the driver whose link this page was already opened through.
+   */
+  function loadCircleThenAdvance(active: boolean, forIdentity: StoredIdentity) {
+    request<CircleMember[]>(`/v1/connections?passengerReference=${forIdentity.identityId}`, {
+      headers: { Authorization: `Bearer ${forIdentity.token}` },
+      baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
+    })
+      .then((members) => enrichCircle(members))
+      .then((enriched) => {
+        if (!active) {
+          return
+        }
+        setCircle(enriched)
+        setStep(enriched.length > 1 ? 'circle' : 'form')
+      })
+      .catch(() => {
+        if (!active) {
+          return
+        }
+        setCircleError(true)
+        setStep('form')
+      })
+  }
+
+  async function enrichCircle(members: CircleMember[]): Promise<EnrichedCircleMember[]> {
+    const enriched = await Promise.all(
+      members.map(async (member): Promise<EnrichedCircleMember> => {
+        try {
+          const driver = await request<DriverSummary>(`/v1/drivers/${member.driverId}`)
+          return { ...member, displayName: driver.displayName ?? member.driverId, availability: driver.availability }
+        } catch {
+          // Best-effort per member: an unreachable Driver Management record
+          // still shows up in the circle, just without a real name or a
+          // known availability -- never dropped silently.
+          return { ...member, displayName: member.driverId, availability: 'UNAVAILABLE' }
+        }
+      })
+    )
+    return enriched.sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
   }
 
   useEffect(() => {
     let active = true
-    loadInvitation(active, driverCode ?? '')
+    identityProvider.restoreIdentity().then((restored) => {
+      if (!active) {
+        return
+      }
+      setIdentity(restored)
+      setIdentityChecked(true)
+      if (restored) {
+        loadInvitation(active, driverCode ?? '', restored)
+      }
+    })
     return () => {
       active = false
     }
@@ -260,12 +371,24 @@ export function RideRequest() {
     }
   }, [step, orderId])
 
-  if (!identity) {
+  if (identityChecked && !identity) {
     return <Navigate to={`/i/${driverCode ?? ''}`} replace />
   }
+  if (!identity) {
+    // Still checking this device's own session (ADR-055) -- `step` stays
+    // 'loading' below until this resolves one way or the other.
+    return (
+      <div className={styles.screen}>
+        <Header />
+        <main className={styles.content}>
+          <Spinner label="Загрузка…" />
+        </main>
+      </div>
+    )
+  }
 
-  const passengerId = identity.id
-  const passengerName = identity.name
+  const passengerId = identity.identityId
+  const passengerName = getDisplayName()
 
   function handlePickupAddressChange(value: string) {
     setPickupAddress(value)
@@ -358,12 +481,99 @@ export function RideRequest() {
    * per-driver scope) -- a current order held with a different driver, on
    * this same passenger identity, is untouched.
    */
+  /** Section 6 ("Final Pre-Pilot Sprint"): a passenger must be able to sign out — the account itself is untouched, only this device forgets its own session. */
+  function handleLogout() {
+    identityProvider.logout()
+    navigate(`/i/${driverCode ?? ''}`, { replace: true })
+  }
+
   function handleOrderAgain() {
     clearCurrentOrderId(driverCode ?? '')
     setOrderId(null)
     setProposalStatus(null)
     setRideStatus('OPEN')
     setStep('form')
+  }
+
+  /**
+   * Rule 12/13 (`PRODUCT_DECISION_CIRCLE_OF_TRUST.md`): choosing a driver
+   * for *this* ride only ever changes which driver this specific order goes
+   * to -- never who is primary. Picking the driver whose own link this page
+   * is already open through simply proceeds in place; picking anyone else
+   * in the circle navigates to that driver's own `/i/:driverCode/request`,
+   * reusing this same component fresh for them rather than teaching this
+   * page to serve two drivers' state at once.
+   */
+  function handleChooseCircleMember(chosenDriverId: string) {
+    if (chosenDriverId === driverCode) {
+      setStep('form')
+    } else {
+      navigate(`/i/${chosenDriverId}/request`)
+    }
+  }
+
+  function handleRequestMakePrimary(connectionId: string) {
+    setPrimaryChangeTarget(connectionId)
+    setPrimaryChangeStatus('idle')
+  }
+
+  function handleCancelMakePrimary() {
+    setPrimaryChangeTarget(null)
+    setPrimaryChangeStatus('idle')
+  }
+
+  /** Rule 4: only this explicit, passenger-confirmed action ever changes who is primary. */
+  async function handleConfirmMakePrimary() {
+    if (!identity || !primaryChangeTarget || primaryChangeStatus === 'submitting') {
+      return
+    }
+    setPrimaryChangeStatus('submitting')
+    try {
+      await request(`/v1/connections/${primaryChangeTarget}/primary`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${identity.token}` },
+        baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
+      })
+      setCircle((current) =>
+        current
+          .map((member) => ({ ...member, isPrimary: member.connectionId === primaryChangeTarget }))
+          .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+      )
+      setPrimaryChangeTarget(null)
+      setPrimaryChangeStatus('idle')
+    } catch {
+      setPrimaryChangeStatus('error')
+    }
+  }
+
+  function handleRequestRemove(connectionId: string) {
+    setRemoveTarget(connectionId)
+    setRemoveStatus('idle')
+  }
+
+  function handleCancelRemove() {
+    setRemoveTarget(null)
+    setRemoveStatus('idle')
+  }
+
+  /** Rule 8: a passenger may remove any driver, primary or not, from their own circle at any time. */
+  async function handleConfirmRemove() {
+    if (!identity || !removeTarget || removeStatus === 'submitting') {
+      return
+    }
+    setRemoveStatus('submitting')
+    try {
+      await request(`/v1/connections/${removeTarget}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${identity.token}` },
+        baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
+      })
+      setCircle((current) => current.filter((member) => member.connectionId !== removeTarget))
+      setRemoveTarget(null)
+      setRemoveStatus('idle')
+    } catch {
+      setRemoveStatus('error')
+    }
   }
 
   return (
@@ -387,9 +597,119 @@ export function RideRequest() {
             <ActionButton
               label="Попробовать снова"
               variant="secondary"
-              onClick={() => loadInvitation(true, driverCode ?? '')}
+              onClick={() => loadInvitation(true, driverCode ?? '', identity)}
             />
           </div>
+        )}
+
+        {step === 'circle' && (
+          <>
+            <h1 className={styles.title}>Кому доверить эту поездку?</h1>
+            {circleError && <p className={styles.hint}>Не удалось загрузить часть данных о ваших предпринимателях.</p>}
+
+            {circle
+              .filter((member) => member.isPrimary)
+              .map((primary) => (
+                <section key={primary.connectionId} className={styles.circleCard}>
+                  <p className={styles.circleSectionLabel}>Основной предприниматель</p>
+                  <p className={styles.circleName}>
+                    {primary.displayName} {primary.availability === 'AVAILABLE' ? '🟢' : '🔴'}
+                  </p>
+                  <ActionButton
+                    label="Вызвать"
+                    variant="primary"
+                    onClick={() => handleChooseCircleMember(primary.driverId)}
+                    disabled={primary.availability !== 'AVAILABLE'}
+                  />
+                  {primary.availability !== 'AVAILABLE' && (
+                    <p className={styles.hint}>Сейчас недоступен. Вот кому ещё вы доверяете:</p>
+                  )}
+                </section>
+              ))}
+
+            {circle.filter((member) => !member.isPrimary).length > 0 && (
+              <section className={styles.circleCard}>
+                <p className={styles.circleSectionLabel}>Другие доверенные предприниматели</p>
+                {circle
+                  .filter((member) => !member.isPrimary)
+                  .map((member) => (
+                    <div key={member.connectionId} className={styles.circleMemberRow}>
+                      <span className={styles.circleName}>
+                        {member.displayName} {member.availability === 'AVAILABLE' ? '🟢' : '🔴'}
+                      </span>
+                      <div className={styles.circleMemberActions}>
+                        <ActionButton
+                          label="Выбрать"
+                          variant="secondary"
+                          onClick={() => handleChooseCircleMember(member.driverId)}
+                          disabled={member.availability !== 'AVAILABLE'}
+                        />
+                        <button
+                          type="button"
+                          className={styles.textAction}
+                          onClick={() => handleRequestMakePrimary(member.connectionId)}
+                        >
+                          Сделать основным
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.textAction}
+                          onClick={() => handleRequestRemove(member.connectionId)}
+                        >
+                          Удалить
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </section>
+            )}
+
+            {primaryChangeTarget && (
+              <div className={styles.confirmBox}>
+                <p className={styles.status}>
+                  Сделать {circle.find((member) => member.connectionId === primaryChangeTarget)?.displayName}{' '}
+                  основным предпринимателем?
+                </p>
+                <div className={styles.actionRow}>
+                  <ActionButton
+                    label={primaryChangeStatus === 'submitting' ? 'Сохраняем…' : 'Да, сделать основным'}
+                    variant="primary"
+                    onClick={() => void handleConfirmMakePrimary()}
+                    disabled={primaryChangeStatus === 'submitting'}
+                  />
+                  <ActionButton label="Отмена" variant="secondary" onClick={handleCancelMakePrimary} />
+                </div>
+                {primaryChangeStatus === 'error' && (
+                  <p className={styles.error} role="alert">
+                    Не удалось изменить основного предпринимателя. Попробуйте ещё раз.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {removeTarget && (
+              <div className={styles.confirmBox}>
+                <p className={styles.status}>
+                  Удалить {circle.find((member) => member.connectionId === removeTarget)?.displayName} из круга
+                  доверия?
+                </p>
+                <div className={styles.actionRow}>
+                  <ActionButton
+                    label={removeStatus === 'submitting' ? 'Удаляем…' : 'Да, удалить'}
+                    variant="primary"
+                    onClick={() => void handleConfirmRemove()}
+                    disabled={removeStatus === 'submitting'}
+                  />
+                  <ActionButton label="Отмена" variant="secondary" onClick={handleCancelRemove} />
+                </div>
+                {removeStatus === 'error' && (
+                  <p className={styles.error} role="alert">
+                    Не удалось удалить. Попробуйте ещё раз.
+                  </p>
+                )}
+              </div>
+            )}
+          </>
         )}
 
         {step === 'form' && (
@@ -441,8 +761,12 @@ export function RideRequest() {
                 label={isSubmitting ? 'Отправляем…' : 'Заказать поездку'}
                 variant="primary"
                 onClick={handleSubmit}
+                disabled={isSubmitting}
               />
             </div>
+            <button type="button" className={styles.textAction} onClick={handleLogout}>
+              Выйти
+            </button>
           </>
         )}
 
