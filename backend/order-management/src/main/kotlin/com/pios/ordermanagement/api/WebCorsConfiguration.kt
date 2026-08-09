@@ -27,11 +27,17 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
  * from `PIOS_PILOT_FRONTEND_ORIGIN`, when set, is allowed alongside the
  * local dev origin — see `com.pios.drivermanagement.api.WebCorsConfiguration`'s
  * own KDoc for the reasoning.
+ *
+ * Browsers treat `http://localhost:5173` and `http://127.0.0.1:5173` as two
+ * distinct origins even though Vite's dev server answers both, so both are
+ * listed explicitly (mirrors the identical fix in `identity` and
+ * `driver-management`) — a `127.0.0.1` origin without this entry fails CORS
+ * preflight with 403.
  */
 @Configuration
 class WebCorsConfiguration : WebMvcConfigurer {
     override fun addCorsMappings(registry: CorsRegistry) {
-        val origins = listOfNotNull(FRONTEND_DEV_ORIGIN, System.getenv("PIOS_PILOT_FRONTEND_ORIGIN"))
+        val origins = listOfNotNull(FRONTEND_DEV_ORIGIN, FRONTEND_DEV_ORIGIN_LOOPBACK_IP, System.getenv("PIOS_PILOT_FRONTEND_ORIGIN"))
         registry.addMapping("/v1/**")
             .allowedOrigins(*origins.toTypedArray())
             .allowedMethods("GET", "POST")
@@ -40,5 +46,6 @@ class WebCorsConfiguration : WebMvcConfigurer {
 
     companion object {
         const val FRONTEND_DEV_ORIGIN = "http://localhost:5173"
+        const val FRONTEND_DEV_ORIGIN_LOOPBACK_IP = "http://127.0.0.1:5173"
     }
 }

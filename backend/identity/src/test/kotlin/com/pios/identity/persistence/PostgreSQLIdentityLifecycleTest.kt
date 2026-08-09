@@ -6,8 +6,10 @@ import com.pios.identity.application.CreateIdentityApplicationService
 import com.pios.identity.application.CreateIdentityCommand
 import com.pios.identity.application.IdentityNotFoundException
 import com.pios.identity.application.RetrieveIdentityHandler
+import com.pios.identity.application.SessionTokenIssuer
 import com.pios.identity.domain.IdentityId
 import org.springframework.jdbc.core.JdbcTemplate
+import java.util.Base64
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -28,6 +30,11 @@ import kotlin.test.assertFailsWith
  */
 class PostgreSQLIdentityLifecycleTest {
 
+    private val sessionTokenIssuer = SessionTokenIssuer(
+        secretBase64 = Base64.getEncoder().encodeToString("postgres-identity-lifecycle-secret-32".toByteArray()),
+        ttlSeconds = 2_592_000
+    )
+
     private fun freshRepository() = PostgreSQLIdentityRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
 
     @Test
@@ -37,7 +44,7 @@ class PostgreSQLIdentityLifecycleTest {
         // performs (ADR-039).
         val registrationRepository = freshRepository()
         val created = CreateIdentityApplicationService(registrationRepository).handle(CreateIdentityCommand(null))
-        AssociateDriverApplicationService(registrationRepository)
+        AssociateDriverApplicationService(registrationRepository, sessionTokenIssuer)
             .handle(AssociateDriverCommand(created.id.value, "postgres-identity-lifecycle-driver-1"))
 
         // Reopen (device restart): a brand new repository/handler pair,
@@ -68,14 +75,14 @@ class PostgreSQLIdentityLifecycleTest {
         // uniqueness).
         val phone = uniqueTestPhone()
         val created = CreateIdentityApplicationService(repository).handle(CreateIdentityCommand(phone))
-        AssociateDriverApplicationService(repository)
+        AssociateDriverApplicationService(repository, sessionTokenIssuer)
             .handle(AssociateDriverCommand(created.id.value, "postgres-identity-lifecycle-driver-2a"))
 
         // A later reopen associating a different driver id (e.g. this
         // device re-ran onboarding after losing its own local pointer,
         // per BackendIdentityProvider's 404-recovery path) -- the backend
         // itself does not forbid this; it simply reflects the latest call.
-        AssociateDriverApplicationService(freshRepository())
+        AssociateDriverApplicationService(freshRepository(), sessionTokenIssuer)
             .handle(AssociateDriverCommand(created.id.value, "postgres-identity-lifecycle-driver-2b"))
 
         val reopened = RetrieveIdentityHandler(freshRepository()).handle(created.id)

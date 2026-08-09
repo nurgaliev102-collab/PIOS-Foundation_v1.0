@@ -16,7 +16,11 @@ interface AuthResponse {
   expiresAt: string
 }
 
-/** `GET /v1/identities/me` and `POST /v1/identities/{id}/driver`'s own response shape (ADR-055 Decision 3). */
+/**
+ * `GET /v1/identities/me`'s own response shape (ADR-055 Decision 3).
+ * `POST /v1/identities/{id}/driver` used to share this shape too, until
+ * the ADR-055 Decision 6 addendum changed it to [AuthResponse] instead.
+ */
 interface IdentityApiResponse {
   id: string
   phone: string | null
@@ -73,15 +77,22 @@ export class BackendIdentityProvider implements IdentityProvider {
     if (!current) {
       throw new Error('attachDriver called before a session exists')
     }
-    const response = await request<IdentityApiResponse>(`/v1/identities/${current.identityId}/driver`, {
+    // ADR-055 Decision 6 addendum: `POST /v1/identities/{id}/driver` now
+    // returns a fresh `AuthResponse`, not `IdentityApiResponse` -- the
+    // registration-time token's `drv` claim is frozen at `null` forever
+    // otherwise, so every later `driverId`-scoped call this device makes
+    // (e.g. Passenger Experience's `GET /v1/connections?driverId=`) would
+    // keep failing with 403 for the rest of this session. Reuses
+    // `persistAuthResponse`, the exact same helper `register`/`login`
+    // already use, so the new token replaces the old one in storage the
+    // same way theirs does.
+    const response = await request<AuthResponse>(`/v1/identities/${current.identityId}/driver`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${current.token}` },
       body: JSON.stringify({ driverId }),
       baseUrl: IDENTITY_BASE_URL,
     })
-    const identity: StoredIdentity = { ...current, driverId: response.driverId }
-    this.persist(identity)
-    return identity
+    return this.persistAuthResponse(response)
   }
 
   /** See [IdentityProvider.restoreIdentity]'s own KDoc for the contract. */

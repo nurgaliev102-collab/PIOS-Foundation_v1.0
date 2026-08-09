@@ -42,7 +42,7 @@ class IdentityControllerTest {
     private val loginService =
         LoginApplicationService(identityRepository, credentialRepository, passwordHasher, sessionTokenIssuer, loginRateLimiter)
     private val retrieveIdentityHandler = RetrieveIdentityHandler(identityRepository)
-    private val associateDriverService = AssociateDriverApplicationService(identityRepository)
+    private val associateDriverService = AssociateDriverApplicationService(identityRepository, sessionTokenIssuer)
     private val controller = IdentityController(
         registerService,
         loginService,
@@ -218,6 +218,33 @@ class IdentityControllerTest {
 
         assertEquals(HttpStatus.OK, response.statusCode)
         assertEquals("ILDAR001", assertNotNull(response.body).driverId)
+    }
+
+    @Test
+    fun `associating a driver returns a fresh token carrying drv, with no login round-trip needed (ADR-055 Decision 6 addendum)`() {
+        val registered = register("+79991234567")
+        val registrationToken = registered.token
+
+        val response =
+            controller.associateDriver(registered.identityId, AssociateDriverRequest("ILDAR001"), bearer(registrationToken))
+
+        val body = assertNotNull(response.body)
+        assertNotNull(body.token)
+        val verifiedNewToken = assertNotNull(sessionTokenVerifier.verify(bearer(body.token)))
+        assertEquals("ILDAR001", verifiedNewToken.drv)
+        // The new token is genuinely a different one, not the same string echoed back --
+        // the whole point is that the caller no longer needs the registration-time token.
+        assertEquals(false, body.token == registrationToken)
+    }
+
+    @Test
+    fun `the registration token used to call associateDriver still verifies afterwards -- no server-side revocation exists (ADR-055)`() {
+        val registered = register("+79991234567")
+
+        controller.associateDriver(registered.identityId, AssociateDriverRequest("ILDAR001"), bearer(registered.token))
+
+        val verifiedOldToken = assertNotNull(sessionTokenVerifier.verify(bearer(registered.token)))
+        assertNull(verifiedOldToken.drv)
     }
 
     @Test

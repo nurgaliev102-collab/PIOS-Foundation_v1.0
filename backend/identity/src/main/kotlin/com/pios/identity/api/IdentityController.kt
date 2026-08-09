@@ -2,6 +2,7 @@ package com.pios.identity.api
 
 import com.pios.identity.application.AssociateDriverApplicationService
 import com.pios.identity.application.AssociateDriverCommand
+import com.pios.identity.application.AssociateDriverOutcome
 import com.pios.identity.application.IdentityNotFoundException
 import com.pios.identity.application.LoginApplicationService
 import com.pios.identity.application.LoginCommand
@@ -43,6 +44,16 @@ import org.springframework.web.bind.annotation.RestController
  * token for a *different* subject is 403. `GET /v1/identities/me` reads
  * the caller's own identity from the token's `sub` claim alone, so no id
  * is ever supplied by the caller for that endpoint.
+ *
+ * `POST /v1/identities/{id}/driver` returns [AuthResponse], not
+ * [IdentityResponse] (ADR-055 Decision 6 addendum) — associating a driver
+ * changes what the caller's own token *should* assert (`drv`), so a fresh
+ * token carrying it is issued and returned immediately, the same "mutate,
+ * then re-mint" shape `register`/`login` already use. The token the caller
+ * presented to make this call keeps verifying successfully until it
+ * expires — ADR-055's stateless model has no server-side revocation — but
+ * the caller has no reason to keep sending it once it has this response's
+ * own fresh one.
  *
  * A malformed phone or a blank password on `register` surfaces as
  * [IllegalArgumentException], mapped here to HTTP 400. An unrecognized
@@ -124,15 +135,15 @@ class IdentityController(
         @PathVariable id: String,
         @RequestBody request: AssociateDriverRequest,
         @RequestHeader("Authorization", required = false) authorization: String?
-    ): ResponseEntity<IdentityResponse> {
+    ): ResponseEntity<AuthResponse> {
         val verified = sessionTokenVerifier.verify(authorization)
             ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
         if (verified.sub != id) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
         }
         return try {
-            val identity = associateDriverApplicationService.handle(AssociateDriverCommand(id, request.driverId))
-            ResponseEntity.ok(identity.toResponse())
+            val outcome = associateDriverApplicationService.handle(AssociateDriverCommand(id, request.driverId))
+            ResponseEntity.ok(outcome.toResponse())
         } catch (ex: IdentityNotFoundException) {
             ResponseEntity.notFound().build()
         } catch (ex: IllegalArgumentException) {
@@ -143,5 +154,8 @@ class IdentityController(
     private fun Identity.toResponse() = IdentityResponse(id.value, phone?.value, driverId)
 
     private fun RegisterIdentityOutcome.toResponse() =
+        AuthResponse(identity.id.value, identity.driverId, token, expiresAt.toString())
+
+    private fun AssociateDriverOutcome.toResponse() =
         AuthResponse(identity.id.value, identity.driverId, token, expiresAt.toString())
 }
