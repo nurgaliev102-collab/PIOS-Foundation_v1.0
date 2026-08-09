@@ -269,6 +269,94 @@ npm run preview -- --port 4173 --strictPort
 
 ---
 
+## Раздел 7 — Operations Hardening (Stage 3, добавлено 2026-08-09)
+
+Дописано по итогам Stage 3 «Pilot Operations Hardening», закрывавшего два P0 из Stage 2 Pilot Readiness Audit (сетевой периметр backend и backup/recovery PostgreSQL). Ни один раздел выше не менялся. В репозитории на момент написания не было отдельного технического operational runbook — этот раздел им и является для двух конкретных механизмов ниже; остальные операционные факты (health-эндпоинты, WinSW, порты) — см. Разделы 1 и 4 выше.
+
+### 7.1 Firewall — блокировка backend от Public-зоны
+
+**Факт, установленный аудитом:** Windows на этой машине содержал два широких, ранее никем не замеченных правила `Allow Inbound` на профиле **Public** — `OpenJDK Platform binary` (java.exe, **любой** порт) и `Node.js JavaScript Runtime` (node.exe, любой порт). `java.exe` — это единственный процесс, которым запущены все пять backend-модулей (identity 8086, driver-management 8081, passenger-experience 8082, order-management 8083, dispatch 8084). На машине активен Public-классифицированный сетевой адаптер `happ-tun` (VPN/proxy-туннель) — то есть эти правила не гипотетические, они действуют прямо сейчас на реальном интерфейсе.
+
+**Правило, которое требовалось добавить** (закрывает именно этот разрыв, не трогая остальное): inbound Block, профиль Public, TCP, порты `8081,8082,8083,8084,8086`, имя `PIOS Backend - Block Public Inbound`.
+
+**Статус на 2026-08-09: ПРИМЕНЕНО и подтверждено.** Первая попытка (`New-NetFirewallRule` из неelevated сессии) вернула `Access is denied` — эта причина больше не актуальна: правило было создано оператором в elevated PowerShell той же командой, что приведена ниже, и независимо перепроверено в неelevated сессии (создание правил требует admin, но их чтение — нет):
+
+```powershell
+New-NetFirewallRule -DisplayName "PIOS Backend - Block Public Inbound" `
+  -Description "Blocks inbound TCP to PIOS backend business ports on the Public firewall profile. Loopback and Private-LAN traffic are unaffected." `
+  -Direction Inbound -Action Block -Protocol TCP -LocalPort 8081,8082,8083,8084,8086 -Profile Public -Enabled True
+```
+
+Фактическое состояние, подтверждено `Get-NetFirewallRule -DisplayName "PIOS Backend - Block Public Inbound"`:
+
+```
+Enabled       : True
+Profile       : Public
+Direction     : Inbound
+Action        : Block
+PrimaryStatus : OK
+```
+
+Проверено также: `localhost` → все пять backend-портов (8081/8082/8083/8084/8086) по-прежнему доступны (`Test-NetConnection 127.0.0.1 -Port <port>` → `TcpTestSucceeded: True` для каждого) — блокировка не задевает loopback, как и ожидалось. Private/Wi-Fi-поведение не менялось (было заблокировано политикой по умолчанию и раньше, отдельного allow там не было и нет). Порт 4173 и правило `Node.js JavaScript Runtime` (Public, любой порт) сознательно не тронуты — общее, не специфичное для PIOS правило Windows, вне минимального объёма этой задачи; остаётся отдельным, задокументированным риском.
+
+### 7.2 PostgreSQL backup / restore
+
+**Скрипт:** `windows-services/postgresql-backup/backup-pios-databases.ps1`. Делает `pg_dump -Fc` (custom format, сжатый, совместим с `pg_restore`) для пяти БД пилота — `pios_identity`, `pios_driver_management`, `pios_passenger_experience`, `pios_order_management`, `pios_dispatch` (`pios_network_management` сознательно не входит — модуль вне пилотного потока, ADR-037). Подключается тем же способом, что и сами backend-сервисы (`postgres` без пароля, `pg_hba.conf` trust на 127.0.0.1) — никакой пароль нигде не хранится и не логируется.
+
+**Куда пишет:** `C:\PIOS-Backups\<yyyy-MM-dd_HHmmss>\<db>.dump`, лог — `C:\PIOS-Backups\logs\backup-<тот же timestamp>.log`. Каталог — вне git-репозитория намеренно: дампы содержат реальные данные участников пилота.
+
+**Retention:** по умолчанию 14 дней (`-RetentionDays`), удаление подпапок старше порога — только после полностью успешного прогона; при частичном сбое старые бэкапы не трогаются, чтобы не остаться совсем без резервной копии.
+
+**Ручной запуск:**
+```powershell
+powershell -ExecutionPolicy Bypass -File "windows-services\postgresql-backup\backup-pios-databases.ps1"
+```
+Код возврата `0` — все 5 БД сохранены; `1` — минимум одна не удалась (см. лог, какая именно).
+
+**Как проверить последний бэкап:**
+```powershell
+Get-ChildItem C:\PIOS-Backups -Directory | Sort-Object Name -Descending | Select-Object -First 1
+Get-Content (Get-ChildItem C:\PIOS-Backups\logs | Sort-Object Name -Descending | Select-Object -First 1).FullName
+```
+
+**Как восстановить БД** (проверено вживую 2026-08-09 для всех пяти):
+```powershell
+& "C:\Program Files\PostgreSQL\17\bin\psql.exe" -h 127.0.0.1 -U postgres -d postgres -c "CREATE DATABASE <новое_имя>;"
+& "C:\Program Files\PostgreSQL\17\bin\pg_restore.exe" -h 127.0.0.1 -U postgres -d <новое_имя> "C:\PIOS-Backups\<timestamp>\<db>.dump"
+```
+Восстанавливать в НОВУЮ базу, не поверх работающей `pios_*` — переключение сервиса на восстановленные данные (переименование БД, остановка/запуск сервиса) отдельно не автоматизировано и не проверялось в рамках этой задачи.
+
+**Проверка восстановления (2026-08-09):** пять временных баз — `restoretest_pios_identity`, `restoretest_pios_driver_management`, `restoretest_pios_passenger_experience`, `restoretest_pios_order_management`, `restoretest_pios_dispatch` — были созданы, в каждую восстановлен реальный дамп, пройдена проверка счётчиком строк (identity: 8 identities; driver-management: 55 drivers; passenger-experience: 4 connections; order-management: 117 orders; dispatch: 276 proposals + 141 assignments — все ненулевые, восстановление подтверждено реальными данными). Все пять временных баз впоследствии удалены и очистка подтверждена: `SELECT datname FROM pg_database WHERE datname LIKE 'restoretest_pios_%'` возвращает пустой результат.
+
+**Scheduled Task:** `PIOS Nightly PostgreSQL Backup`, ежедневно 03:30. Изначально была зарегистрирована под текущим интерактивным пользователем (`LogonType: Interactive`, `RunLevel: Limited`) — рабочий, но ограниченный вариант: бэкап срабатывал бы только если пользователь на тот момент вошёл в систему. Позже пересоздана оператором в elevated-сессии под системной учётной записью:
+
+```
+UserId    : SYSTEM
+LogonType : ServiceAccount
+RunLevel  : Highest
+```
+```
+StartWhenAvailable : True
+WakeToRun          : False
+ExecutionTimeLimit : PT1H
+MultipleInstances  : IgnoreNew
+```
+
+Это снимает прежнее ограничение: запуск в 03:30 больше не зависит от того, вошёл ли кто-то в систему. Ручной триггер после пересоздания дал `LastTaskResult = 0`, и на диске появилась новая, независимая папка бэкапа (`C:\PIOS-Backups\2026-08-09_085109`) — подтверждает, что задача реально вызывает скрипт под новой учётной записью, а не является пустышкой.
+
+*Оговорка о проверке:* `Principal`/`Settings` в SYSTEM-режиме зафиксированы в этом разделе со слов оператора, выполнившего пересоздание в elevated-сессии — из обычной (неelevated) сессии `Get-ScheduledTask`/`schtasks` для SYSTEM-задачи с `RunLevel Highest` возвращают либо пустой результат, либо `Access is denied` (подтверждено 2026-08-09), то есть независимо перепроверить эти конкретные поля в такой сессии нельзя. Независимо подтверждён факт успешной работы — сама папка `2026-08-09_085109` на диске, увиденная напрямую, а не только заявленная.
+
+### 7.3 Что делать при потере основной БД
+
+1. Остановить соответствующий Windows-сервис (`Stop-Service pios-<module>`).
+2. Найти последний целый бэкап (7.1 «как проверить последний бэкап»).
+3. Создать новую БД, восстановить в неё дамп (команда выше).
+4. Переименовать БД (`ALTER DATABASE pios_<module> RENAME TO pios_<module>_lost; ALTER DATABASE <новое_имя> RENAME TO pios_<module>;`) — не проверено в этой сессии, выполнять с осторожностью и на копии данных, если есть время.
+5. Запустить сервис (`Start-Service pios-<module>`), проверить `/v1/health/<module>`.
+6. Сверить с другими модулями через RabbitMQ/outbox: возможен разрыв последовательности событий за период между последним бэкапом и потерей — не восстанавливается автоматически, требует ручной сверки.
+
+---
+
 ## References
 
 - [PIOS_PILOT_DRY_RUN_CHECKLIST.md](PIOS_PILOT_DRY_RUN_CHECKLIST.md) — раздел 1.5, который этот документ закрывает
