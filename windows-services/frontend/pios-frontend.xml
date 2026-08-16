@@ -18,7 +18,7 @@
        Section 4's own port for the tunnelled pilot surface, not the
        LAN-only port used before the named-tunnel decision
        (docs/PIOS_NAMED_TUNNEL_DEPLOYMENT.md records that decision).
-       `--strictPort` matches the same document's own launch command
+       the `strictPort` flag matches the same document's own launch command
        exactly: if 4173 is already taken, this service must fail loudly
        rather than silently bind a different port `vite.config.ts`'s
        `preview.allowedHosts` and the tunnel's own config do not expect. -->

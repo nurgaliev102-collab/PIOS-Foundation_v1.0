@@ -7,7 +7,7 @@
   <workingdirectory>C:\Projects\PIOS-Foundation_v1.0\backend\order-management</workingdirectory>
   <!-- See LOG_DIRECTORY_POLICY.md: working directory must match bootRun's
        own default so the T-1 log path keeps resolving correctly. -->
-  <env name="PIOS_PILOT_FRONTEND_ORIGIN" value="https://piosapp.ru"/>
+  <env name="PIOS_PILOT_FRONTEND_ORIGIN" value="https://home-pc.tail385153.ts.net"/>
   <log mode="none"/>
   <onfailure action="restart" delay="30 sec"/>
   <onfailure action="restart" delay="60 sec"/>

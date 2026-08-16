@@ -10,8 +10,15 @@ export default defineConfig({
   // every request reaching this server from the public internet, so that
   // suffix is allowed here -- this is a deployment-only change, it does
   // not affect `vite dev` or the production build's own behavior.
+  // `piosapp.ru` added for the named Cloudflare Tunnel
+  // (docs/PIOS_NAMED_TUNNEL_DEPLOYMENT.md) -- the quick-tunnel suffix above
+  // is left in place rather than removed, since it is still a valid,
+  // narrowly-scoped host and removing it is outside this change's own scope.
+  // `home-pc.tail385153.ts.net` added for Tailscale Funnel (this machine's
+  // own MagicDNS name, the only hostname Funnel's built-in HTTPS cert
+  // actually covers -- Funnel cannot serve an arbitrary custom domain).
   preview: {
-    allowedHosts: ['.trycloudflare.com'],
+    allowedHosts: ['.trycloudflare.com', 'piosapp.ru', 'home-pc.tail385153.ts.net'],
     // Pilot Infrastructure Decision (docs/PIOS_PILOT_INFRASTRUCTURE_DECISION.md):
     // route the five pilot backend services through this single preview
     // origin so one Cloudflare Tunnel can reach all of them. Paths are

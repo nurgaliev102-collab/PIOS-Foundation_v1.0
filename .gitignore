@@ -255,6 +255,10 @@ windows-services/**/*.exe
 # halves of the same setup step.
 windows-services/cloudflared/config.yml
 windows-services/cloudflared/*.json
+# Token-mode connector auth (used when the classic credentials JSON above
+# isn't available locally for an existing, already-created tunnel) -- same
+# "never enters version control" reasoning, same machine-local creation step.
+windows-services/cloudflared/*.token
 
 # Rolling log files (T-1, ADR-049 Decision 5) -- runtime output, not source.
 backend/logs/
