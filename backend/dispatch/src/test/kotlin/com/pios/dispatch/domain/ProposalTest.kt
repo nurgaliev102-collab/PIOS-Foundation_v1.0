@@ -250,6 +250,26 @@ class ProposalTest {
         assertEquals(null, proposal.statedPrice)
     }
 
+    // --- Acceptance: stated ETA (ADR-057) ---
+
+    @Test
+    fun `accepting an open proposal with a stated eta records it`() {
+        val proposal = Proposal.propose(order, driver).proposal
+
+        proposal.accept(statedEtaMinutes = 5)
+
+        assertEquals(5, proposal.statedEtaMinutes)
+    }
+
+    @Test
+    fun `accepting an open proposal without a stated eta leaves it null`() {
+        val proposal = Proposal.propose(order, driver).proposal
+
+        proposal.accept()
+
+        assertEquals(null, proposal.statedEtaMinutes)
+    }
+
     // --- Decline ---
 
     @Test
@@ -318,6 +338,15 @@ class ProposalTest {
         proposal.decline()
 
         assertEquals(null, proposal.statedPrice)
+    }
+
+    @Test
+    fun `declining an open proposal never sets a stated eta`() {
+        val proposal = Proposal.propose(order, driver).proposal
+
+        proposal.decline()
+
+        assertEquals(null, proposal.statedEtaMinutes)
     }
 
     // --- Lapse ---
@@ -390,6 +419,15 @@ class ProposalTest {
         assertEquals(null, proposal.statedPrice)
     }
 
+    @Test
+    fun `lapsing an open proposal never sets a stated eta`() {
+        val proposal = Proposal.propose(order, driver).proposal
+
+        proposal.lapse()
+
+        assertEquals(null, proposal.statedEtaMinutes)
+    }
+
     // --- Withdraw (ADR-053, Proposal Resolution on Order Cancellation) ---
 
     @Test
@@ -458,5 +496,14 @@ class ProposalTest {
         proposal.withdraw()
 
         assertEquals(null, proposal.statedPrice)
+    }
+
+    @Test
+    fun `withdrawing an open proposal never sets a stated eta`() {
+        val proposal = Proposal.propose(order, driver).proposal
+
+        proposal.withdraw()
+
+        assertEquals(null, proposal.statedEtaMinutes)
     }
 }

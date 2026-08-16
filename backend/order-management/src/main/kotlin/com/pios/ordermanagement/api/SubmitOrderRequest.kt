@@ -30,10 +30,20 @@ package com.pios.ordermanagement.api
  * same backward-compatibility reason — it lets the passenger state where
  * to be picked up, closing the gap where this contract previously only
  * carried where they were going.
+ *
+ * [requestedPickupAt] (ADR-058, Scheduled Pickup Time) follows the same
+ * optional, defaulting-to-`null`, appended-last shape — a passenger's
+ * requested pickup instant for a pre-booked ride, as an ISO-8601 string
+ * carrying an explicit offset or `Z` (ADR-058 Decision item 4). `null`
+ * (or absent) means "as soon as possible", unchanged from today. Parsed
+ * to [java.time.Instant] at the application boundary
+ * ([com.pios.ordermanagement.application.OrderSubmissionRequestHandler.handle]);
+ * a value that does not parse is a 400.
  */
 data class SubmitOrderRequest(
     val passengerReference: String,
     val destination: String? = null,
     val passengerName: String? = null,
-    val pickupAddress: String? = null
+    val pickupAddress: String? = null,
+    val requestedPickupAt: String? = null
 )

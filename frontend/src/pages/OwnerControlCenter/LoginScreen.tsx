@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent } from 'react'
 import { ActionButton } from '../../components/ActionButton'
+import { PasswordInput } from '../../components/PasswordInput'
 import { verifyOwnerCredential } from './healthPoll'
 import { storeOwnerCredential } from './ownerCredential'
 import styles from './OwnerControlCenter.module.css'
@@ -8,6 +9,15 @@ export interface LoginScreenProps {
   onLoggedIn: () => void
   /** Section 4.3: a saved login is pre-filled after the tab idles out or is reopened — never the password. */
   initialUsername?: string
+  /**
+   * ADR-061 (Coordinator Owner-Gated Access): `Coordinator.tsx` reuses this
+   * same screen and the same owner credential rather than building a second
+   * login UI (there is exactly one owner, ADR-044 Decision 6) — only the
+   * subtitle differs, so the coordinator is not told they are entering an
+   * "owner console" when they are on the dispatch screen. Defaults to the
+   * original copy so `OwnerControlCenter.tsx`'s own usage is unchanged.
+   */
+  subtitle?: string
 }
 
 type SubmitStatus = 'idle' | 'checking' | 'wrong-credential' | 'cannot-verify'
@@ -30,7 +40,7 @@ type SubmitStatus = 'idle' | 'checking' | 'wrong-credential' | 'cannot-verify'
  * own `onClick`, and also from pressing Enter in either field, so both
  * paths reach the same one place.
  */
-export function LoginScreen({ onLoggedIn, initialUsername }: LoginScreenProps) {
+export function LoginScreen({ onLoggedIn, initialUsername, subtitle }: LoginScreenProps) {
   const [username, setUsername] = useState(initialUsername ?? '')
   const [password, setPassword] = useState('')
   const [status, setStatus] = useState<SubmitStatus>('idle')
@@ -60,7 +70,7 @@ export function LoginScreen({ onLoggedIn, initialUsername }: LoginScreenProps) {
     <div className={styles.loginScreen}>
       <div className={styles.loginCard}>
         <p className={styles.loginBrand}>PIOS</p>
-        <p className={styles.loginSubtitle}>Пульт владельца</p>
+        <p className={styles.loginSubtitle}>{subtitle ?? 'Пульт владельца'}</p>
 
         <label className={styles.loginLabel} htmlFor="owner-username">
           Логин
@@ -79,13 +89,12 @@ export function LoginScreen({ onLoggedIn, initialUsername }: LoginScreenProps) {
         <label className={styles.loginLabel} htmlFor="owner-password">
           Пароль
         </label>
-        <input
+        <PasswordInput
           id="owner-password"
           className={styles.loginInput}
-          type="password"
           autoComplete="current-password"
           value={password}
-          onChange={(event) => setPassword(event.target.value)}
+          onChange={setPassword}
           onKeyDown={handleEnterKey}
           disabled={status === 'checking'}
         />

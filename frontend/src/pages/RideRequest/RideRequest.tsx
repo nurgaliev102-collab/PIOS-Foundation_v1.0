@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { Header } from '../../components/Header'
 import { ActionButton } from '../../components/ActionButton'
@@ -76,11 +76,37 @@ interface EnrichedCircleMember extends CircleMember {
 }
 
 interface ProposalStatusItem {
-  status: 'OPEN' | 'ACCEPTED' | 'DECLINED' | 'LAPSED'
+  status: 'OPEN' | 'ACCEPTED' | 'DECLINED' | 'LAPSED' | 'WITHDRAWN'
+  // ADR-042 (Stated Ride Price Minimal Model), Amendment 2026-08-01 (R9):
+  // the Product Owner ruled the passenger does see the amount the driver
+  // stated on acceptance -- `GET /v1/proposals?orderId=...` (this screen's
+  // own poll) has always carried it (`ProposalResponse.kt`'s own KDoc), no
+  // backend change accompanies this field being read here for the first
+  // time. Display-only, per R10: no response mechanism is added.
+  statedPrice: string | null
+  // ADR-057 (Driver Stated Time to Pickup): same poll, same display-only
+  // treatment as [statedPrice] -- the number of minutes the driver stated
+  // it would take to reach the passenger, `null` until accepted or if the
+  // driver left it unset.
+  statedEtaMinutes: number | null
 }
 
 interface AssignmentStatusItem {
   status: 'CREATED' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED'
+}
+
+/**
+ * ADR-058 (Scheduled Pickup Time): the subset of `GET /v1/orders`'s own
+ * response shape this screen needs -- the same unfiltered, already-public
+ * endpoint `DriverHome.tsx` already reads for its own order details, only
+ * matched here to this one order by id client-side. Read from the backend
+ * (not kept only in local component state) so a page reload does not lose
+ * it -- unlike [statedPrice]/[statedEtaMinutes], nothing about this value
+ * comes from the proposal poll.
+ */
+interface OrderListItem {
+  id: string
+  requestedPickupAt: string | null
 }
 
 // First-pilot feedback: a passenger used to have no way of knowing the
@@ -107,12 +133,37 @@ const STATUS_POLL_INTERVAL_MS = 3000
  * lapsed. No new status is invented here: this only stops discarding two
  * real ones the backend already sends.
  */
-type RideStatus = 'OPEN' | 'DECLINED' | 'LAPSED' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED'
+type RideStatus = 'OPEN' | 'DECLINED' | 'LAPSED' | 'WITHDRAWN' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED'
+
+/**
+ * ADR-058 Decision item 5: PIOS itself asserts nothing about a past
+ * requested time -- "the passenger's own screen prevents picking a past
+ * time" is this function, feeding a native `<input type="datetime-local">`'s
+ * own `min` attribute with this device's own local clock.
+ */
+function currentDatetimeLocalValue(): string {
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
+}
+
+/** Mirrors `DriverHome.tsx`'s own `formatRequestedPickupAt` -- this device's own local time, no timezone concept in the contract. */
+function formatRequestedPickupAt(requestedPickupAt: string | null): string | null {
+  if (!requestedPickupAt) {
+    return null
+  }
+  const parsed = new Date(requestedPickupAt)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+  return parsed.toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+}
 
 const RIDE_STATUS_LABEL: Record<RideStatus, string> = {
   OPEN: '⏳ Ждём ответа водителя. Мы сообщим, как только он подтвердит заказ.',
   DECLINED: '❌ Водитель отклонил ваш заказ.',
   LAPSED: '⌛ Заказ больше не активен — водитель не ответил вовремя.',
+  WITHDRAWN: '🚫 Вы отменили этот заказ.',
   ACCEPTED: '✅ Водитель принял ваш заказ и скоро свяжется с вами.',
   ARRIVED: '🚗 Водитель прибыл на место.',
   IN_PROGRESS: '🚕 Поездка началась.',
@@ -205,6 +256,28 @@ export function RideRequest() {
   const [orderId, setOrderId] = useState<string | null>(null)
   const [proposalStatus, setProposalStatus] = useState<ProposalStatus | null>(null)
   const [rideStatus, setRideStatus] = useState<RideStatus>('OPEN')
+  // ADR-042 R9: the amount the driver stated on accepting this order, read
+  // from the same poll [rideStatus] already uses -- null until a proposal
+  // is actually ACCEPTED, and whenever the driver accepted with no amount
+  // typed (`acceptRequestInit` in DriverHome.tsx sends no body at all then).
+  const [statedPrice, setStatedPrice] = useState<string | null>(null)
+  // ADR-057: the driver's own stated time to pickup, read from the same
+  // poll -- mirrors [statedPrice] exactly.
+  const [statedEtaMinutes, setStatedEtaMinutes] = useState<number | null>(null)
+  // ADR-058 (Scheduled Pickup Time): whether this passenger is booking for
+  // "сейчас" (default, sends nothing) or a chosen future date/time.
+  const [isScheduled, setIsScheduled] = useState(false)
+  const [scheduledAt, setScheduledAt] = useState('')
+  const [scheduledAtError, setScheduledAtError] = useState<string | null>(null)
+  // ADR-058: this order's own requested pickup instant, read from Order
+  // Management -- see [OrderListItem]'s own KDoc for why this is fetched
+  // rather than kept only in [scheduledAt] (which a page reload loses).
+  const [requestedPickupAt, setRequestedPickupAt] = useState<string | null>(null)
+  const hasFetchedRequestedPickupAt = useRef(false)
+  // P0-2 Tier 1 (`docs/SPRINT_PILOT_BLOCKERS.md`; ADR-053): the passenger's
+  // own way to stop waiting on an order no driver has accepted yet -- see
+  // [handleCancelOrder]'s own KDoc.
+  const [cancelStatus, setCancelStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
 
   // Sprint 6 (Passenger Entry-Path Failure Handling): pulled out of the
   // effect (mirrors DriverHome.tsx's own loadDriver) so the same fetch can
@@ -308,9 +381,10 @@ export function RideRequest() {
   // or resumed after a page reload (proposalStatus is only ever set by a
   // fresh submission's own attemptProposal, never by this effect).
   useEffect(() => {
-    if (step !== 'confirmed' || !orderId) {
+    if (step !== 'confirmed' || !orderId || !identity) {
       return
     }
+    const currentIdentity = identity
     let active = true
     function poll() {
       request<ProposalStatusItem[]>(`/v1/proposals?orderId=${orderId}`, { baseUrl: DISPATCH_BASE_URL })
@@ -318,20 +392,28 @@ export function RideRequest() {
           if (!active) {
             return
           }
-          if (!items.some((item) => item.status === 'ACCEPTED')) {
+          const acceptedItem = items.find((item) => item.status === 'ACCEPTED')
+          if (!acceptedItem) {
             // Sprint H5 (Truthful Status Rendering): reflect whichever real
             // proposal status this order actually has -- OPEN, DECLINED, or
             // LAPSED are three different facts and must not all render as
             // the same "✅ ... он свяжется с вами" success message. Priority
-            // (OPEN > DECLINED > LAPSED) only matters if more than one
-            // proposal somehow exists for this order; in the normal
-            // single-proposal case exactly one of these is true.
+            // (OPEN > DECLINED > LAPSED > WITHDRAWN) only matters if more
+            // than one proposal somehow exists for this order; in the
+            // normal single-proposal case exactly one of these is true.
+            // WITHDRAWN (ADR-053) is what this same proposal becomes once
+            // [handleCancelOrder] below cancels the order -- Dispatch
+            // withdraws the open proposal automatically, asynchronously, so
+            // this poll is also what confirms a cancellation actually took
+            // effect, not only [handleCancelOrder]'s own optimistic update.
             if (items.some((item) => item.status === 'OPEN')) {
               setRideStatus('OPEN')
             } else if (items.some((item) => item.status === 'DECLINED')) {
               setRideStatus('DECLINED')
             } else if (items.some((item) => item.status === 'LAPSED')) {
               setRideStatus('LAPSED')
+            } else if (items.some((item) => item.status === 'WITHDRAWN')) {
+              setRideStatus('WITHDRAWN')
             } else {
               // No proposal recorded yet (e.g., the propose call is still
               // in flight) -- honestly "waiting", not yet knowable as
@@ -340,6 +422,14 @@ export function RideRequest() {
             }
             return
           }
+          // ADR-042 R9: read back here, not only in the branch above,
+          // since this same poll keeps running through ARRIVED/IN_PROGRESS/
+          // COMPLETED too -- the amount was fixed at accept time and never
+          // changes again, so re-setting it every tick is harmless and
+          // keeps this the single place [statedPrice] is ever written.
+          setStatedPrice(acceptedItem.statedPrice)
+          // ADR-057: same read-back pattern as statedPrice immediately above.
+          setStatedEtaMinutes(acceptedItem.statedEtaMinutes)
           // Accepted -- an Assignment now exists (created in the same
           // step Dispatch accepts the Proposal); check its own ride
           // progress. CREATED and ACCEPTED both read as "принял" to a
@@ -358,6 +448,31 @@ export function RideRequest() {
                 setRideStatus('ACCEPTED')
               }
             })
+          // ADR-058: fetched once per confirmed order, chained after the
+          // assignments request above so this poll's own call order stays
+          // deterministic -- requestedPickupAt is fixed at submission and
+          // never changes, so [hasFetchedRequestedPickupAt] guards against
+          // refetching it on every subsequent tick.
+          if (!hasFetchedRequestedPickupAt.current) {
+            hasFetchedRequestedPickupAt.current = true
+            // ADR-060 (Order Query Authorization): GET /v1/orders now
+            // requires a Bearer token and exactly one scoping parameter --
+            // `?passengerReference=` returns only this passenger's own
+            // orders, and only when it equals the token's own subject.
+            request<OrderListItem[]>(`/v1/orders?passengerReference=${currentIdentity.identityId}`, {
+              headers: { Authorization: `Bearer ${currentIdentity.token}` },
+              baseUrl: ORDER_MANAGEMENT_BASE_URL,
+            })
+              .then((orders) => {
+                if (!active) {
+                  return
+                }
+                setRequestedPickupAt(orders.find((order) => order.id === orderId)?.requestedPickupAt ?? null)
+              })
+              .catch(() => {
+                // Best-effort: the confirmation simply omits this line.
+              })
+          }
         })
         .catch(() => {
           // Best-effort: a failed poll simply tries again next tick.
@@ -369,7 +484,7 @@ export function RideRequest() {
       active = false
       clearInterval(interval)
     }
-  }, [step, orderId])
+  }, [step, orderId, identity])
 
   if (identityChecked && !identity) {
     return <Navigate to={`/i/${driverCode ?? ''}`} replace />
@@ -404,6 +519,13 @@ export function RideRequest() {
     }
   }
 
+  function handleScheduledAtChange(value: string) {
+    setScheduledAt(value)
+    if (scheduledAtError) {
+      setScheduledAtError(null)
+    }
+  }
+
   async function handleSubmit() {
     if (isSubmitting) {
       return
@@ -418,6 +540,22 @@ export function RideRequest() {
       setDestinationError('Пожалуйста, укажите адрес.')
       return
     }
+    // ADR-058 Decision item 5: validation is structural only -- a value
+    // that does not parse (or is simply missing while "Заранее" is chosen)
+    // is rejected here in the UI; PIOS itself asserts nothing about it.
+    let requestedPickupAt: string | null = null
+    if (isScheduled) {
+      if (!scheduledAt) {
+        setScheduledAtError('Пожалуйста, укажите дату и время.')
+        return
+      }
+      const parsed = new Date(scheduledAt)
+      if (Number.isNaN(parsed.getTime())) {
+        setScheduledAtError('Неверная дата или время.')
+        return
+      }
+      requestedPickupAt = parsed.toISOString()
+    }
 
     setSubmitError(null)
     setIsSubmitting(true)
@@ -430,6 +568,7 @@ export function RideRequest() {
           pickupAddress: trimmedPickupAddress,
           destination: trimmedDestination,
           passengerName,
+          ...(requestedPickupAt ? { requestedPickupAt } : {}),
         }),
         baseUrl: ORDER_MANAGEMENT_BASE_URL,
       })
@@ -473,6 +612,41 @@ export function RideRequest() {
   }
 
   /**
+   * P0-2 Tier 1 (`docs/SPRINT_PILOT_BLOCKERS.md`; ADR-053, Proposal
+   * Resolution on Order Cancellation): calls the already-existing, already-
+   * tested `POST /v1/orders/{id}/cancel` (`OrderCancellationController.kt`)
+   * -- this button is the only thing that was missing; the backend
+   * capability itself predates this change. Shown only while `rideStatus`
+   * is `'OPEN'` (no driver has accepted yet), matching that ADR's own Tier
+   * 1 scope ("cancel while no live Assignment exists") rather than
+   * inventing a rule about cancelling mid-ride.
+   *
+   * Optimistically sets `rideStatus` to `'WITHDRAWN'` on success rather
+   * than waiting for the next poll: Order Management's own cancellation is
+   * synchronous and already confirmed by the 200 response, even though
+   * Dispatch's own proposal withdrawal (which is what the poll actually
+   * observes) happens moments later, asynchronously, via the outbox relay
+   * (ADR-053). The next poll tick then confirms the same fact from the
+   * server, so a failed optimistic update self-corrects within one tick.
+   */
+  async function handleCancelOrder() {
+    if (!orderId || cancelStatus === 'submitting') {
+      return
+    }
+    setCancelStatus('submitting')
+    try {
+      await request(`/v1/orders/${orderId}/cancel`, {
+        method: 'POST',
+        baseUrl: ORDER_MANAGEMENT_BASE_URL,
+      })
+      setRideStatus('WITHDRAWN')
+      setCancelStatus('idle')
+    } catch {
+      setCancelStatus('error')
+    }
+  }
+
+  /**
    * P0-1 (`docs/SPRINT_PILOT_BLOCKERS.md`): the passenger's own way back to
    * the order form once this driver's current order has reached a state
    * from which no further server-side progress is possible ('DECLINED',
@@ -492,6 +666,14 @@ export function RideRequest() {
     setOrderId(null)
     setProposalStatus(null)
     setRideStatus('OPEN')
+    setStatedPrice(null)
+    setStatedEtaMinutes(null)
+    setIsScheduled(false)
+    setScheduledAt('')
+    setScheduledAtError(null)
+    setRequestedPickupAt(null)
+    hasFetchedRequestedPickupAt.current = false
+    setCancelStatus('idle')
     setStep('form')
   }
 
@@ -750,6 +932,36 @@ export function RideRequest() {
               </p>
             )}
 
+            <label className={styles.label} htmlFor="whenScheduled">
+              Когда
+            </label>
+            <select
+              id="whenScheduled"
+              className={styles.input}
+              value={isScheduled ? 'later' : 'now'}
+              onChange={(event) => setIsScheduled(event.target.value === 'later')}
+            >
+              <option value="now">Сейчас</option>
+              <option value="later">Заранее</option>
+            </select>
+            {isScheduled && (
+              <>
+                <input
+                  className={styles.input}
+                  type="datetime-local"
+                  value={scheduledAt}
+                  min={currentDatetimeLocalValue()}
+                  aria-label="Дата и время подачи"
+                  onChange={(event) => handleScheduledAtChange(event.target.value)}
+                />
+                {scheduledAtError && (
+                  <p className={styles.error} role="alert">
+                    {scheduledAtError}
+                  </p>
+                )}
+              </>
+            )}
+
             {submitError && (
               <p className={styles.error} role="alert">
                 {submitError}
@@ -773,6 +985,9 @@ export function RideRequest() {
         {step === 'confirmed' && orderId && (
           <>
             <p className={styles.confirmed}>✅ Заказ оформлен.</p>
+            {requestedPickupAt && (
+              <p className={styles.status}>📅 Заказ на: {formatRequestedPickupAt(requestedPickupAt)}</p>
+            )}
 
             {proposalStatus === 'proposing' && <Spinner label="Сообщаем водителю…" />}
             {proposalStatus === 'error' && (
@@ -793,14 +1008,51 @@ export function RideRequest() {
             {(proposalStatus === 'proposed' || proposalStatus === null) && (
               <>
                 <p className={styles.status}>{RIDE_STATUS_LABEL[rideStatus]}</p>
+                {/* ADR-042 R9: shown from ACCEPTED onward (never for OPEN/
+                    DECLINED/LAPSED, where no acceptance -- and so no stated
+                    amount -- exists yet); absent entirely if the driver
+                    accepted without typing one, same as DriverHome.tsx's
+                    own identical rendering of this field. */}
+                {statedPrice && rideStatus !== 'OPEN' && rideStatus !== 'DECLINED' && rideStatus !== 'LAPSED' && (
+                  <p className={styles.status}>Стоимость: {statedPrice}</p>
+                )}
+                {/* ADR-057: same placement and gating as statedPrice immediately above. */}
+                {typeof statedEtaMinutes === 'number' &&
+                  rideStatus !== 'OPEN' &&
+                  rideStatus !== 'DECLINED' &&
+                  rideStatus !== 'LAPSED' && (
+                    <p className={styles.status}>Будет примерно через: {statedEtaMinutes} мин</p>
+                  )}
+                {/* P0-2 Tier 1: only while still OPEN -- a driver who has
+                    already accepted has committed, and cancelling then is
+                    out of this Tier's scope (handleCancelOrder's own
+                    KDoc). */}
+                {rideStatus === 'OPEN' && (
+                  <div className={styles.actionRow}>
+                    <ActionButton
+                      label={cancelStatus === 'submitting' ? 'Отменяем…' : 'Отменить заказ'}
+                      variant="secondary"
+                      onClick={() => void handleCancelOrder()}
+                      disabled={cancelStatus === 'submitting'}
+                    />
+                  </div>
+                )}
+                {cancelStatus === 'error' && (
+                  <p className={styles.error} role="alert">
+                    Не удалось отменить заказ. Попробуйте ещё раз.
+                  </p>
+                )}
                 {/* P0-1: a terminal ride state ('DECLINED', 'LAPSED',
-                    'COMPLETED') is exactly where this driver's link
-                    otherwise dead-ended forever -- 'OPEN', 'ACCEPTED',
+                    'WITHDRAWN', 'COMPLETED') is exactly where this driver's
+                    link otherwise dead-ended forever -- 'OPEN', 'ACCEPTED',
                     'ARRIVED', 'IN_PROGRESS' keep today's behavior
                     unchanged, since a ride still in progress must not
                     offer a second, concurrent order with the same
                     driver. */}
-                {(rideStatus === 'DECLINED' || rideStatus === 'LAPSED' || rideStatus === 'COMPLETED') && (
+                {(rideStatus === 'DECLINED' ||
+                  rideStatus === 'LAPSED' ||
+                  rideStatus === 'WITHDRAWN' ||
+                  rideStatus === 'COMPLETED') && (
                   <div className={styles.actionRow}>
                     <ActionButton label="Заказать ещё раз" variant="primary" onClick={handleOrderAgain} />
                   </div>

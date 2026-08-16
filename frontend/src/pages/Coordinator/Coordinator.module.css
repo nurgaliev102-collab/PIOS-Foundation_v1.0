@@ -24,20 +24,46 @@
   color: #0f172a;
 }
 
+/* ADR-061 (Coordinator Owner-Gated Access): houses the "Выйти" action next
+   to the first section title, mirroring OwnerControlCenter.module.css's
+   own .headerRow exactly. */
+.headerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.headerRow .title {
+  margin: 0;
+}
+
 .status {
   font-size: 0.9375rem;
   color: #64748b;
   text-align: center;
 }
 
+.hint {
+  margin: 0 0 0.25rem;
+  font-size: 0.8125rem;
+  color: #64748b;
+}
+
 .orderRow {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  flex-direction: column;
+  gap: 0.375rem;
   padding: 0.875rem 1rem;
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
+}
+
+.orderMain {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .orderId {
@@ -62,14 +88,29 @@
   background: #eff6ff;
 }
 
-.orderOrigin {
-  flex-shrink: 0;
+/* UX audit (pilot readiness): replaces the old single-value .orderOrigin
+   (which rendered the passenger's internal reference, not an address) --
+   now up to three lines of real order detail already returned by the same
+   API response. */
+.orderDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
   font-size: 0.8125rem;
   color: #64748b;
 }
 
 .clickableRow {
   cursor: pointer;
+}
+
+/* UX audit (pilot readiness): a COMPLETED or CANCELLED order is not a real
+   choice here (Dispatch would accept a proposal against it anyway -- see
+   Coordinator.tsx's own comment on `selectable`) -- same dimmed, inert
+   treatment as .driverUnavailable below, just not sharing its class since
+   this element is a `<section>` row, not a driver card. */
+.orderRowDisabled {
+  opacity: 0.55;
 }
 
 .selectedRow {
@@ -87,6 +128,14 @@
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+/* Pilot-readiness fix: an UNAVAILABLE driver can no longer be proposed an
+   order (`ProposalApplicationService.handle`'s own new fail-closed gate,
+   Dispatch) -- dimmed and non-clickable here so a coordinator does not
+   waste a click that backend check would now reject. */
+.driverUnavailable {
+  opacity: 0.55;
 }
 
 .error {

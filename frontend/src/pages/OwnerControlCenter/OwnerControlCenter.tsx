@@ -57,7 +57,7 @@ export function OwnerControlCenter() {
     setHealths(health)
     setLastCheckedAt(new Date())
 
-    const snapshot = await loadTodaySnapshot()
+    const snapshot = await loadTodaySnapshot(activeCredential)
     if (pollGeneration.current !== generation) {
       return
     }

@@ -85,16 +85,17 @@ class PostgreSQLProposalRepository(
 ) : ProposalRepository {
 
     private val selectColumns =
-        "id, order_reference, driver_reference, status, stated_price, created_at, responded_at"
+        "id, order_reference, driver_reference, status, stated_price, stated_eta_minutes, created_at, responded_at"
 
     override fun save(proposal: Proposal) {
         jdbcTemplate.update(
             """
-            INSERT INTO proposals (id, order_reference, driver_reference, status, stated_price, created_at, responded_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO proposals (id, order_reference, driver_reference, status, stated_price, stated_eta_minutes, created_at, responded_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 status = EXCLUDED.status,
                 stated_price = EXCLUDED.stated_price,
+                stated_eta_minutes = EXCLUDED.stated_eta_minutes,
                 responded_at = EXCLUDED.responded_at
             """.trimIndent(),
             proposal.id.value,
@@ -102,6 +103,7 @@ class PostgreSQLProposalRepository(
             proposal.driver.driverId,
             proposal.status.name,
             proposal.statedPrice,
+            proposal.statedEtaMinutes,
             proposal.createdAt?.let { Timestamp.from(it) },
             proposal.respondedAt?.let { Timestamp.from(it) }
         )
@@ -153,9 +155,10 @@ class PostgreSQLProposalRepository(
         )
         val status = ProposalStatus.valueOf(rs.getString("status"))
         val statedPrice = rs.getString("stated_price")
+        val statedEtaMinutes = rs.getInt("stated_eta_minutes").let { if (rs.wasNull()) null else it }
         val respondedAt: Instant = rs.getTimestamp("responded_at")?.toInstant() ?: Instant.now()
         when (status) {
-            ProposalStatus.ACCEPTED -> proposal.accept(statedPrice, respondedAt)
+            ProposalStatus.ACCEPTED -> proposal.accept(statedPrice, statedEtaMinutes, respondedAt)
             ProposalStatus.DECLINED -> proposal.decline(respondedAt)
             ProposalStatus.LAPSED -> proposal.lapse(respondedAt)
             ProposalStatus.WITHDRAWN -> proposal.withdraw(respondedAt)

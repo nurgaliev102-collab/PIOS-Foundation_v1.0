@@ -79,14 +79,56 @@ import org.springframework.stereotype.Service
  * behavior continue to work unchanged; a real, Spring-wired instance
  * always receives [com.pios.dispatch.persistence.SpringTransactionRunner]
  * instead.
+ *
+ * ## Availability gate on [handle] (pilot-readiness fix)
+ *
+ * [handle] now rejects proposing a driver who is not currently `AVAILABLE`,
+ * read from [driverAvailabilityRepository] — Dispatch's own local,
+ * event-sourced projection of Driver Management's `DriverAvailabilityChanged`
+ * (see [DriverAvailabilityRepository]'s own KDoc). This closes a real gap:
+ * before this fix, [handle] created a proposal for whatever driver a caller
+ * named, with no availability check at all. The check fails closed,
+ * matching this codebase's existing convention for a check with no
+ * confirmed positive (`OwnerCredentialGate.isConfigured()` does the same
+ * for a different concern): no projection record yet for a given driver
+ * (e.g. they have never toggled availability since this event pipeline
+ * started) is treated as not available, never as a bypass. Rejection
+ * surfaces as [IllegalStateException] — the exact exception type
+ * [Proposal.propose]'s own duplicate-open-proposal check already throws,
+ * deliberately reused rather than introducing a new one, since
+ * `ProposalController.createProposal` already maps [IllegalStateException]
+ * to HTTP 409 and this rejection belongs in the same "conflicting proposal
+ * request" family as that one.
+ *
+ * [driverAvailabilityRepository] defaults to `null`, not to a permissive
+ * always-available fake: the many existing tests of this service's other
+ * commands (decline/lapse/withdraw/accept, the Proposal→Assignment
+ * orchestration, the Order-cancellation consumer) construct
+ * [ProposalApplicationService] directly with no interest in availability at
+ * all, and forcing every one of them to wire an availability double would
+ * be an unrelated, out-of-scope change to each of them. A `null` repository
+ * simply skips the check entirely, identical to this service's behavior
+ * before this fix — safe here because Spring's real, production wiring
+ * always supplies the real
+ * [com.pios.dispatch.persistence.PostgreSQLDriverAvailabilityRepository]
+ * bean by type regardless of this default (Kotlin default constructor
+ * values only apply when Spring cannot resolve a bean of that type), so
+ * production behavior is unaffected by this default existing.
  */
 @Service
 class ProposalApplicationService(
     private val proposalRepository: ProposalRepository,
-    private val transactionRunner: TransactionRunner = NoOpTransactionRunner
+    private val transactionRunner: TransactionRunner = NoOpTransactionRunner,
+    private val driverAvailabilityRepository: DriverAvailabilityRepository? = null
 ) {
 
     fun handle(command: ProposeDriverCommand): ProposalCreated = transactionRunner.run {
+        if (driverAvailabilityRepository != null) {
+            val record = driverAvailabilityRepository.findByDriverReference(command.driver)
+            check(record?.available == true) {
+                "Driver ${command.driver.driverId} is not available"
+            }
+        }
         val existingProposals = proposalRepository.findByOrder(command.order)
         val created = Proposal.propose(
             order = command.order,
@@ -122,7 +164,7 @@ class ProposalApplicationService(
         require(proposal.id == command.proposalId) {
             "Proposal ${proposal.id.value} does not match command target ${command.proposalId.value}"
         }
-        val event = proposal.accept(command.statedPrice)
+        val event = proposal.accept(command.statedPrice, command.statedEtaMinutes)
         proposalRepository.save(proposal)
         return event
     }

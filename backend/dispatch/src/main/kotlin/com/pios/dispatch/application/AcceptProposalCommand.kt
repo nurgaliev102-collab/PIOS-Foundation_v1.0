@@ -23,11 +23,15 @@ import com.pios.dispatch.domain.ProposalId
  */
 data class AcceptProposalCommand(
     val proposalId: ProposalId,
-    val statedPrice: String? = null
+    val statedPrice: String? = null,
+    val statedEtaMinutes: Int? = null
 ) {
     init {
         require(statedPrice == null || statedPrice.isNotBlank()) {
             "statedPrice must not be blank when present"
+        }
+        require(statedEtaMinutes == null || statedEtaMinutes in 1..240) {
+            "statedEtaMinutes must be between 1 and 240 when present"
         }
     }
 }

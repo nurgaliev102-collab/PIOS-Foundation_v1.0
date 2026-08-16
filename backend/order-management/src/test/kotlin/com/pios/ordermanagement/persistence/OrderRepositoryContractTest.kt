@@ -85,6 +85,29 @@ abstract class OrderRepositoryContractTest {
     }
 
     @Test
+    fun `a saved order's requested pickup instant survives a round trip`() {
+        val repository = createRepository()
+        val requestedPickupAt = java.time.Instant.parse("2026-08-25T06:30:00Z")
+        val submitted = Order.submit(contractOrigin, requestedPickupAt = requestedPickupAt)
+
+        repository.save(submitted.order)
+        val reloaded = repository.findById(submitted.order.id)
+
+        assertEquals(requestedPickupAt, reloaded?.requestedPickupAt)
+    }
+
+    @Test
+    fun `a saved order without a requested pickup instant reloads with a null requested pickup instant`() {
+        val repository = createRepository()
+        val submitted = Order.submit(contractOrigin)
+
+        repository.save(submitted.order)
+        val reloaded = repository.findById(submitted.order.id)
+
+        assertNull(reloaded?.requestedPickupAt)
+    }
+
+    @Test
     fun `findAll includes every saved order`() {
         val repository = createRepository()
         val first = Order.submit(OrderOrigin("contract-test-findall-1"))

@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
@@ -83,7 +84,9 @@ import org.springframework.web.bind.annotation.RestController
 class ProposalController(
     private val proposalApplicationService: ProposalApplicationService,
     private val proposalAssignmentOrchestrationService: ProposalAssignmentOrchestrationService,
-    private val proposalRepository: ProposalRepository
+    private val proposalRepository: ProposalRepository,
+    private val sessionTokenVerifier: SessionTokenVerifier,
+    private val ownerCredentialGate: OwnerCredentialGate
 ) {
 
     @PostMapping
@@ -107,7 +110,7 @@ class ProposalController(
         try {
             val id = ProposalId(proposalId)
             val outcome = proposalAssignmentOrchestrationService.acceptProposal(
-                AcceptProposalCommand(id, request?.statedPrice)
+                AcceptProposalCommand(id, request?.statedPrice, request?.statedEtaMinutes)
             )
             ResponseEntity.ok(outcome.proposal.toResponse())
         } catch (ex: ProposalNotFoundException) {
@@ -171,9 +174,31 @@ class ProposalController(
      * (unfiltered, same convention as [findByOrder] already had) — the
      * caller decides which ones are actionable, exactly as the Driver UI
      * itself does by only offering Accept/Decline on `OPEN` ones.
+     *
+     * ## Authorization on `?driverId=` only (ADR-060 Decision 4)
+     *
+     * `GET /v1/drivers` → `?driverId=` used to let any anonymous caller
+     * enumerate every proposal (and, through it, every order id) for any
+     * driver they named — the enumeration path that made Order
+     * Management's own `GET /v1/orders` vulnerability exploitable even
+     * without calling it directly. `?driverId=` now requires either a
+     * `Bearer` session token whose own `drv` equals the named driver (401
+     * if the token does not verify at all, 403 if it verifies but names a
+     * different driver, including a passenger-only token with `drv ==
+     * null`), or a valid `Authorization: Basic` owner credential naming
+     * any driver — the owner already reads this unauthenticated today
+     * (`OwnerControlCenter/todayData.ts`'s own event-feed fan-out) and
+     * gains no new capability, mirroring ADR-060 Decision 5's identical
+     * reasoning for `GET /v1/orders`.
+     *
+     * `?orderId=` is deliberately left exactly as unauthenticated as
+     * before (ADR-060 Decision 4: it is an enumeration *sink*, not a
+     * *source* — locking it needs a `passengerReference` on `Proposal`,
+     * not authorized by this change).
      */
     @GetMapping
     fun listProposals(
+        @RequestHeader("Authorization", required = false) authorization: String? = null,
         @RequestParam(required = false) orderId: String?,
         @RequestParam(required = false) driverId: String?
     ): ResponseEntity<List<ProposalResponse>> =
@@ -181,13 +206,27 @@ class ProposalController(
             when {
                 orderId != null && driverId == null ->
                     ResponseEntity.ok(proposalRepository.findByOrder(OrderReference(orderId)).map { it.toResponse() })
-                driverId != null && orderId == null ->
-                    ResponseEntity.ok(proposalRepository.findByDriver(DriverReference(driverId)).map { it.toResponse() })
+                driverId != null && orderId == null -> listProposalsForDriver(authorization, driverId)
                 else -> ResponseEntity.badRequest().build()
             }
         } catch (ex: IllegalArgumentException) {
             ResponseEntity.badRequest().build()
         }
+
+    private fun listProposalsForDriver(authorization: String?, driverId: String): ResponseEntity<List<ProposalResponse>> {
+        if (authorization != null && authorization.startsWith("Basic ")) {
+            if (!ownerCredentialGate.verify(authorization)) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            }
+            return ResponseEntity.ok(proposalRepository.findByDriver(DriverReference(driverId)).map { it.toResponse() })
+        }
+        val verified = sessionTokenVerifier.verify(authorization)
+            ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+        if (verified.drv != driverId) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+        }
+        return ResponseEntity.ok(proposalRepository.findByDriver(DriverReference(driverId)).map { it.toResponse() })
+    }
 
     private fun Proposal.toResponse(): ProposalResponse =
         ProposalResponse(
@@ -197,6 +236,7 @@ class ProposalController(
             status.name,
             statedPrice,
             createdAt?.toString(),
-            respondedAt?.toString()
+            respondedAt?.toString(),
+            statedEtaMinutes
         )
 }

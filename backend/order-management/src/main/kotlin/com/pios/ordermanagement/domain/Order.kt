@@ -75,6 +75,19 @@ import java.util.UUID
  * changes for the rest of the order's lifecycle, mirroring
  * [destination]/[passengerName]'s own immutability: neither [complete] nor
  * [cancel] touches it.
+ *
+ * ADR-058 (Scheduled Pickup Time) adds [requestedPickupAt] — the passenger's
+ * own requested pickup instant for a pre-booked ride, `null` meaning "as
+ * soon as possible" (the behaviour every existing row and every existing
+ * caller already has, unchanged). Follows [pickupAddress]'s own precedent
+ * exactly: optional, appended as this class's own last constructor
+ * parameter, set once at submission, never touched by [complete] or
+ * [cancel]. Unlike every other optional field on this aggregate, it is the
+ * first **caller-supplied** time — deliberately not modeled as a new
+ * [OrderStatus] value (ADR-058 Decision item 2): a scheduled order is an
+ * ordinary [OrderStatus.SUBMITTED] order that happens to carry a requested
+ * time, so every existing invariant, guard, and lifecycle path applies to
+ * it unchanged.
  */
 class Order private constructor(
     val id: OrderId,
@@ -83,7 +96,8 @@ class Order private constructor(
     val destination: String?,
     val passengerName: String?,
     val createdAt: Instant?,
-    val pickupAddress: String?
+    val pickupAddress: String?,
+    val requestedPickupAt: Instant?
 ) {
     var status: OrderStatus = status
         private set
@@ -139,7 +153,8 @@ class Order private constructor(
             origin: OrderOrigin,
             destination: String? = null,
             passengerName: String? = null,
-            pickupAddress: String? = null
+            pickupAddress: String? = null,
+            requestedPickupAt: Instant? = null
         ): SubmittedOrder {
             val order = Order(
                 id = OrderId(UUID.randomUUID().toString()),
@@ -148,7 +163,8 @@ class Order private constructor(
                 destination = destination,
                 passengerName = passengerName,
                 createdAt = Instant.now(),
-                pickupAddress = pickupAddress
+                pickupAddress = pickupAddress,
+                requestedPickupAt = requestedPickupAt
             )
             return SubmittedOrder(order = order, event = OrderSubmitted(orderId = order.id))
         }

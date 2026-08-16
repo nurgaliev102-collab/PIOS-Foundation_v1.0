@@ -48,7 +48,21 @@ class ProposalControllerPostgreSQLIntegrationTest {
         service,
         assignmentService
     )
-    private val controller = ProposalController(service, orchestrationService, repository)
+    private val controller = ProposalController(
+        service,
+        orchestrationService,
+        repository,
+        SessionTokenVerifier(secretBase64 = "proposal-postgres-integration-test-secret"),
+        OwnerCredentialGate(
+            configuredUsername = "",
+            configuredPasswordHash = "",
+            configuredPasswordSalt = "",
+            iterations = 1000,
+            failureDelayMillis = 0,
+            maxFailuresPerWindow = 1000,
+            windowMillis = 900_000
+        )
+    )
 
     @Test
     fun `creating a proposal through REST persists it to PostgreSQL, loadable by id`() {

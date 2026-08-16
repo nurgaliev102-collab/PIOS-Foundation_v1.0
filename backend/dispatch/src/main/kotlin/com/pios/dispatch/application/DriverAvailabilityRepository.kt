@@ -11,6 +11,11 @@ import com.pios.dispatch.domain.DriverReference
  * Only Dispatch's own consumer path
  * ([DriverAvailabilityProjectionApplicationService]) writes through this
  * boundary; no other module implements or depends on it.
+ *
+ * Read from production code for the first time by
+ * [ProposalApplicationService.handle] (pilot-readiness fix) — this
+ * projection existed and was fully tested before that change but was not
+ * wired into any production read path.
  */
 interface DriverAvailabilityRepository {
     /**

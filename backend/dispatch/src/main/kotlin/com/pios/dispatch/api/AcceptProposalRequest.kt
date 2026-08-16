@@ -18,4 +18,4 @@ package com.pios.dispatch.api
  * [statedPrice] to HTTP 400, the same way it already converts a blank
  * `orderId`/`driverId` — see [AcceptProposalCommand]'s own validation.
  */
-data class AcceptProposalRequest(val statedPrice: String? = null)
+data class AcceptProposalRequest(val statedPrice: String? = null, val statedEtaMinutes: Int? = null)

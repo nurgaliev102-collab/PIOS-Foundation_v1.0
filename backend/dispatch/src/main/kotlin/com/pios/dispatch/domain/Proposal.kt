@@ -86,6 +86,27 @@ class Proposal private constructor(
         private set
 
     /**
+     * The whole number of minutes the driver stated it would take them to
+     * reach the passenger, given at the moment of accepting this proposal
+     * (ADR-057, Decision items 1-3) — `null` for every proposal that has
+     * not (yet, or ever) been accepted with one supplied. PIOS records this
+     * value verbatim; it computes, estimates, derives, compares, or ranks
+     * nothing from it (ADR-057 Decision item 5).
+     *
+     * Deliberately **not** a primary-constructor parameter, for exactly the
+     * reason [statedPrice]'s own KDoc gives:
+     * [com.pios.dispatch.persistence.PostgreSQLProposalRepository.reconstruct]
+     * restores a persisted [Proposal] by reflectively invoking this class's
+     * private constructor by parameter count and type; widening that
+     * constructor would break that lookup at runtime, silently. Set exactly
+     * once, by [accept], and never modified afterwards — [decline] and
+     * [lapse] never touch it, mirroring [statedPrice]'s own refusal
+     * exclusion (ADR-057 Decision item 2).
+     */
+    var statedEtaMinutes: Int? = null
+        private set
+
+    /**
      * Accepts this proposal, per the driver's own confirming act. Only an
      * [ProposalStatus.OPEN] proposal may be accepted; an already-resolved
      * proposal cannot be accepted again.
@@ -99,18 +120,27 @@ class Proposal private constructor(
      * mirroring [Assignment.accept]'s own `at` parameter precedent
      * (ADR-040).
      *
+     * [statedEtaMinutes] is the driver's stated time to pickup, in minutes
+     * (ADR-057, Decision item 3) — optional, same reconstruction-replay
+     * reasoning as [statedPrice].
+     *
      * [at] defaults to the current time for real callers; overridable so
      * [com.pios.dispatch.persistence.PostgreSQLProposalRepository] can
      * replay this transition during reconstruction with the originally
      * persisted `responded_at` instead of the moment of the read (ADR-043,
      * mirroring [Assignment]'s own already-established `at` precedent).
      */
-    fun accept(statedPrice: String? = null, at: Instant = Instant.now()): ProposalAccepted {
+    fun accept(
+        statedPrice: String? = null,
+        statedEtaMinutes: Int? = null,
+        at: Instant = Instant.now()
+    ): ProposalAccepted {
         check(status == ProposalStatus.OPEN) {
             "Proposal ${id.value} cannot be accepted from status $status"
         }
         status = ProposalStatus.ACCEPTED
         this.statedPrice = statedPrice
+        this.statedEtaMinutes = statedEtaMinutes
         this.respondedAt = at
         return ProposalAccepted(orderId = order, driverId = driver)
     }

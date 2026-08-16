@@ -246,4 +246,85 @@ class ProposalApplicationServiceTest {
             service.acceptProposal(proposal, AcceptProposalCommand(proposal.id))
         }
     }
+
+    // --- Driver availability gate (pilot-readiness fix) ---
+
+    private class InMemoryDriverAvailabilityRepository : DriverAvailabilityRepository {
+        val records = mutableMapOf<String, DriverAvailabilityRecord>()
+
+        override fun markProcessed(eventId: String): Boolean = throw UnsupportedOperationException("not used by this test")
+        override fun upsert(record: DriverAvailabilityRecord) {
+            records[record.driverReference.driverId] = record
+        }
+        override fun findByDriverReference(driverReference: DriverReference): DriverAvailabilityRecord? =
+            records[driverReference.driverId]
+    }
+
+    @Test
+    fun `handling a command for a driver with no availability record is rejected`() {
+        val availabilityRepository = InMemoryDriverAvailabilityRepository()
+        val gatedService = ProposalApplicationService(repository, driverAvailabilityRepository = availabilityRepository)
+
+        assertFailsWith<IllegalStateException> {
+            gatedService.handle(ProposeDriverCommand(order, driver))
+        }
+    }
+
+    @Test
+    fun `handling a command for a driver marked unavailable is rejected`() {
+        val availabilityRepository = InMemoryDriverAvailabilityRepository()
+        availabilityRepository.upsert(DriverAvailabilityRecord(driver, available = false))
+        val gatedService = ProposalApplicationService(repository, driverAvailabilityRepository = availabilityRepository)
+
+        assertFailsWith<IllegalStateException> {
+            gatedService.handle(ProposeDriverCommand(order, driver))
+        }
+    }
+
+    @Test
+    fun `handling a command for a driver marked available succeeds`() {
+        val availabilityRepository = InMemoryDriverAvailabilityRepository()
+        availabilityRepository.upsert(DriverAvailabilityRecord(driver, available = true))
+        val gatedService = ProposalApplicationService(repository, driverAvailabilityRepository = availabilityRepository)
+
+        val result = gatedService.handle(ProposeDriverCommand(order, driver))
+
+        assertEquals(order, result.proposal.order)
+    }
+
+    /**
+     * Full pilot-readiness verification scenario: 4 drivers, only one
+     * (Артур) `AVAILABLE`, the other 3 defaulting to `UNAVAILABLE` (no
+     * record ever upserted for them) -- proving the fail-closed gate end to
+     * end, then proving it re-applies the moment Артур goes offline too.
+     */
+    @Test
+    fun `proposal creation follows a driver's own availability end to end`() {
+        val availabilityRepository = InMemoryDriverAvailabilityRepository()
+        val gatedService = ProposalApplicationService(repository, driverAvailabilityRepository = availabilityRepository)
+        val artur = DriverReference("driver-artur")
+        val orderForArtur = OrderReference("order-for-artur")
+        val orderForOther = OrderReference("order-for-other")
+        val orderForArturSecond = OrderReference("order-for-artur-second")
+
+        // Step 2: Артур is AVAILABLE, the other 3 stay UNAVAILABLE (default, no record).
+        availabilityRepository.upsert(DriverAvailabilityRecord(artur, available = true))
+
+        // Step 4: proposing Артур succeeds.
+        val proposedArtur = gatedService.handle(ProposeDriverCommand(orderForArtur, artur))
+        assertEquals(artur, proposedArtur.proposal.driver)
+
+        // Step 5: proposing one of the other 3 (never toggled -- no record) is rejected.
+        assertFailsWith<IllegalStateException> {
+            gatedService.handle(ProposeDriverCommand(orderForOther, DriverReference("driver-other-1")))
+        }
+
+        // Step 6: Артур goes UNAVAILABLE.
+        availabilityRepository.upsert(DriverAvailabilityRecord(artur, available = false))
+
+        // Step 7: proposing Артур again is now rejected too.
+        assertFailsWith<IllegalStateException> {
+            gatedService.handle(ProposeDriverCommand(orderForArturSecond, artur))
+        }
+    }
 }

@@ -4,6 +4,7 @@ import { DriverCard } from '../../components/DriverCard'
 import { QRCard } from '../../components/QRCard'
 import { ActionButton } from '../../components/ActionButton'
 import { Spinner } from '../../components/Spinner'
+import { PasswordInput } from '../../components/PasswordInput'
 import { ApiError, request } from '../../api/apiClient'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
 import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
@@ -75,13 +76,22 @@ interface ProposalListItem {
   proposalId: string
   orderId: string
   driverId: string
-  status: 'OPEN' | 'ACCEPTED' | 'DECLINED' | 'LAPSED'
+  status: 'OPEN' | 'ACCEPTED' | 'DECLINED' | 'LAPSED' | 'WITHDRAWN'
   // ADR-042 (Stated Ride Price Minimal Model): the amount this driver
   // stated when accepting, if any. Always `null` for a proposal that is
   // not yet ACCEPTED or was accepted with no price entered — PIOS never
   // fills this in on its own (Decision Revised R4.1).
   statedPrice: string | null
+  // ADR-057 (Driver Stated Time to Pickup): the number of minutes this
+  // driver stated it would take to reach the passenger, if any. Same
+  // null-until-accepted rule as [statedPrice].
+  statedEtaMinutes: number | null
 }
+
+// ADR-057 Decision item 4: the fixed choice set lives in the UI, not the
+// domain -- this is a presentation choice about what is easy to tap, so it
+// can change without a backend contract change.
+const ETA_OPTIONS_MINUTES = [2, 5, 7, 10, 15] as const
 
 // Sprint 6A (Human Interface Polish): the raw status values above are this
 // screen's own wire format, not driver-facing wording -- MVR_DRIVER_ONBOARDING_GUIDE.md
@@ -94,6 +104,10 @@ const PROPOSAL_STATUS_LABEL: Record<ProposalListItem['status'], string> = {
   ACCEPTED: 'Вы приняли',
   DECLINED: 'Отклонено',
   LAPSED: 'Больше не активно',
+  // P0-2 Tier 1 (`docs/SPRINT_PILOT_BLOCKERS.md`; ADR-053): what an OPEN
+  // proposal becomes when the passenger cancels the order it belongs to,
+  // before this driver responded to it.
+  WITHDRAWN: 'Отменено пассажиром',
 }
 
 type AssignmentStatusValue = 'CREATED' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED'
@@ -131,6 +145,10 @@ interface OrderListItem {
   // previously had no way to know where to pick a passenger up short of
   // calling them.
   pickupAddress: string | null
+  // ADR-058 (Scheduled Pickup Time): the passenger's own requested pickup
+  // instant (ISO-8601), for a pre-booked ride -- `null` means "as soon as
+  // possible", same as every order before this field existed.
+  requestedPickupAt: string | null
 }
 
 /**
@@ -167,6 +185,23 @@ function formatOrderTime(createdAt: string | null): string | null {
     return null
   }
   return parsed.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+}
+
+/**
+ * ADR-058 (Scheduled Pickup Time): renders an order's own `requestedPickupAt`
+ * (ISO-8601 instant) in this device's own local time, so a driver reads it
+ * exactly like [formatOrderTime] -- the browser resolves the offset, no
+ * timezone concept exists in the contract itself.
+ */
+function formatRequestedPickupAt(requestedPickupAt: string | null): string | null {
+  if (!requestedPickupAt) {
+    return null
+  }
+  const parsed = new Date(requestedPickupAt)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+  return parsed.toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
 }
 
 /**
@@ -314,6 +349,10 @@ export function DriverHome() {
   // tap "Принять". Sent only on the accept action (never on decline) and
   // only if non-blank -- see `respondToProposal`.
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({})
+  // ADR-057 (Driver Stated Time to Pickup): the ETA a driver has chosen for
+  // a given open proposal, keyed by proposalId, before they tap "Принять" --
+  // mirrors [priceInputs] exactly. `null`/unset means "not chosen".
+  const [etaInputs, setEtaInputs] = useState<Record<string, number | null>>({})
   const [orderDetails, setOrderDetails] = useState<Record<string, OrderListItem>>({})
   const [connections, setConnections] = useState<ConnectionListItem[]>([])
   // ADR-040 (Assignment Ride Lifecycle): keyed by orderId, one entry per
@@ -360,21 +399,21 @@ export function DriverHome() {
   // screen if a single poll happens to fail — the same best-effort
   // tolerance `orderDetails` below already has.
   useEffect(() => {
-    if (!driverId) {
+    // ADR-060 (Order Query Authorization): `driverId` is only ever derived
+    // from `identity?.driverId` (below), so `driverId` truthy already
+    // implies `identity` truthy at runtime -- this second check exists so
+    // TypeScript narrows `identity` to non-null for `identity.token` below,
+    // now that both `loadProposals` (its own `?driverId=`) and, through it,
+    // `loadOrderDetails` (its own `?ids=`) require a Bearer token.
+    if (!driverId || !identity) {
       return
     }
     let active = true
-    loadProposals(active, driverId, { silent: false })
-    loadOrderDetails(active)
-    if (identity) {
-      loadConnections(active, driverId, identity.token)
-    }
+    loadProposals(active, driverId, identity.token, { silent: false })
+    loadConnections(active, driverId, identity.token)
     const interval = setInterval(() => {
-      loadProposals(active, driverId, { silent: true })
-      loadOrderDetails(active)
-      if (identity) {
-        loadConnections(active, driverId, identity.token)
-      }
+      loadProposals(active, driverId, identity.token, { silent: true })
+      loadConnections(active, driverId, identity.token)
     }, PROPOSALS_POLL_INTERVAL_MS)
     return () => {
       active = false
@@ -382,8 +421,25 @@ export function DriverHome() {
     }
   }, [driverId, identity])
 
-  function loadOrderDetails(active: boolean) {
-    request<OrderListItem[]>('/v1/orders', { baseUrl: ORDER_MANAGEMENT_BASE_URL })
+  /**
+   * ADR-060 Decision 1/Mode 2: `GET /v1/orders?ids=...` now requires a
+   * driver-linked Bearer token, and returns only the named orders -- this
+   * screen only ever needs orders it already has a proposal for, which
+   * [loadProposals] below already knows once its own request resolves.
+   * [orderIds] empty means no proposals exist yet, so there is nothing to
+   * look up (unchanged in effect from this driver's own screen showing
+   * nothing, before this ADR fetched every order in the system to get
+   * there).
+   */
+  function loadOrderDetails(active: boolean, orderIds: string[], token: string) {
+    if (orderIds.length === 0) {
+      setOrderDetails({})
+      return
+    }
+    request<OrderListItem[]>(`/v1/orders?ids=${orderIds.join(',')}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      baseUrl: ORDER_MANAGEMENT_BASE_URL,
+    })
       .then((orders) => {
         if (!active) {
           return
@@ -430,11 +486,29 @@ export function DriverHome() {
       })
   }
 
-  function loadProposals(active: boolean, forDriverId: string, opts: { silent: boolean } = { silent: false }) {
+  /**
+   * ADR-060 Decision 4: `?driverId=` now requires this driver's own Bearer
+   * token -- unlike [loadConnections]'s own best-effort tolerance, a
+   * failure here is not cosmetic (this is the core of the driver's
+   * screen), so it still surfaces [proposalsStatus] `'error'` exactly as
+   * before this ADR. [loadOrderDetails] is now called from inside this
+   * function's own `.then`, not independently by the polling effect --
+   * `GET /v1/orders?ids=` (ADR-060 Mode 2) needs the order ids this
+   * response carries, which the previous, independent call never had.
+   */
+  function loadProposals(
+    active: boolean,
+    forDriverId: string,
+    token: string,
+    opts: { silent: boolean } = { silent: false }
+  ) {
     if (!opts.silent) {
       setProposalsStatus('loading')
     }
-    request<ProposalListItem[]>(`/v1/proposals?driverId=${forDriverId}`, { baseUrl: DISPATCH_BASE_URL })
+    request<ProposalListItem[]>(`/v1/proposals?driverId=${forDriverId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      baseUrl: DISPATCH_BASE_URL,
+    })
       .then((result) => {
         if (!active) {
           return
@@ -442,6 +516,7 @@ export function DriverHome() {
         setProposals(result)
         setProposalsStatus('ready')
         loadAssignments(active, result)
+        loadOrderDetails(active, Array.from(new Set(result.map((p) => p.orderId))), token)
       })
       .catch(() => {
         // A silent poll failure keeps the last-known list on screen rather
@@ -631,12 +706,16 @@ export function DriverHome() {
   // (Open Question 6: a price may never accompany a decline).
   function acceptRequestInit(proposalId: string): RequestInit {
     const statedPrice = (priceInputs[proposalId] ?? '').trim()
-    if (!statedPrice) {
+    const statedEtaMinutes = etaInputs[proposalId] ?? null
+    if (!statedPrice && statedEtaMinutes === null) {
       return {}
     }
     return {
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ statedPrice }),
+      body: JSON.stringify({
+        ...(statedPrice ? { statedPrice } : {}),
+        ...(statedEtaMinutes !== null ? { statedEtaMinutes } : {}),
+      }),
     }
   }
 
@@ -657,8 +736,8 @@ export function DriverHome() {
       setProposalActions((current) => ({ ...current, [proposalId]: 'error' }))
       // A 404/409 here means another actor already resolved this proposal (or it no
       // longer exists) -- reload the list so this screen reflects its real state.
-      if (error instanceof ApiError && (error.status === 404 || error.status === 409) && driverId) {
-        loadProposals(true, driverId)
+      if (error instanceof ApiError && (error.status === 404 || error.status === 409) && driverId && identity) {
+        loadProposals(true, driverId, identity.token)
       }
     }
   }
@@ -785,13 +864,13 @@ export function DriverHome() {
                 aria-label="Номер телефона"
                 onChange={(event) => handleAuthFieldChange(setPhone)(event.target.value)}
               />
-              <input
+              <PasswordInput
                 className={styles.driverCodeInput}
-                type="password"
                 value={password}
+                onChange={handleAuthFieldChange(setPassword)}
                 placeholder="Пароль"
-                aria-label="Пароль"
-                onChange={(event) => handleAuthFieldChange(setPassword)(event.target.value)}
+                ariaLabel="Пароль"
+                autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
                     void (authMode === 'register' ? handleRegisterSubmit() : handleLoginSubmit())
@@ -1006,7 +1085,7 @@ export function DriverHome() {
             <ActionButton
               label="Попробовать снова"
               variant="secondary"
-              onClick={() => loadProposals(true, identity.driverId!)}
+              onClick={() => loadProposals(true, identity.driverId!, identity.token)}
             />
           </div>
         )}
@@ -1036,6 +1115,16 @@ export function DriverHome() {
                 </span>
               </div>
 
+              {/* ADR-058 (Scheduled Pickup Time): shown whenever this order
+                  carries a passenger-requested pickup instant, regardless of
+                  proposal status -- a driver deciding whether to accept
+                  needs to know it is a pre-booking, not only a driver who
+                  already has. */}
+              {order?.requestedPickupAt && (
+                <p className={styles.status}>
+                  📅 Предварительный заказ: {formatRequestedPickupAt(order.requestedPickupAt)}
+                </p>
+              )}
               {order?.passengerName && <p className={styles.status}>Пассажир: {order.passengerName}</p>}
               {order?.pickupAddress && <p className={styles.status}>Откуда: {order.pickupAddress}</p>}
               {order?.destination && <p className={styles.status}>Куда: {order.destination}</p>}
@@ -1049,6 +1138,11 @@ export function DriverHome() {
               {proposal.status === 'ACCEPTED' && proposal.statedPrice && (
                 <p className={styles.status}>Стоимость: {proposal.statedPrice}</p>
               )}
+              {/* ADR-057 (Driver Stated Time to Pickup): same read-back
+                  pattern as statedPrice immediately above. */}
+              {proposal.status === 'ACCEPTED' && typeof proposal.statedEtaMinutes === 'number' && (
+                <p className={styles.status}>Будет примерно через: {proposal.statedEtaMinutes} мин</p>
+              )}
 
               {proposal.status === 'OPEN' && (
                 <input
@@ -1061,6 +1155,33 @@ export function DriverHome() {
                     setPriceInputs((current) => ({ ...current, [proposal.proposalId]: event.target.value }))
                   }
                 />
+              )}
+
+              {proposal.status === 'OPEN' && (
+                <>
+                  <label className={styles.status} htmlFor={`eta-${proposal.proposalId}`}>
+                    Когда сможете приехать?
+                  </label>
+                  <select
+                    id={`eta-${proposal.proposalId}`}
+                    className={styles.driverCodeInput}
+                    value={etaInputs[proposal.proposalId] ?? ''}
+                    aria-label="Через сколько вы приедете"
+                    onChange={(event) =>
+                      setEtaInputs((current) => ({
+                        ...current,
+                        [proposal.proposalId]: event.target.value ? Number(event.target.value) : null,
+                      }))
+                    }
+                  >
+                    <option value="">Не указано</option>
+                    {ETA_OPTIONS_MINUTES.map((minutes) => (
+                      <option key={minutes} value={minutes}>
+                        {minutes} мин
+                      </option>
+                    ))}
+                  </select>
+                </>
               )}
 
               {proposal.status === 'OPEN' && (

@@ -1,6 +1,7 @@
 package com.pios.ordermanagement.application
 
 import com.pios.ordermanagement.domain.OrderOrigin
+import java.time.Instant
 
 /**
  * The Submit Order command (DOMAIN_MODEL.md Section 9;
@@ -30,5 +31,6 @@ class SubmitOrderCommand(
     val origin: OrderOrigin,
     val destination: String? = null,
     val passengerName: String? = null,
-    val pickupAddress: String? = null
+    val pickupAddress: String? = null,
+    val requestedPickupAt: Instant? = null
 )

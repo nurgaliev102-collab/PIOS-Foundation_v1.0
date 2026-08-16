@@ -69,4 +69,13 @@ describe('LoginScreen', () => {
 
     expect(screen.getByRole('button', { name: 'Войти' })).toBeDisabled()
   })
+
+  it('shows the default "Пульт владельца" subtitle when none is given, and a caller-supplied subtitle when it is (ADR-061)', () => {
+    const { rerender } = render(<LoginScreen onLoggedIn={vi.fn()} />)
+    expect(screen.getByText('Пульт владельца')).toBeInTheDocument()
+
+    rerender(<LoginScreen onLoggedIn={vi.fn()} subtitle="Координатор" />)
+    expect(screen.getByText('Координатор')).toBeInTheDocument()
+    expect(screen.queryByText('Пульт владельца')).not.toBeInTheDocument()
+  })
 })

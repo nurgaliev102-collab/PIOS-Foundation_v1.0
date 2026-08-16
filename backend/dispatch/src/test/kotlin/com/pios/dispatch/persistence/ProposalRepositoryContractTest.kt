@@ -168,6 +168,41 @@ abstract class ProposalRepositoryContractTest {
 
         assertNull(repository.findById(created.proposal.id)?.statedPrice)
     }
+
+    // --- Stated eta (ADR-057) ---
+
+    @Test
+    fun `a proposal accepted with a stated eta can be found with that eta intact`() {
+        val repository = createRepository()
+        val created = Proposal.propose(OrderReference("contract-test-order-eta-1"), DriverReference("contract-test-driver-eta-1"))
+        created.proposal.accept(statedEtaMinutes = 7)
+
+        repository.save(created.proposal)
+
+        assertEquals(7, repository.findById(created.proposal.id)?.statedEtaMinutes)
+    }
+
+    @Test
+    fun `a proposal accepted without a stated eta can be found with a null eta`() {
+        val repository = createRepository()
+        val created = Proposal.propose(OrderReference("contract-test-order-eta-2"), DriverReference("contract-test-driver-eta-2"))
+        created.proposal.accept()
+
+        repository.save(created.proposal)
+
+        assertNull(repository.findById(created.proposal.id)?.statedEtaMinutes)
+    }
+
+    @Test
+    fun `a declined proposal never has a stated eta`() {
+        val repository = createRepository()
+        val created = Proposal.propose(OrderReference("contract-test-order-eta-3"), DriverReference("contract-test-driver-eta-3"))
+        created.proposal.decline()
+
+        repository.save(created.proposal)
+
+        assertNull(repository.findById(created.proposal.id)?.statedEtaMinutes)
+    }
 }
 
 class InMemoryProposalRepositoryContractTest : ProposalRepositoryContractTest() {

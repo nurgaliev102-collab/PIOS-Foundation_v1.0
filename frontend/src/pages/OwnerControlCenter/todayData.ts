@@ -1,26 +1,51 @@
 import { request } from '../../api/apiClient'
 import { DISPATCH_BASE_URL, DRIVER_MANAGEMENT_BASE_URL, ORDER_MANAGEMENT_BASE_URL } from './moduleBaseUrls'
+import { toBasicAuthorizationHeader, type OwnerCredential } from './ownerCredential'
 
 /**
- * Owner Control Center's own read of the platform's existing, unauthenticated
- * `GET /v1/drivers`, `GET /v1/orders`, `GET /v1/proposals?driverId=...` and
- * `GET /v1/assignments?orderId=...` (ADR-043 Decision 3: those contracts are
- * not loosened — this screen fans out to them exactly as `Coordinator.tsx`
- * already does, one call per driver/order of interest, Section 7.5 steps
- * 2–5). `statedPrice`, present on every `ProposalListItem`, is read here
- * and **never rendered, summed, or included in the report** (ADR-043
- * Decision 6; ADR-042 R4.3) — this module deliberately never even copies
- * it into [TodayEvent] or [TodayCounters].
+ * Owner Control Center's own read of the platform's `GET /v1/drivers`,
+ * `GET /v1/orders`, `GET /v1/proposals?driverId=...` and
+ * `GET /v1/assignments?orderId=...` (ADR-043 Decision 3: this screen fans
+ * out to them exactly as `Coordinator.tsx` already does, one call per
+ * driver/order of interest, Section 7.5 steps 2–5). `statedPrice`, present
+ * on every `ProposalListItem`, is read here and — for *this module's own use
+ * in [loadTodaySnapshot]* — **never rendered, summed, or included in the
+ * report** (ADR-043 Decision 6; ADR-042 R4.3): `buildReport.ts` never reads
+ * it, and neither [TodayEvent] nor [TodayCounters] ever copies it in. The
+ * field is still present on [ProposalListItem] because `fetchProposalsForOrder`
+ * below is now also called by `Coordinator.tsx`, which does render it — see
+ * ADR-061 Decision 3 for the narrow, screen-scoped exception that permits
+ * that one caller to do so.
+ *
+ * ADR-060 (Order Query Authorization): `GET /v1/orders` and
+ * `GET /v1/proposals?driverId=...` now require a credential. This screen
+ * already holds the owner's own `Authorization: Basic` credential
+ * (`ownerCredential.ts`, already sent to `GET /v1/health` by
+ * `healthPoll.ts`) — [loadTodaySnapshot] now takes it and attaches it to
+ * both calls (ADR-060 Decision 5's Mode 3 for orders; Decision 4's owner
+ * branch for `?driverId=`). `GET /v1/drivers` and
+ * `GET /v1/assignments?orderId=...` are not gated by that ADR and keep
+ * sending no credential, unchanged.
+ *
+ * ADR-061 (Coordinator Owner-Gated Access), Decision 2: the individual fetch
+ * functions below are exported so `Coordinator.tsx` can reuse the same
+ * authorized reads rather than re-implementing its own copy of the
+ * `Authorization: Basic` header logic. Each function throws on failure;
+ * [loadTodaySnapshot] is the one caller that wants "never fail the whole
+ * snapshot" and applies its own `.catch(() => [])` at the call site —
+ * `Coordinator.tsx` applies its own error handling instead, since it needs
+ * to distinguish "failed to load" from "genuinely empty" for its own status
+ * display.
  */
 
-interface DriverListItem {
+export interface DriverListItem {
   id: string
   availability: 'AVAILABLE' | 'UNAVAILABLE'
   displayName: string | null
   registeredAt: string | null
 }
 
-interface OrderListItem {
+export interface OrderListItem {
   id: string
   status: 'SUBMITTED' | 'COMPLETED' | 'CANCELLED'
   origin: string
@@ -28,18 +53,21 @@ interface OrderListItem {
   passengerName: string | null
   createdAt: string | null
   pickupAddress: string | null
+  requestedPickupAt: string | null
 }
 
-interface ProposalListItem {
+export interface ProposalListItem {
   proposalId: string
   orderId: string
   driverId: string
-  status: 'OPEN' | 'ACCEPTED' | 'DECLINED' | 'LAPSED'
+  status: 'OPEN' | 'ACCEPTED' | 'DECLINED' | 'LAPSED' | 'WITHDRAWN'
+  statedPrice: string | null
+  statedEtaMinutes: number | null
   createdAt: string | null
   respondedAt: string | null
 }
 
-interface AssignmentListItem {
+export interface AssignmentListItem {
   assignmentId: string
   orderId: string
   driverId: string
@@ -47,6 +75,45 @@ interface AssignmentListItem {
   arrivedAt: string | null
   startedAt: string | null
   completedAt: string | null
+}
+
+/** `GET /v1/drivers` — unauthenticated, unaffected by ADR-060. */
+export function fetchDrivers(): Promise<DriverListItem[]> {
+  return request<DriverListItem[]>('/v1/drivers', { baseUrl: DRIVER_MANAGEMENT_BASE_URL })
+}
+
+/** `GET /v1/orders`, owner Mode (ADR-060 Decision 1's third mode: no parameter, `Authorization: Basic`). */
+export function fetchOrders(credential: OwnerCredential): Promise<OrderListItem[]> {
+  return request<OrderListItem[]>('/v1/orders', {
+    headers: { Authorization: toBasicAuthorizationHeader(credential) },
+    baseUrl: ORDER_MANAGEMENT_BASE_URL,
+  })
+}
+
+/** `GET /v1/proposals?driverId=...`, owner branch (ADR-060 Decision 4). */
+export function fetchProposalsForDriver(driverId: string, credential: OwnerCredential): Promise<ProposalListItem[]> {
+  return request<ProposalListItem[]>(`/v1/proposals?driverId=${encodeURIComponent(driverId)}`, {
+    headers: { Authorization: toBasicAuthorizationHeader(credential) },
+    baseUrl: DISPATCH_BASE_URL,
+  })
+}
+
+/**
+ * `GET /v1/proposals?orderId=...` — left unauthenticated by ADR-060
+ * Decision 4 (an enumeration sink, not a source: the caller must already
+ * hold the order id). No credential needed or sent.
+ */
+export function fetchProposalsForOrder(orderId: string): Promise<ProposalListItem[]> {
+  return request<ProposalListItem[]>(`/v1/proposals?orderId=${encodeURIComponent(orderId)}`, {
+    baseUrl: DISPATCH_BASE_URL,
+  })
+}
+
+/** `GET /v1/assignments?orderId=...` — unauthenticated, unaffected by ADR-060. */
+export function fetchAssignmentsForOrder(orderId: string): Promise<AssignmentListItem[]> {
+  return request<AssignmentListItem[]>(`/v1/assignments?orderId=${encodeURIComponent(orderId)}`, {
+    baseUrl: DISPATCH_BASE_URL,
+  })
 }
 
 export interface TodayCounters {
@@ -81,7 +148,8 @@ function isToday(isoTimestamp: string | null): boolean {
   )
 }
 
-function driverLabel(driverId: string, drivers: DriverListItem[]): string {
+/** Resolves a driver's display name, falling back to its id — shared with `Coordinator.tsx` (ADR-061 Decision 2). */
+export function driverLabel(driverId: string, drivers: DriverListItem[]): string {
   return drivers.find((driver) => driver.id === driverId)?.displayName ?? driverId
 }
 
@@ -97,18 +165,14 @@ function passengerLabel(orderId: string, orders: OrderListItem[]): string {
  * card (driven by `GET /v1/health` alone) is what tells the owner whether
  * this data can be trusted.
  */
-export async function loadTodaySnapshot(): Promise<TodaySnapshot> {
+export async function loadTodaySnapshot(credential: OwnerCredential): Promise<TodaySnapshot> {
   const [drivers, orders] = await Promise.all([
-    request<DriverListItem[]>('/v1/drivers', { baseUrl: DRIVER_MANAGEMENT_BASE_URL }).catch(() => [] as DriverListItem[]),
-    request<OrderListItem[]>('/v1/orders', { baseUrl: ORDER_MANAGEMENT_BASE_URL }).catch(() => [] as OrderListItem[]),
+    fetchDrivers().catch(() => [] as DriverListItem[]),
+    fetchOrders(credential).catch(() => [] as OrderListItem[]),
   ])
 
   const proposalLists = await Promise.all(
-    drivers.map((driver) =>
-      request<ProposalListItem[]>(`/v1/proposals?driverId=${encodeURIComponent(driver.id)}`, {
-        baseUrl: DISPATCH_BASE_URL,
-      }).catch(() => [] as ProposalListItem[])
-    )
+    drivers.map((driver) => fetchProposalsForDriver(driver.id, credential).catch(() => [] as ProposalListItem[]))
   )
   const proposals = proposalLists.flat()
 
@@ -117,9 +181,7 @@ export async function loadTodaySnapshot(): Promise<TodaySnapshot> {
   )
   const assignmentLists = await Promise.all(
     [...ordersWithAcceptedProposal].map((orderId) =>
-      request<AssignmentListItem[]>(`/v1/assignments?orderId=${encodeURIComponent(orderId)}`, {
-        baseUrl: DISPATCH_BASE_URL,
-      }).catch(() => [] as AssignmentListItem[])
+      fetchAssignmentsForOrder(orderId).catch(() => [] as AssignmentListItem[])
     )
   )
   const assignments = assignmentLists.flat()

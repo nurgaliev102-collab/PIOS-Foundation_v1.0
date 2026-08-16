@@ -1,6 +1,8 @@
 package com.pios.dispatch.api
 
 import com.pios.dispatch.application.DispatchAssignmentApplicationService
+import com.pios.dispatch.application.DriverAvailabilityRecord
+import com.pios.dispatch.application.DriverAvailabilityRepository
 import com.pios.dispatch.application.ProposalApplicationService
 import com.pios.dispatch.application.ProposalAssignmentOrchestrationService
 import com.pios.dispatch.domain.Assignment
@@ -8,10 +10,18 @@ import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import com.pios.dispatch.persistence.InMemoryAssignmentRepository
 import com.pios.dispatch.persistence.InMemoryProposalRepository
+import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.http.HttpStatus
+import java.time.Instant
+import java.util.Base64
+import javax.crypto.Mac
+import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
+import javax.crypto.SecretKeyFactory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -21,6 +31,15 @@ import kotlin.test.assertTrue
  * real [InMemoryAssignmentRepository] the orchestrator also writes to),
  * no Spring MVC context -- mirroring [AssignmentControllerTest]'s own
  * constructor-based testing convention exactly.
+ *
+ * ADR-060 Decision 4: `?driverId=` now requires a `Bearer` token whose own
+ * `drv` matches, or a valid owner `Basic` credential. Token minting mirrors
+ * `passenger-experience`'s own `ConnectionControllerTest` and this
+ * module's own `OrderQueryControllerTest` (order-management): this module
+ * has no build-time dependency on `identity` and never calls it (ADR-055
+ * Decision 1), so tokens are minted locally, in the exact format
+ * `SessionTokenIssuer` mints and this module's own [SessionTokenVerifier]
+ * checks.
  */
 class ProposalControllerTest {
 
@@ -33,7 +52,50 @@ class ProposalControllerTest {
         service,
         assignmentService
     )
-    private val controller = ProposalController(service, orchestrationService, repository)
+    private val secret = Base64.getEncoder().encodeToString("proposal-controller-test-secret".toByteArray())
+    private val sessionTokenVerifier = SessionTokenVerifier(secretBase64 = secret)
+    private val ownerSalt = "proposal-controller-owner-salt".toByteArray()
+    private val ownerIterations = 1000
+    private val ownerPassword = "owner-password"
+    private val ownerCredentialGate = OwnerCredentialGate(
+        configuredUsername = "owner",
+        configuredPasswordHash = Base64.getEncoder().encodeToString(deriveKey(ownerPassword, ownerSalt, ownerIterations)),
+        configuredPasswordSalt = Base64.getEncoder().encodeToString(ownerSalt),
+        iterations = ownerIterations,
+        failureDelayMillis = 0,
+        maxFailuresPerWindow = 1000,
+        windowMillis = 900_000
+    )
+    private val controller = ProposalController(service, orchestrationService, repository, sessionTokenVerifier, ownerCredentialGate)
+
+    // --- Token minting test helper (see class KDoc) ---
+
+    private val objectMapper = ObjectMapper()
+
+    private fun issueToken(sub: String, drv: String? = null, ttlSeconds: Long = 3600): String {
+        val payloadNode = objectMapper.createObjectNode()
+        payloadNode.put("sub", sub)
+        if (drv == null) payloadNode.putNull("drv") else payloadNode.put("drv", drv)
+        payloadNode.put("exp", Instant.now().plusSeconds(ttlSeconds).epochSecond)
+        val encodedPayload = base64UrlEncode(objectMapper.writeValueAsBytes(payloadNode))
+        val secretBytes = Base64.getDecoder().decode(secret)
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(secretBytes, "HmacSHA256"))
+        val encodedSignature = base64UrlEncode(mac.doFinal(encodedPayload.toByteArray(Charsets.UTF_8)))
+        return "$encodedPayload.$encodedSignature"
+    }
+
+    private fun base64UrlEncode(bytes: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+
+    private fun bearer(token: String): String = "Bearer $token"
+
+    private fun basicHeader(username: String, password: String): String =
+        "Basic " + Base64.getEncoder().encodeToString("$username:$password".toByteArray())
+
+    private fun deriveKey(password: String, salt: ByteArray, iterations: Int, keyLengthBits: Int = 256): ByteArray {
+        val spec = PBEKeySpec(password.toCharArray(), salt, iterations, keyLengthBits)
+        return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+    }
 
     @Test
     fun `creating a proposal returns 201 with a new proposal id and OPEN status`() {
@@ -149,6 +211,56 @@ class ProposalControllerTest {
 
         assertEquals(HttpStatus.OK, response.statusCode)
         assertEquals(null, response.body?.statedPrice)
+    }
+
+    // --- Stated time to pickup (ADR-057) ---
+
+    @Test
+    fun `accepting a proposal with a statedEtaMinutes returns it in the response`() {
+        val created = controller.createProposal(ProposeDriverRequest("order-3h", "driver-1")).body!!
+
+        val response = controller.acceptProposal(created.proposalId, AcceptProposalRequest(statedEtaMinutes = 5))
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals(5, response.body?.statedEtaMinutes)
+    }
+
+    @Test
+    fun `accepting a proposal with no request body succeeds with no statedEtaMinutes`() {
+        val created = controller.createProposal(ProposeDriverRequest("order-3i", "driver-1")).body!!
+
+        val response = controller.acceptProposal(created.proposalId)
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals(null, response.body?.statedEtaMinutes)
+    }
+
+    @Test
+    fun `accepting a proposal with a statedEtaMinutes of zero returns 400`() {
+        val created = controller.createProposal(ProposeDriverRequest("order-3j", "driver-1")).body!!
+
+        val response = controller.acceptProposal(created.proposalId, AcceptProposalRequest(statedEtaMinutes = 0))
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
+    @Test
+    fun `accepting a proposal with a statedEtaMinutes above 240 returns 400`() {
+        val created = controller.createProposal(ProposeDriverRequest("order-3k", "driver-1")).body!!
+
+        val response = controller.acceptProposal(created.proposalId, AcceptProposalRequest(statedEtaMinutes = 241))
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
+    @Test
+    fun `declining a proposal never returns a statedEtaMinutes`() {
+        val created = controller.createProposal(ProposeDriverRequest("order-3l", "driver-1")).body!!
+
+        val response = controller.declineProposal(created.proposalId)
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals(null, response.body?.statedEtaMinutes)
     }
 
     @Test
@@ -303,7 +415,11 @@ class ProposalControllerTest {
         controller.createProposal(ProposeDriverRequest("order-10", "driver-10"))
         controller.createProposal(ProposeDriverRequest("order-11", "driver-11"))
 
-        val response = controller.listProposals(orderId = null, driverId = "driver-10")
+        val response = controller.listProposals(
+            authorization = bearer(issueToken(sub = "driver-10-identity", drv = "driver-10")),
+            orderId = null,
+            driverId = "driver-10"
+        )
 
         assertEquals(HttpStatus.OK, response.statusCode)
         val body = assertNotNull(response.body)
@@ -313,7 +429,11 @@ class ProposalControllerTest {
 
     @Test
     fun `listing proposals for a driver with none returns an empty list`() {
-        val response = controller.listProposals(orderId = null, driverId = "driver-never-proposed")
+        val response = controller.listProposals(
+            authorization = bearer(issueToken(sub = "never-proposed-identity", drv = "driver-never-proposed")),
+            orderId = null,
+            driverId = "driver-never-proposed"
+        )
 
         assertEquals(HttpStatus.OK, response.statusCode)
         assertEquals(emptyList(), response.body)
@@ -333,10 +453,151 @@ class ProposalControllerTest {
         assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
     }
 
+    // --- Authorization on ?driverId= (ADR-060 Decision 4) ---
+
+    @Test
+    fun `driverId with no Authorization header returns 401`() {
+        val response = controller.listProposals(orderId = null, driverId = "driver-10")
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+        assertNull(response.body)
+    }
+
+    @Test
+    fun `driverId for another driver is forbidden -- IDOR`() {
+        controller.createProposal(ProposeDriverRequest("order-12", "driver-12"))
+
+        val response = controller.listProposals(
+            authorization = bearer(issueToken(sub = "driver-13-identity", drv = "driver-13")),
+            orderId = null,
+            driverId = "driver-12"
+        )
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+    }
+
+    @Test
+    fun `driverId with a passenger-only token (drv null) is forbidden`() {
+        val response = controller.listProposals(
+            authorization = bearer(issueToken(sub = "some-passenger")),
+            orderId = null,
+            driverId = "driver-10"
+        )
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+    }
+
+    @Test
+    fun `driverId with a valid owner Basic credential returns any named driver's proposals`() {
+        controller.createProposal(ProposeDriverRequest("order-14", "driver-14"))
+
+        val response = controller.listProposals(
+            authorization = basicHeader("owner", ownerPassword),
+            orderId = null,
+            driverId = "driver-14"
+        )
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertTrue(response.body?.isNotEmpty() == true)
+    }
+
+    @Test
+    fun `driverId with a bad owner Basic credential returns 401`() {
+        val response = controller.listProposals(
+            authorization = basicHeader("owner", "wrong-password"),
+            orderId = null,
+            driverId = "driver-10"
+        )
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
+    fun `orderId stays unauthenticated -- no Authorization header still returns 200, deliberately`() {
+        controller.createProposal(ProposeDriverRequest("order-15", "driver-15"))
+
+        val response = controller.listProposals(orderId = "order-15", driverId = null)
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+    }
+
     @Test
     fun `getting a proposal with a blank id returns 400`() {
         val response = controller.getProposal("")
 
         assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
+    // --- Driver availability gate (pilot-readiness fix) ---
+
+    private class InMemoryDriverAvailabilityRepository : DriverAvailabilityRepository {
+        val records = mutableMapOf<String, DriverAvailabilityRecord>()
+
+        override fun markProcessed(eventId: String): Boolean = throw UnsupportedOperationException("not used by this test")
+        override fun upsert(record: DriverAvailabilityRecord) {
+            records[record.driverReference.driverId] = record
+        }
+        override fun findByDriverReference(driverReference: DriverReference): DriverAvailabilityRecord? =
+            records[driverReference.driverId]
+    }
+
+    /**
+     * A second [ProposalController], wired with a real
+     * [DriverAvailabilityRepository] this time -- kept separate from
+     * [controller] above so every other test in this file (none of which
+     * concerns availability) keeps constructing its proposals exactly as
+     * before, unaffected by this gate.
+     */
+    private class GatedFixture {
+        val availabilityRepository = InMemoryDriverAvailabilityRepository()
+        val repository = InMemoryProposalRepository()
+        val service = ProposalApplicationService(repository, driverAvailabilityRepository = availabilityRepository)
+        val assignmentRepository = InMemoryAssignmentRepository()
+        val assignmentService = DispatchAssignmentApplicationService(assignmentRepository)
+        val orchestrationService = ProposalAssignmentOrchestrationService(repository, service, assignmentService)
+        val controller = ProposalController(
+            service,
+            orchestrationService,
+            repository,
+            SessionTokenVerifier(secretBase64 = "gated-fixture-secret"),
+            OwnerCredentialGate(
+                configuredUsername = "",
+                configuredPasswordHash = "",
+                configuredPasswordSalt = "",
+                iterations = 1000,
+                failureDelayMillis = 0,
+                maxFailuresPerWindow = 1000,
+                windowMillis = 900_000
+            )
+        )
+    }
+
+    @Test
+    fun `creating a proposal for a driver with no availability record returns 409`() {
+        val fixture = GatedFixture()
+
+        val response = fixture.controller.createProposal(ProposeDriverRequest("order-avail-1", "driver-never-toggled"))
+
+        assertEquals(HttpStatus.CONFLICT, response.statusCode)
+    }
+
+    @Test
+    fun `creating a proposal for a driver marked unavailable returns 409`() {
+        val fixture = GatedFixture()
+        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-unavailable"), available = false))
+
+        val response = fixture.controller.createProposal(ProposeDriverRequest("order-avail-2", "driver-unavailable"))
+
+        assertEquals(HttpStatus.CONFLICT, response.statusCode)
+    }
+
+    @Test
+    fun `creating a proposal for a driver marked available returns 201`() {
+        val fixture = GatedFixture()
+        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-available"), available = true))
+
+        val response = fixture.controller.createProposal(ProposeDriverRequest("order-avail-3", "driver-available"))
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
     }
 }

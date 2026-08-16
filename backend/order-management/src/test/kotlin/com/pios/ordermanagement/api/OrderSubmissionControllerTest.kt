@@ -99,4 +99,38 @@ class OrderSubmissionControllerTest {
         val orderId = assertNotNull(response.body).orderId
         assertNull(repository.findById(OrderId(orderId))?.pickupAddress)
     }
+
+    // --- Requested pickup time (ADR-058, Scheduled Pickup Time) ---
+
+    @Test
+    fun `a request with a requested pickup instant persists it`() {
+        val response = controller.submitOrder(
+            SubmitOrderRequest("passenger-scheduled", requestedPickupAt = "2026-08-25T06:30:00Z")
+        )
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        val orderId = assertNotNull(response.body).orderId
+        assertEquals(
+            java.time.Instant.parse("2026-08-25T06:30:00Z"),
+            repository.findById(OrderId(orderId))?.requestedPickupAt
+        )
+    }
+
+    @Test
+    fun `a request without a requested pickup instant still succeeds -- regression for the existing contract`() {
+        val response = controller.submitOrder(SubmitOrderRequest("passenger-not-scheduled"))
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        val orderId = assertNotNull(response.body).orderId
+        assertNull(repository.findById(OrderId(orderId))?.requestedPickupAt)
+    }
+
+    @Test
+    fun `a request with a malformed requested pickup instant returns 400`() {
+        val response = controller.submitOrder(
+            SubmitOrderRequest("passenger-bad-schedule", requestedPickupAt = "tomorrow at 6")
+        )
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
 }

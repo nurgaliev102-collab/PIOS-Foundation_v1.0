@@ -2,6 +2,8 @@ package com.pios.ordermanagement.application
 
 import com.pios.ordermanagement.domain.OrderOrigin
 import org.springframework.stereotype.Service
+import java.time.Instant
+import java.time.format.DateTimeParseException
 
 /**
  * Consumer-side handler for the Passenger Experience -> Order Management
@@ -47,16 +49,35 @@ class OrderSubmissionRequestHandler(
         passengerReference: String,
         destination: String? = null,
         passengerName: String? = null,
-        pickupAddress: String? = null
+        pickupAddress: String? = null,
+        requestedPickupAt: String? = null
     ): String {
         val submitted = orderLifecycleApplicationService.submitOrder(
             SubmitOrderCommand(
                 origin = OrderOrigin(passengerReference),
                 destination = destination,
                 passengerName = passengerName,
-                pickupAddress = pickupAddress
+                pickupAddress = pickupAddress,
+                requestedPickupAt = parseRequestedPickupAt(requestedPickupAt)
             )
         )
         return submitted.order.id.value
+    }
+
+    /**
+     * Parses the wire-format [requestedPickupAt] (ADR-058 Decision item 4)
+     * to an [Instant]. A value that does not parse is surfaced as
+     * [IllegalArgumentException] — the same exception type this handler's
+     * own [OrderOrigin] construction already throws for a blank passenger
+     * reference — so [OrderSubmissionController] maps it to the same 400
+     * without a new catch clause.
+     */
+    private fun parseRequestedPickupAt(requestedPickupAt: String?): Instant? {
+        if (requestedPickupAt == null) return null
+        return try {
+            Instant.parse(requestedPickupAt)
+        } catch (ex: DateTimeParseException) {
+            throw IllegalArgumentException("requestedPickupAt must be a valid ISO-8601 instant", ex)
+        }
     }
 }

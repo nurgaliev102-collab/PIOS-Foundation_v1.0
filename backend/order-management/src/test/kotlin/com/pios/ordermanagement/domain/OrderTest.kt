@@ -124,6 +124,44 @@ class OrderTest {
         assertEquals("ул. Ленина, 10", order.pickupAddress)
     }
 
+    // --- Requested pickup time (ADR-058, Scheduled Pickup Time) ---
+
+    @Test
+    fun `a submitted order carries the requested pickup instant it was submitted with`() {
+        val requestedPickupAt = java.time.Instant.parse("2026-08-25T06:30:00Z")
+
+        val submitted = Order.submit(origin, requestedPickupAt = requestedPickupAt)
+
+        assertEquals(requestedPickupAt, submitted.order.requestedPickupAt)
+    }
+
+    @Test
+    fun `a submitted order without a requested pickup instant has a null requested pickup instant`() {
+        val submitted = Order.submit(origin)
+
+        assertEquals(null, submitted.order.requestedPickupAt)
+    }
+
+    @Test
+    fun `requested pickup instant survives completion unchanged`() {
+        val requestedPickupAt = java.time.Instant.parse("2026-08-25T06:30:00Z")
+        val order = Order.submit(origin, requestedPickupAt = requestedPickupAt).order
+
+        order.complete()
+
+        assertEquals(requestedPickupAt, order.requestedPickupAt)
+    }
+
+    @Test
+    fun `requested pickup instant survives cancellation unchanged`() {
+        val requestedPickupAt = java.time.Instant.parse("2026-08-25T06:30:00Z")
+        val order = Order.submit(origin, requestedPickupAt = requestedPickupAt).order
+
+        order.cancel()
+
+        assertEquals(requestedPickupAt, order.requestedPickupAt)
+    }
+
     // --- Completion ---
 
     @Test
