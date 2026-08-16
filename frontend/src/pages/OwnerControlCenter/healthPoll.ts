@@ -67,6 +67,13 @@ async function fetchModuleHealth(pilotModule: PilotModule, credential: OwnerCred
     })
 
     if (response.status === 401) {
+      // Drain the body even though this branch has no use for it: an
+      // unread `Response` stream is what makes Chrome's Network panel show
+      // this request as "(canceled)" -- cosmetic, but it was the first
+      // thing this incident's own diagnosis had to rule out, since it looks
+      // identical to a genuine `AbortSignal.timeout` cancellation until you
+      // check the actual response status next to it.
+      await response.text().catch(() => undefined)
       return {
         module: pilotModule.key,
         outcome: 'unauthorized',
@@ -87,6 +94,10 @@ async function fetchModuleHealth(pilotModule: PilotModule, credential: OwnerCred
       }
     }
 
+    // Same reasoning as the 401 branch above: any other status this
+    // endpoint is not documented to return still carries an unread body
+    // unless it is drained here too.
+    await response.text().catch(() => undefined)
     return {
       module: pilotModule.key,
       outcome: 'unreachable',

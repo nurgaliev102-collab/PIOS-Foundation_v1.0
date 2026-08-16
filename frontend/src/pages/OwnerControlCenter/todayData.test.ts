@@ -60,4 +60,43 @@ describe('loadTodaySnapshot', () => {
     expect(snapshot.counters.ordersCreated).toBe(0)
     expect(snapshot.events).toEqual([])
   })
+
+  // 2026-08-17 incident: this session's own accumulated test data left 240
+  // driver records in the live database, and the driver-proposals fan-out
+  // below used to fire all of them as one unbounded `Promise.all` burst,
+  // sharing the same HTTP/2 connection as the five health checks -- proven
+  // live via Playwright against the public Funnel to starve those health
+  // requests past their own 10s client-side timeout. This asserts the fix's
+  // actual contract: bounded concurrency, not a request count or a specific
+  // batch size (an implementation detail this test does not pin down).
+  it('never has more than a bounded number of GET /v1/proposals?driverId= requests in flight at once, however many drivers exist', async () => {
+    const driverCount = 75
+    const drivers = Array.from({ length: driverCount }, (_, i) => ({
+      id: `driver-${i}`,
+      availability: 'AVAILABLE' as const,
+      displayName: null,
+      registeredAt: null,
+    }))
+
+    let inFlight = 0
+    let maxInFlight = 0
+    mockedRequest.mockImplementation(async (path: string) => {
+      if (path === '/v1/drivers') return drivers
+      if (path === '/v1/orders') return []
+      if ((path as string).startsWith('/v1/proposals?driverId=')) {
+        inFlight++
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        await new Promise((resolve) => setTimeout(resolve, 1))
+        inFlight--
+        return []
+      }
+      return []
+    })
+
+    await loadTodaySnapshot(OWNER_CREDENTIAL)
+
+    expect(maxInFlight).toBeGreaterThan(0)
+    expect(maxInFlight).toBeLessThan(driverCount)
+    expect(maxInFlight).toBeLessThanOrEqual(5)
+  })
 })

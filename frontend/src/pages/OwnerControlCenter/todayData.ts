@@ -90,11 +90,18 @@ export function fetchOrders(credential: OwnerCredential): Promise<OrderListItem[
   })
 }
 
-/** `GET /v1/proposals?driverId=...`, owner branch (ADR-060 Decision 4). */
+/**
+ * `GET /v1/proposals?driverId=...`, owner branch (ADR-060 Decision 4).
+ * Carries its own [FAN_OUT_REQUEST_TIMEOUT_MS] bound (2026-08-17 incident,
+ * see [mapWithConcurrency]'s own KDoc) so one slow response, under whatever
+ * load produced this fan-out's own delay in the first place, cannot occupy
+ * a worker slot indefinitely and stall every driver queued behind it.
+ */
 export function fetchProposalsForDriver(driverId: string, credential: OwnerCredential): Promise<ProposalListItem[]> {
   return request<ProposalListItem[]>(`/v1/proposals?driverId=${encodeURIComponent(driverId)}`, {
     headers: { Authorization: toBasicAuthorizationHeader(credential) },
     baseUrl: DISPATCH_BASE_URL,
+    signal: AbortSignal.timeout(FAN_OUT_REQUEST_TIMEOUT_MS),
   })
 }
 
@@ -109,12 +116,72 @@ export function fetchProposalsForOrder(orderId: string): Promise<ProposalListIte
   })
 }
 
-/** `GET /v1/assignments?orderId=...` — unauthenticated, unaffected by ADR-060. */
+/**
+ * `GET /v1/assignments?orderId=...` — unauthenticated, unaffected by ADR-060.
+ * Carries the same [FAN_OUT_REQUEST_TIMEOUT_MS] bound as
+ * [fetchProposalsForDriver], for the same reason.
+ */
 export function fetchAssignmentsForOrder(orderId: string): Promise<AssignmentListItem[]> {
   return request<AssignmentListItem[]>(`/v1/assignments?orderId=${encodeURIComponent(orderId)}`, {
     baseUrl: DISPATCH_BASE_URL,
+    signal: AbortSignal.timeout(FAN_OUT_REQUEST_TIMEOUT_MS),
   })
 }
+
+/**
+ * Runs [fn] over [items] with at most [limit] calls in flight at once,
+ * instead of firing every call in one `Promise.all` burst.
+ *
+ * 2026-08-17 incident: [loadTodaySnapshot]'s own driver fan-out
+ * (`drivers.map(fetchProposalsForDriver)`) used to be one unbounded
+ * `Promise.all` — harmless at pilot-launch driver counts, but this session's
+ * own repeated E2E test runs left 240 disposable driver records in the live
+ * database (`GET /v1/drivers` on the public Funnel confirmed the count; no
+ * delete endpoint exists to remove them — `DriverController` only exposes
+ * create/read/declare-availability). At that count, every 15-second poll
+ * fired 240 simultaneous credentialed requests to Dispatch on the same
+ * shared-origin HTTP/2 connection the five `GET /v1/health/<module>` calls
+ * also use. When one poll's 240-way fan-out was still draining as the next
+ * poll's tick fired (plausible once the fan-out itself takes longer than
+ * the 15s interval under that much concurrent load), the interleaved health
+ * requests were the ones observed starved past their own 10s
+ * `AbortSignal.timeout` in `healthPoll.ts` — reproduced live via Playwright
+ * against the public Funnel, not merely theorized.
+ *
+ * Chunking bounds the concurrent request count regardless of how large
+ * `drivers`/`orders` grows, without touching any endpoint's contract,
+ * without adding a request-cancellation/dedup layer, and without changing
+ * what data this screen shows — same reasoning applied to the
+ * orders-with-an-accepted-proposal fan-out just below it, which has the
+ * same unbounded shape and would hit the same ceiling as order volume grows.
+ */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let nextIndex = 0
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex++
+      results[index] = await fn(items[index])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return results
+}
+
+/**
+ * Fan-out batch size for [loadTodaySnapshot]'s two per-item polls — see
+ * [mapWithConcurrency]'s own KDoc. Chosen from live measurement, not a
+ * round number: 5 concurrent, credentialed, DB-touching requests through
+ * the public Funnel completed in under 2.1s total in the same incident's
+ * own verification; 20 concurrent still left a live 240-driver fan-out
+ * competing long enough to starve an unrelated second poll's health checks
+ * past their own 10s timeout (reproduced live via Playwright before this
+ * value was lowered from 20 to 5).
+ */
+const FAN_OUT_CONCURRENCY_LIMIT = 5
+
+/** Per-item timeout for the same two fan-outs — see [fetchProposalsForDriver]'s own KDoc. */
+const FAN_OUT_REQUEST_TIMEOUT_MS = 10_000
 
 export interface TodayCounters {
   driversTotal: number
@@ -171,18 +238,16 @@ export async function loadTodaySnapshot(credential: OwnerCredential): Promise<To
     fetchOrders(credential).catch(() => [] as OrderListItem[]),
   ])
 
-  const proposalLists = await Promise.all(
-    drivers.map((driver) => fetchProposalsForDriver(driver.id, credential).catch(() => [] as ProposalListItem[]))
+  const proposalLists = await mapWithConcurrency(drivers, FAN_OUT_CONCURRENCY_LIMIT, (driver) =>
+    fetchProposalsForDriver(driver.id, credential).catch(() => [] as ProposalListItem[])
   )
   const proposals = proposalLists.flat()
 
   const ordersWithAcceptedProposal = new Set(
     proposals.filter((proposal) => proposal.status === 'ACCEPTED').map((proposal) => proposal.orderId)
   )
-  const assignmentLists = await Promise.all(
-    [...ordersWithAcceptedProposal].map((orderId) =>
-      fetchAssignmentsForOrder(orderId).catch(() => [] as AssignmentListItem[])
-    )
+  const assignmentLists = await mapWithConcurrency([...ordersWithAcceptedProposal], FAN_OUT_CONCURRENCY_LIMIT, (orderId) =>
+    fetchAssignmentsForOrder(orderId).catch(() => [] as AssignmentListItem[])
   )
   const assignments = assignmentLists.flat()
 
