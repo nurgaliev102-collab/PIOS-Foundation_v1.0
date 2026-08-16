@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Header } from '../../components/Header'
 import { ActionButton } from '../../components/ActionButton'
 import { Spinner } from '../../components/Spinner'
+import { PasswordInput } from '../../components/PasswordInput'
 import { getInvitationByDriverCode } from './invitationSource'
 import type { InvitationInfo } from './invitationSource'
 import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
@@ -436,13 +437,13 @@ export function PassengerLanding() {
               aria-label="Номер телефона"
               onChange={(event) => handleFieldChange(setPhone)(event.target.value)}
             />
-            <input
+            <PasswordInput
               className={styles.input}
-              type="password"
               value={password}
+              onChange={handleFieldChange(setPassword)}
               placeholder="Пароль"
-              aria-label="Пароль"
-              onChange={(event) => handleFieldChange(setPassword)(event.target.value)}
+              ariaLabel="Пароль"
+              autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
                   void (authMode === 'register' ? handleRegisterSubmit() : handleLoginSubmit())

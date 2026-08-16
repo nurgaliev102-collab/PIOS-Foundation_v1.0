@@ -60,6 +60,16 @@ export function DriverCard({
     <section
       className={`${styles.card} ${clickable ? styles.clickable : ''} ${selected ? styles.selected : ''}`}
       onClick={onClick}
+      onKeyDown={
+        clickable
+          ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                onClick?.()
+              }
+            }
+          : undefined
+      }
       role={clickable ? 'button' : undefined}
       tabIndex={clickable ? 0 : undefined}
     >
