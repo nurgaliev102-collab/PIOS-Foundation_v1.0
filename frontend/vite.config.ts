@@ -34,6 +34,14 @@ export default defineConfig({
     // PILOT_INFRASTRUCTURE_ROUTING_DECISION.md Variant A (Product Owner
     // approved 2026-08-03): each module names itself in its own health
     // path, no rewrite, same property as every other row here.
+    //
+    // `/v1/advisor` (ADR-056: AI Advisor for Owner Control Center, Accepted
+    // 2026-08-17, Open Question 2's own resolution): `ai-advisor` is not
+    // asked to restart anything, including this very preview process, so
+    // ADR-048 Decision 1's argument against routing *control* through
+    // `vite preview` does not apply here -- unlike `platform-ops`, this is
+    // a plain, unprivileged proxy row, forwarded unchanged like every row
+    // above it.
     proxy: {
       '/v1/drivers': 'http://localhost:8081',
       '/v1/connections': 'http://localhost:8082',
@@ -41,6 +49,7 @@ export default defineConfig({
       '/v1/proposals': 'http://localhost:8084',
       '/v1/assignments': 'http://localhost:8084',
       '/v1/identities': 'http://localhost:8086',
+      '/v1/advisor': 'http://localhost:8091',
       '/v1/health/driver-management': 'http://localhost:8081',
       '/v1/health/passenger-experience': 'http://localhost:8082',
       '/v1/health/order-management': 'http://localhost:8083',

@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: ai-advisor
+
+server:
+  port: 8091
+  # Explicit, not the implicit default -- same deliberate statement
+  # platform-ops/src/main/resources/application.yml already makes for the
+  # same reason (phone/LAN reachability; never assume "localhost" resolves
+  # usefully on this machine).
+  address: 0.0.0.0
+
+logging:
+  file:
+    name: ../logs/ai-advisor.log
+  logback:
+    rollingpolicy:
+      max-file-size: 20MB
+
+# ADR-056 Decision 4: the SAME owner credential every domain module's own
+# OwnerCredentialGate already checks (pios.owner.* in each PIOS module) --
+# not a new, independent secret. Deliberately left unset here -- an unset
+# username/password-hash/password-salt makes OwnerCredentialGate.isConfigured()
+# false, which denies every request rather than defaulting open, exactly the
+# precedent ADR-044/OwnerCredentialGate already established. Each deployment
+# must set all three explicitly, generated for that deployment
+# (pios.owner.password-hash/password-salt are PBKDF2-HMAC-SHA256 output and
+# its salt, both base64, never the plain password) -- the same values
+# already configured for the five domain modules, copied here unchanged.
+# pios:
+#   owner:
+#     username: ""
+#     password-hash: ""
+#     password-salt: ""
+#     password-iterations: 210000
+#     auth:
+#       failure-delay-ms: 500
+#       max-failures-per-window: 20
+#       window-ms: 900000
+#   ai-advisor:
+#     max-request-body-bytes: 8192
+#     rate-limit:
+#       min-interval-ms: 10000
+#     budget:
+#       max-calls-per-day: 200
+#       max-calls-per-month: 2000

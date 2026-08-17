@@ -1,22 +1,25 @@
-import {
-  calculateAcceptanceRate,
-  calculateCancellationRate,
-  calculateCompletionRate,
-  type PilotAnalyticsInput,
-} from './pilotAnalytics'
+import { request } from '../../api/apiClient'
+import { toBasicAuthorizationHeader, type OwnerCredential } from './ownerCredential'
+import type { PilotAnalyticsInput } from './pilotAnalytics'
 
 /**
- * AI Analyst's own provider boundary — the frontend-only precursor to
- * `docs/ADR/ADR-056-Control-Center-AI-Advisor.md`'s own (still Proposed,
- * not Accepted) `AIProvider` interface. Named and shaped to be a plausible
- * stepping stone toward that ADR's `AIProvider.ask` once it is ratified
- * and a real backend exists behind it — but `analyze` here never leaves
- * the browser: [MockAIProvider] is the only implementation, and it is pure,
- * synchronous rule evaluation over already-fetched numbers, not a network
- * call. Swapping in a real provider later means adding a new class that
- * implements this same interface and pointing [getActiveAIProvider] at it —
- * this file's own callers (`AIAnalystCard.tsx`) do not change.
+ * AI Analyst's own provider boundary (ADR-056: AI Advisor for Owner
+ * Control Center, Accepted 2026-08-17). `analyze` calls the real backend
+ * component (`ai-advisor`, `POST /v1/advisor/analyze`) — the frontend-local
+ * `MockAIProvider` this file used to hold (2026-08-17, "AI Analyst first
+ * technical stage") has been moved server-side unchanged
+ * (`ai-advisor/src/main/kotlin/com/pios/aiadvisor/domain/MockAIProvider.kt`,
+ * same rules, same thresholds) so the analysis logic lives in exactly one
+ * place — this file's own job is now only the HTTP call and the outcome
+ * mapping, never the analysis itself.
+ *
+ * `AI_ADVISOR_BASE_URL` follows the same `VITE_*_BASE_URL` convention every
+ * other module's base URL already uses (`moduleBaseUrls.ts`) — empty in
+ * `.env.local` for the pilot's same-origin design, defaulting to
+ * `http://localhost:8091` for local development against a directly-run
+ * `ai-advisor`.
  */
+const AI_ADVISOR_BASE_URL = import.meta.env.VITE_AI_ADVISOR_BASE_URL ?? 'http://localhost:8091'
 
 export type PilotAnalysisStatus = 'ok' | 'attention' | 'critical' | 'unknown'
 
@@ -42,143 +45,87 @@ export interface AIProvider {
   analyze(input: PilotAnalyticsInput): Promise<PilotAnalysisResult>
 }
 
-function formatPercent(rate: number | null): string {
-  return rate === null ? 'нет данных' : `${Math.round(rate * 100)}%`
+/** `POST /v1/advisor/analyze`'s own response shape (`PilotAnalysisResponse` on `ai-advisor`, ADR-056 Decision 6). */
+interface AdvisorAnalyzeResponse {
+  outcome: string
+  result: PilotAnalysisResult | null
+  message: string | null
 }
-
-function formatMinutes(value: number | null): string {
-  return value === null ? '—' : `${Math.round(value)} мин`
-}
-
-/** A cancellation rate at or above this is graded `critical` on its own — see {@link MockAIProvider.analyze}. */
-const CRITICAL_CANCELLATION_RATE = 0.5
-/** A cancellation rate at or above this (but below the critical threshold) contributes to `attention`. */
-const ATTENTION_CANCELLATION_RATE = 0.2
 
 /**
- * Deterministic, rule-based analysis over already-computed metrics — never
- * a real language model, and never pretends to be one (this task's own
- * explicit requirement: no random text, no fabricated LLM-sounding prose).
- * Every sentence it produces is a template filled with a real number from
- * [PilotAnalyticsInput]; a metric this provider cannot compute is reported
- * as "нет данных", never invented (`calculateAcceptanceRate`/
- * `calculateCompletionRate`/`calculateCancellationRate` all already return
- * `null` rather than guess — see their own KDoc in `pilotAnalytics.ts`).
- *
- * Thresholds below ([CRITICAL_CANCELLATION_RATE], [ATTENTION_CANCELLATION_RATE])
- * are this MVP's own disclosed heuristic, not a ratified business rule —
- * exactly the kind of number `docs/PRODUCT_DECISION_MVP_PILOT_BOUNDARY.md`
- * expects real pilot data to eventually calibrate, not something this task
- * invents as a permanent policy.
+ * Thrown by [BackendAIProvider.analyze] whenever `ai-advisor` answered with
+ * an explicit non-`"ok"` [outcome] (`"provider_unavailable"`,
+ * `"budget_exceeded"`, `"invalid_input"`) — distinct from a thrown
+ * [ApiError][../../api/apiClient.ApiError] (network failure, wrong owner
+ * credential, `ai-advisor` unreachable), so `AIAnalystCard.tsx` can show
+ * the owner a specific, honest reason rather than one generic error for
+ * every kind of "not analyzed" (this task's own explicit requirement:
+ * "недостаточно данных ≠ AI недоступен; AI недоступен ≠ ошибка PIOS;
+ * rate limit ≠ backend failure").
  */
-export class MockAIProvider implements AIProvider {
-  readonly name = 'mock'
+export class AdvisorOutcomeError extends Error {
+  readonly outcome: string
+  readonly userMessage: string
+
+  constructor(outcome: string, userMessage: string) {
+    super(`AI Analyst outcome: ${outcome}`)
+    this.name = 'AdvisorOutcomeError'
+    this.outcome = outcome
+    this.userMessage = userMessage
+  }
+}
+
+/**
+ * Calls the real `ai-advisor` backend (ADR-056 Decision 1: it never talks
+ * to any domain module — the browser already computed [PilotAnalyticsInput]
+ * before calling this). Sends the same owner `Authorization: Basic` header
+ * `todayData.ts`'s own owner-authenticated calls already send (ADR-056
+ * Decision 4 — a sixth replica of the same credential, not a new one).
+ *
+ * `outcome === "ok"` is the only case that returns a value; every other
+ * outcome throws [AdvisorOutcomeError] carrying the backend's own honest,
+ * non-technical `message` — `ai-advisor` never explains *why* in technical
+ * terms (no raw provider status code, no exception text), by its own
+ * design (ADR-056 Decision 10).
+ */
+export class BackendAIProvider implements AIProvider {
+  readonly name = 'backend'
+  private readonly credential: OwnerCredential
+
+  constructor(credential: OwnerCredential) {
+    this.credential = credential
+  }
 
   async analyze(input: PilotAnalyticsInput): Promise<PilotAnalysisResult> {
-    const acceptanceRate = calculateAcceptanceRate(input.proposals)
-    const completionRate = calculateCompletionRate(input.orders)
-    const cancellationRate = calculateCancellationRate(input.orders)
-    const metrics: PilotAnalysisMetricsSummary = { acceptanceRate, completionRate, cancellationRate }
+    const response = await request<AdvisorAnalyzeResponse>('/v1/advisor/analyze', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: toBasicAuthorizationHeader(this.credential),
+      },
+      body: JSON.stringify(input),
+      baseUrl: AI_ADVISOR_BASE_URL,
+    })
 
-    if (input.orders.total === 0) {
-      return {
-        status: 'unknown',
-        summary: 'Недостаточно данных для анализа — за наблюдаемый период не зафиксировано ни одного заказа.',
-        keyFindings: [],
-        risks: [],
-        recommendations: ['Дождитесь первых заказов в системе и запустите анализ ещё раз.'],
-        metrics,
-        generatedAt: input.generatedAt,
-        providerName: this.name,
-      }
+    if (response.outcome !== 'ok' || !response.result) {
+      throw new AdvisorOutcomeError(response.outcome, response.message ?? 'Не удалось выполнить анализ.')
     }
-
-    const keyFindings: string[] = [
-      `Заказов всего: ${input.orders.total}, завершено: ${input.orders.completed} (completion rate ${formatPercent(completionRate)}).`,
-      `Решённых предложений: ${input.proposals.accepted + input.proposals.declined + input.proposals.lapsed} ` +
-        `(принято ${input.proposals.accepted}, отклонено ${input.proposals.declined}, просрочено ${input.proposals.lapsed}); ` +
-        `acceptance rate ${formatPercent(acceptanceRate)}.`,
-      `Водителей всего: ${input.drivers.total}, на линии сейчас: ${input.drivers.available}, ` +
-        `получили хотя бы одно предложение: ${input.drivers.withActivity}.`,
-    ]
-    if (input.reactionTime.sampleSize > 0) {
-      keyFindings.push(
-        `Среднее время реакции водителя на предложение: ${formatMinutes(input.reactionTime.averageMinutes)} ` +
-          `(медиана: ${formatMinutes(input.reactionTime.medianMinutes)}, на основе ${input.reactionTime.sampleSize} предложений).`
-      )
-    }
-
-    const risks: string[] = []
-    if (input.proposals.lapsed > 0) {
-      risks.push(`Просроченных (lapsed) предложений: ${input.proposals.lapsed} — водители не ответили вовремя.`)
-    }
-    if (input.proposals.declined > 0) {
-      risks.push(`Отклонённых предложений: ${input.proposals.declined}.`)
-    }
-    if (cancellationRate !== null && cancellationRate > 0) {
-      risks.push(
-        `Доля отменённых заказов: ${formatPercent(cancellationRate)} (${input.orders.cancelled} из ${input.orders.total}).`
-      )
-    }
-    if (input.health.modulesTotal > 0 && input.health.modulesUp < input.health.modulesTotal) {
-      risks.push(`Не все модули PIOS отвечают: ${input.health.modulesUp} из ${input.health.modulesTotal}.`)
-    }
-    if (input.drivers.total > 0 && input.drivers.withActivity === 0) {
-      risks.push('Ни один водитель ещё не получил ни одного предложения.')
-    }
-
-    const recommendations: string[] = []
-    if (input.proposals.lapsed > 0) {
-      recommendations.push('Проверьте, все ли подключённые водители реально находятся на линии и получают уведомления.')
-    }
-    if (input.drivers.total > 0 && input.drivers.withActivity === 0) {
-      recommendations.push('Убедитесь, что водители делятся своими персональными ссылками с клиентами.')
-    }
-
-    const isCritical =
-      (input.health.modulesTotal > 0 && input.health.modulesUp < input.health.modulesTotal) ||
-      (cancellationRate !== null && cancellationRate >= CRITICAL_CANCELLATION_RATE)
-    const isAttention =
-      input.proposals.lapsed > 0 ||
-      input.proposals.declined > 0 ||
-      (cancellationRate !== null && cancellationRate >= ATTENTION_CANCELLATION_RATE) ||
-      (input.drivers.total > 0 && input.drivers.withActivity === 0)
-
-    const status: PilotAnalysisStatus = isCritical ? 'critical' : isAttention ? 'attention' : 'ok'
-
-    if (recommendations.length === 0) {
-      recommendations.push(
-        status === 'ok' ? 'Явных проблем не обнаружено — продолжайте наблюдение.' : 'Проверьте отмеченные риски вручную.'
-      )
-    }
-
-    const summary =
-      status === 'critical'
-        ? 'Пилот требует немедленного внимания владельца.'
-        : status === 'attention'
-          ? 'Пилот работает, но есть моменты, на которые стоит обратить внимание.'
-          : 'Пилот работает штатно, явных проблем не обнаружено.'
-
-    return { status, summary, keyFindings, risks, recommendations, metrics, generatedAt: input.generatedAt, providerName: this.name }
+    return response.result
   }
 }
 
 /**
  * Provider selection point (`docs/PRODUCT_DECISION_CONTROL_CENTER_AI.md`
- * Section 8/14; ADR-056 Decision 3's "no caller-side knowledge of which
- * implementation is active"). Only `MockAIProvider` exists today —
- * intentionally, per this task's own explicit instruction not to call
- * DeepSeek or Claude yet, and not to read `DEEPSEEK_API_KEY` at runtime.
- *
- * TODO(future): `DeepSeekProvider` — a real implementation of [AIProvider]
- *   calling DeepSeek's chat completion API. Per ADR-056, that call must
- *   originate from a PIOS backend component, never the browser — this
- *   frontend file is not where it will live; it will replace this
- *   function's return value once that backend exists and ADR-056 (or its
- *   successor) is ratified.
- * TODO(future): `ClaudeProvider` — same prerequisite and same placement
- *   constraint as `DeepSeekProvider` above.
+ * Section 8/14; ADR-056 Decision 7's "no caller-side knowledge of which
+ * implementation is active"). [BackendAIProvider] is the only frontend
+ * implementation, and it stays the only one forever — a future
+ * `DeepSeekProvider`/`ClaudeProvider` is a **backend** class implementing
+ * `ai-advisor`'s own `AIProvider` (Kotlin) interface, per ADR-056 Decision
+ * 1: the browser must never hold a provider credential. Nothing in this
+ * frontend file changes when that happens; `ai-advisor` simply starts
+ * returning `providerName: "deepseek"` instead of `"mock"` in the same
+ * response shape this function's caller already handles.
  */
-export function getActiveAIProvider(): AIProvider {
-  return new MockAIProvider()
+export function getActiveAIProvider(credential: OwnerCredential): AIProvider {
+  return new BackendAIProvider(credential)
 }

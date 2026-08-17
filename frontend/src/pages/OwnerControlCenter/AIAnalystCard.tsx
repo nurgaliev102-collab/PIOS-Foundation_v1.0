@@ -3,8 +3,10 @@ import { ActionButton } from '../../components/ActionButton'
 import type { ModuleHealth } from './healthPoll'
 import type { OwnerCredential } from './ownerCredential'
 import { collectPilotAnalyticsInput } from './pilotAnalytics'
-import { getActiveAIProvider, type PilotAnalysisResult, type PilotAnalysisStatus } from './aiProvider'
+import { AdvisorOutcomeError, getActiveAIProvider, type PilotAnalysisResult, type PilotAnalysisStatus } from './aiProvider'
 import styles from './OwnerControlCenter.module.css'
+
+const GENERIC_ERROR_MESSAGE = 'Не удалось связаться с сервером. Проверьте интернет и попробуйте ещё раз.'
 
 export interface AIAnalystCardProps {
   credential: OwnerCredential
@@ -50,16 +52,28 @@ function formatGeneratedAt(iso: string): string {
 export function AIAnalystCard({ credential, healths }: AIAnalystCardProps) {
   const [state, setState] = useState<AnalystState>('idle')
   const [result, setResult] = useState<PilotAnalysisResult | null>(null)
+  // This task's own explicit requirement: "недостаточно данных ≠ AI
+  // недоступен; AI недоступен ≠ ошибка PIOS; rate limit ≠ backend failure" —
+  // one generic error message would not honestly distinguish these.
+  // `AdvisorOutcomeError` (thrown by `BackendAIProvider` for any
+  // `ai-advisor` outcome other than `"ok"`) already carries the backend's
+  // own honest, specific message; anything else (network failure, wrong
+  // owner credential, ai-advisor unreachable) falls back to one generic,
+  // PIOS-side message. "Insufficient data" is not an error at all here —
+  // it is `result.status === 'unknown'` inside a normal `'ready'` state,
+  // rendered below exactly like any other status.
+  const [errorMessage, setErrorMessage] = useState<string>(GENERIC_ERROR_MESSAGE)
 
   async function handleAnalyze() {
     setState('loading')
     try {
       const input = await collectPilotAnalyticsInput(credential, healths)
-      const provider = getActiveAIProvider()
+      const provider = getActiveAIProvider(credential)
       const analysis = await provider.analyze(input)
       setResult(analysis)
       setState('ready')
-    } catch {
+    } catch (error) {
+      setErrorMessage(error instanceof AdvisorOutcomeError ? error.userMessage : GENERIC_ERROR_MESSAGE)
       setState('error')
     }
   }
@@ -77,7 +91,7 @@ export function AIAnalystCard({ credential, healths }: AIAnalystCardProps) {
 
       {state === 'error' && (
         <p className={styles.aiError} role="alert">
-          Не удалось выполнить анализ. Попробуйте ещё раз.
+          {errorMessage}
         </p>
       )}
 

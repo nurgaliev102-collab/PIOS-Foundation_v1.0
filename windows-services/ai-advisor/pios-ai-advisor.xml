@@ -1,0 +1,18 @@
+<service>
+  <id>pios-ai-advisor</id>
+  <name>PIOS AI Advisor</name>
+  <description>AI Advisor for Owner Control Center (ADR-056, Accepted 2026-08-17). Rollout Step 2: POST /v1/advisor/analyze backed by MockAIProvider only -- no real provider (DeepSeek/Claude), no API key, at this stage. Not a PIOS module (ADR-056 Decision 2, mirroring ADR-046 Decision 1): owns no capability, models no domain, holds no data, and has no network path to any of the five domain modules (ADR-056 Decision 1).</description>
+  <executable>C:\Program Files\Eclipse Adoptium\jdk-21.0.12.8-hotspot\bin\java.exe</executable>
+  <arguments>-jar "build\libs\ai-advisor-0.1.0-SNAPSHOT.jar"</arguments>
+  <workingdirectory>C:\Projects\PIOS-Foundation_v1.0\ai-advisor</workingdirectory>
+  <!-- Silenced like the five domain modules (not left at WinSW's default the
+       way platform-ops still is): this service writes its own rolling file
+       log (../logs/ai-advisor.log, application.yml), so WinSW's own wrapper
+       log would only duplicate it. -->
+  <log mode="none"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <onfailure action="restart" delay="120 sec"/>
+  <resetfailure>24 hours</resetfailure>
+  <startmode>Automatic</startmode>
+</service>
