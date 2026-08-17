@@ -5,6 +5,7 @@ import com.pios.aiadvisor.api.PilotAnalysisMetricsDto
 import com.pios.aiadvisor.api.PilotAnalysisRequest
 import com.pios.aiadvisor.api.PilotAnalysisResultDto
 import com.pios.aiadvisor.api.ProposalMetrics
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component
 import kotlin.math.roundToInt
 
@@ -24,6 +25,7 @@ import kotlin.math.roundToInt
  * business rule — the same disclosure the frontend original already carried.
  */
 @Component
+@ConditionalOnProperty(name = ["pios.ai-advisor.provider"], havingValue = "mock", matchIfMissing = true)
 class MockAIProvider : AIProvider {
     override val name = "mock"
 
@@ -34,18 +36,7 @@ class MockAIProvider : AIProvider {
         val metrics = PilotAnalysisMetricsDto(acceptanceRate, completionRate, cancellationRate)
 
         if (input.orders.total == 0) {
-            return AIProviderOutcome.Success(
-                PilotAnalysisResultDto(
-                    status = "unknown",
-                    summary = "Недостаточно данных для анализа — за наблюдаемый период не зафиксировано ни одного заказа.",
-                    keyFindings = emptyList(),
-                    risks = emptyList(),
-                    recommendations = listOf("Дождитесь первых заказов в системе и запустите анализ ещё раз."),
-                    metrics = metrics,
-                    generatedAt = input.generatedAt,
-                    providerName = name
-                )
-            )
+            return AIProviderOutcome.Success(insufficientDataResult(input, metrics, name))
         }
 
         val keyFindings = mutableListOf(

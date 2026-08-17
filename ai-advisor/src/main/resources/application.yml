@@ -44,3 +44,19 @@ logging:
 #     budget:
 #       max-calls-per-day: 200
 #       max-calls-per-month: 2000
+
+# ADR-056 Rollout Step 3 (DeepSeekProvider). "provider" selects which
+# AIProvider bean is active (Spring @ConditionalOnProperty) -- deliberately
+# defaulting to "mock" so the existing pilot never depends on a funded
+# DeepSeek account existing. Set to "deepseek" only once
+# pios.ai-advisor.deepseek.api-key is configured for real; a blank key with
+# provider=deepseek fails every analysis closed (outcome:
+# "provider_unavailable"), never a crash and never a fabricated answer.
+pios:
+  ai-advisor:
+    # provider: mock
+    deepseek:
+      # base-url: https://api.deepseek.com
+      # model: deepseek-v4-flash
+      # timeout-ms: 30000
+      # api-key: ""
