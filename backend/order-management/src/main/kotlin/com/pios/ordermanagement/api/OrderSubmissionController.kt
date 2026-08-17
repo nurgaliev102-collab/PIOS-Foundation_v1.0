@@ -56,7 +56,8 @@ class OrderSubmissionController(
                 request.destination,
                 request.passengerName,
                 request.pickupAddress,
-                request.requestedPickupAt
+                request.requestedPickupAt,
+                request.isTest
             )
             ResponseEntity.status(HttpStatus.CREATED).body(SubmitOrderResponse(orderId))
         } catch (ex: IllegalArgumentException) {

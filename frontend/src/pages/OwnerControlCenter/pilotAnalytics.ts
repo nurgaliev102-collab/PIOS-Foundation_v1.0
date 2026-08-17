@@ -1,6 +1,7 @@
 import type { ModuleHealth } from './healthPoll'
 import type { OwnerCredential } from './ownerCredential'
 import {
+  excludeTestData,
   fetchAssignmentsForOrder,
   fetchDrivers,
   fetchOrders,
@@ -29,6 +30,13 @@ import {
  * 15s poll — and keeping its own data collection fully separate means a
  * future change to either path can never reintroduce that incident's
  * failure mode in the other.
+ *
+ * Test/production data separation (2026-08-17): imports `excludeTestData`
+ * from `todayData.ts` (not its own copy — a plain filter function carries
+ * none of the fan-out-timing risk this module's own KDoc above is about)
+ * and applies it right after each fetch, identically to `loadTodaySnapshot`,
+ * so the AI Advisor's own metrics stay consistent with what Owner Control
+ * Center's counters and EventFeed already show.
  *
  * `docs/ADR/ADR-056-Control-Center-AI-Advisor.md` describes the eventual
  * real AI advisor (a dedicated `ai-advisor` backend, GigaChat) — that ADR
@@ -228,15 +236,17 @@ export async function collectPilotAnalyticsInput(
   credential: OwnerCredential,
   healths: ModuleHealth[]
 ): Promise<PilotAnalyticsInput> {
-  const [drivers, orders] = await Promise.all([
+  const [driversRaw, ordersRaw] = await Promise.all([
     fetchDrivers().catch(() => [] as DriverListItem[]),
     fetchOrders(credential).catch(() => [] as OrderListItem[]),
   ])
+  const drivers = excludeTestData(driversRaw)
+  const orders = excludeTestData(ordersRaw)
 
   const proposalLists = await mapWithConcurrency(drivers, FAN_OUT_CONCURRENCY_LIMIT, (driver) =>
     fetchProposalsForDriver(driver.id, credential).catch(() => [] as ProposalListItem[])
   )
-  const proposals = proposalLists.flat()
+  const proposals = excludeTestData(proposalLists.flat())
 
   const ordersWithAcceptedProposal = new Set(
     proposals.filter((proposal) => proposal.status === 'ACCEPTED').map((proposal) => proposal.orderId)
@@ -246,7 +256,7 @@ export async function collectPilotAnalyticsInput(
     FAN_OUT_CONCURRENCY_LIMIT,
     (orderId) => fetchAssignmentsForOrder(orderId).catch(() => [] as AssignmentListItem[])
   )
-  const assignments = assignmentLists.flat()
+  const assignments = excludeTestData(assignmentLists.flat())
 
   return {
     generatedAt: new Date().toISOString(),

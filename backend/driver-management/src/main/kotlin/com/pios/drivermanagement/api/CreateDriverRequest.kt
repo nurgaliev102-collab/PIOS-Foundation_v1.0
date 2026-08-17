@@ -11,5 +11,10 @@ package com.pios.drivermanagement.api
  *
  * [displayName] (Sprint 7B: Personal Network Flow MVP) is optional, so
  * every existing caller of this endpoint remains unaffected.
+ *
+ * [isTest] (Owner Control Center test/production data separation,
+ * 2026-08-17) lets an automated/manual technical verification mark the
+ * driver it creates as such -- optional, defaulting to `false`, so no
+ * existing caller (a real driver's own registration) is affected.
  */
-data class CreateDriverRequest(val driverId: String, val displayName: String? = null)
+data class CreateDriverRequest(val driverId: String, val displayName: String? = null, val isTest: Boolean = false)

@@ -11,10 +11,18 @@ package com.pios.drivermanagement.api
  * surfaces [com.pios.drivermanagement.domain.Driver.createdAt] — optional,
  * appended last, `null` for every driver registered before
  * `V4__add_driver_created_at.sql` and for any caller that omits it.
+ *
+ * [isTest] (Owner Control Center test/production data separation,
+ * 2026-08-17) surfaces [com.pios.drivermanagement.domain.Driver.isTest]
+ * unchanged — `false` for every real driver and for every driver that
+ * existed before this field was introduced (the migration's own
+ * `DEFAULT FALSE`). Read by the Owner Control Center's own frontend
+ * filtering, never by this module.
  */
 data class DriverResponse(
     val id: String,
     val availability: String,
     val displayName: String? = null,
-    val registeredAt: String? = null
+    val registeredAt: String? = null,
+    val isTest: Boolean = false
 )

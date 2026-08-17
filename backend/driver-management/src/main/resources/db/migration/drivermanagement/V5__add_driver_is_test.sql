@@ -1,0 +1,14 @@
+-- Test/production data separation (Owner Control Center audit,
+-- 2026-08-17): additive, nullable-free boolean, mirroring
+-- V4__add_driver_created_at.sql's own precedent exactly -- a plain column,
+-- no new domain concept, no new Value Object.
+--
+-- DEFAULT FALSE means every existing row (including every historical
+-- test/sprint driver already in this table) becomes `is_test = false` on
+-- migration -- this migration does not attempt to guess which existing
+-- rows were test data; it only stops NEW rows from being ambiguous going
+-- forward. Every existing INSERT path (CreateDriverApplicationService via
+-- DriverController) sets it explicitly through CreateDriverCommand, always
+-- `false` unless the caller opts in, so no real driver is ever marked test
+-- by omission.
+ALTER TABLE drivers ADD COLUMN is_test BOOLEAN NOT NULL DEFAULT FALSE;

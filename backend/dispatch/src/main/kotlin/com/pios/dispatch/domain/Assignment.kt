@@ -30,11 +30,23 @@ import java.util.UUID
  * constructor makes [create] the only means by which an Assignment comes
  * into existence, and both [create] and [accept] live exclusively within
  * the Dispatch module.
+ *
+ * [isTest] (Owner Control Center test/production data separation,
+ * 2026-08-17) marks an assignment deliberately created from a test
+ * proposal. Defaults to `false`. Unlike [Proposal.isTest] (a caller's own
+ * declaration), this one is **derived**, not independently supplied: the
+ * one real path that creates an Assignment (accepting a Proposal, via
+ * [com.pios.dispatch.application.ProposalAssignmentOrchestrationService])
+ * passes the originating Proposal's own [Proposal.isTest] straight
+ * through, entirely within this module — the same same-module derivation
+ * [Assignment.order]/[Assignment.driver] already receive from that
+ * Proposal, not a cross-module read.
  */
 class Assignment private constructor(
     val id: AssignmentId,
     val order: OrderReference,
-    val driver: DriverReference
+    val driver: DriverReference,
+    val isTest: Boolean = false
 ) {
     var status: AssignmentStatus = AssignmentStatus.CREATED
         private set
@@ -164,7 +176,8 @@ class Assignment private constructor(
         fun create(
             order: OrderReference,
             driver: DriverReference,
-            existingAssignments: Collection<Assignment> = emptyList()
+            existingAssignments: Collection<Assignment> = emptyList(),
+            isTest: Boolean = false
         ): AssignmentCreated {
             check(existingAssignments.none { it.order == order }) {
                 "Order ${order.orderId} already has an active assignment"
@@ -172,7 +185,8 @@ class Assignment private constructor(
             val assignment = Assignment(
                 id = AssignmentId(UUID.randomUUID().toString()),
                 order = order,
-                driver = driver
+                driver = driver,
+                isTest = isTest
             )
             val event = OrderAssigned(orderId = order, driverId = driver)
             return AssignmentCreated(assignment = assignment, event = event)

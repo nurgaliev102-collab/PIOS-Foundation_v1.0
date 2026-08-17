@@ -154,4 +154,34 @@ class DriverControllerTest {
 
         assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
     }
+
+    // --- isTest (Owner Control Center test/production data separation, 2026-08-17) ---
+
+    @Test
+    fun `creating a driver with isTest true persists and returns isTest true`() {
+        val response = controller.createDriver(CreateDriverRequest("e2e-driver-1", isTest = true))
+
+        assertEquals(true, assertNotNull(response.body).isTest)
+        assertEquals(true, repository.findById(DriverId("e2e-driver-1"))?.isTest)
+    }
+
+    @Test
+    fun `creating a driver without isTest defaults to isTest false -- a real driver is never marked test by omission`() {
+        val response = controller.createDriver(CreateDriverRequest("real-driver-1"))
+
+        assertEquals(false, assertNotNull(response.body).isTest)
+        assertEquals(false, repository.findById(DriverId("real-driver-1"))?.isTest)
+    }
+
+    @Test
+    fun `listing drivers surfaces each driver's own isTest, unaffected by any other driver's`() {
+        repository.save(Driver(DriverId("mix-real"), isTest = false))
+        repository.save(Driver(DriverId("mix-test"), isTest = true))
+
+        val response = controller.listDrivers()
+
+        val body = assertNotNull(response.body)
+        assertEquals(false, body.first { it.id == "mix-real" }.isTest)
+        assertEquals(true, body.first { it.id == "mix-test" }.isTest)
+    }
 }

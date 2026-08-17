@@ -65,7 +65,8 @@ class OrderLifecycleApplicationService(
             command.destination,
             command.passengerName,
             command.pickupAddress,
-            command.requestedPickupAt
+            command.requestedPickupAt,
+            command.isTest
         )
         orderRepository.save(submitted.order)
         outboxRepository.save(outboxRecordFor(submitted.event))

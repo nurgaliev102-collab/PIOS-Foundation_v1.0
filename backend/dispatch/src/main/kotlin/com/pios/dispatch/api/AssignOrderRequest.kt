@@ -10,4 +10,4 @@ package com.pios.dispatch.api
  * [AssignmentController], which is also where a blank value's
  * [IllegalArgumentException] is caught and mapped to HTTP 400.
  */
-data class AssignOrderRequest(val orderId: String, val driverId: String)
+data class AssignOrderRequest(val orderId: String, val driverId: String, val isTest: Boolean = false)

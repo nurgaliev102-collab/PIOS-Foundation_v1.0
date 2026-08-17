@@ -114,6 +114,17 @@ import org.springframework.stereotype.Repository
  * so the reflected constructor below gains an eighth, trailing
  * `java.time.Instant::class.java` parameter, matching [Order]'s own
  * declaration order exactly.
+ *
+ * Owner Control Center test/production data separation (2026-08-17) adds
+ * `is_test`, excluded from `ON CONFLICT ... UPDATE` since [Order.isTest]
+ * is set once, at submission, and never changes, mirroring `origin`'s own
+ * treatment. It is [Order]'s own new last constructor parameter (declared
+ * after [Order.requestedPickupAt]), a non-nullable `Boolean`, so the
+ * reflected constructor below gains a ninth, trailing
+ * `Boolean::class.java` parameter — Kotlin represents a non-nullable
+ * `Boolean` constructor parameter as the JVM primitive `boolean`, the same
+ * unboxed representation `Boolean::class.java` resolves to, so no
+ * boxed-type mismatch applies here the way it would for a nullable one.
  */
 @Repository
 class PostgreSQLOrderRepository(
@@ -123,7 +134,7 @@ class PostgreSQLOrderRepository(
     override fun save(order: Order) {
         jdbcTemplate.update(
             """
-            INSERT INTO orders (id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO orders (id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status
             """.trimIndent(),
             order.id.value,
@@ -133,13 +144,14 @@ class PostgreSQLOrderRepository(
             order.passengerName,
             order.createdAt?.let { java.sql.Timestamp.from(it) },
             order.pickupAddress,
-            order.requestedPickupAt?.let { java.sql.Timestamp.from(it) }
+            order.requestedPickupAt?.let { java.sql.Timestamp.from(it) },
+            order.isTest
         )
     }
 
     override fun findById(id: OrderId): Order? {
         val rows = jdbcTemplate.query(
-            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at FROM orders WHERE id = ?",
+            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test FROM orders WHERE id = ?",
             { rs, _ ->
                 reconstruct(
                     id = rs.getString("id"),
@@ -149,7 +161,8 @@ class PostgreSQLOrderRepository(
                     passengerName = rs.getString("passenger_name"),
                     createdAt = rs.getTimestamp("created_at"),
                     pickupAddress = rs.getString("pickup_address"),
-                    requestedPickupAt = rs.getTimestamp("requested_pickup_at")
+                    requestedPickupAt = rs.getTimestamp("requested_pickup_at"),
+                    isTest = rs.getBoolean("is_test")
                 )
             },
             id.value
@@ -159,7 +172,7 @@ class PostgreSQLOrderRepository(
 
     override fun findAll(): List<Order> =
         jdbcTemplate.query(
-            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at FROM orders"
+            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test FROM orders"
         ) { rs, _ ->
             reconstruct(
                 id = rs.getString("id"),
@@ -169,7 +182,8 @@ class PostgreSQLOrderRepository(
                 passengerName = rs.getString("passenger_name"),
                 createdAt = rs.getTimestamp("created_at"),
                 pickupAddress = rs.getString("pickup_address"),
-                requestedPickupAt = rs.getTimestamp("requested_pickup_at")
+                requestedPickupAt = rs.getTimestamp("requested_pickup_at"),
+                isTest = rs.getBoolean("is_test")
             )
         }
 
@@ -181,7 +195,8 @@ class PostgreSQLOrderRepository(
         passengerName: String?,
         createdAt: java.sql.Timestamp?,
         pickupAddress: String?,
-        requestedPickupAt: java.sql.Timestamp?
+        requestedPickupAt: java.sql.Timestamp?,
+        isTest: Boolean
     ): Order {
         val constructor = Order::class.java.getDeclaredConstructor(
             String::class.java,
@@ -191,7 +206,8 @@ class PostgreSQLOrderRepository(
             String::class.java,
             java.time.Instant::class.java,
             String::class.java,
-            java.time.Instant::class.java
+            java.time.Instant::class.java,
+            Boolean::class.java
         )
         constructor.isAccessible = true
         return constructor.newInstance(
@@ -202,7 +218,8 @@ class PostgreSQLOrderRepository(
             passengerName,
             createdAt?.toInstant(),
             pickupAddress,
-            requestedPickupAt?.toInstant()
+            requestedPickupAt?.toInstant(),
+            isTest
         )
     }
 }

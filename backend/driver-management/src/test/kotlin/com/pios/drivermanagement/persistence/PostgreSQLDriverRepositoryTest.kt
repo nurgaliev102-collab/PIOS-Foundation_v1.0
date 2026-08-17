@@ -73,4 +73,24 @@ class PostgreSQLDriverRepositoryTest {
 
         assertNull(repository.findById(driver.id)?.createdAt)
     }
+
+    // --- isTest (Owner Control Center test/production data separation, 2026-08-17) ---
+
+    @Test
+    fun `isTest true round-trips through PostgreSQL`() {
+        val driver = Driver(DriverId("postgres-driver-is-test-true"), isTest = true)
+
+        repository.save(driver)
+
+        assertEquals(true, repository.findById(driver.id)?.isTest)
+    }
+
+    @Test
+    fun `a driver saved without isTest loads back with isTest false`() {
+        val driver = Driver(DriverId("postgres-driver-is-test-default"))
+
+        repository.save(driver)
+
+        assertEquals(false, repository.findById(driver.id)?.isTest)
+    }
 }

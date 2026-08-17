@@ -9,4 +9,4 @@ package com.pios.dispatch.api
  * which is also where a blank value's [IllegalArgumentException] is
  * caught and mapped to HTTP 400. Mirrors [AssignOrderRequest] exactly.
  */
-data class ProposeDriverRequest(val orderId: String, val driverId: String)
+data class ProposeDriverRequest(val orderId: String, val driverId: String, val isTest: Boolean = false)

@@ -125,7 +125,7 @@ class ProposalAssignmentOrchestrationService(
         proposalApplicationService.acceptProposalWithinCallerTransaction(proposal, command)
 
         val assignmentCreated = dispatchAssignmentApplicationService.handleWithinCallerTransaction(
-            AssignOrderCommand(proposal.order, proposal.driver)
+            AssignOrderCommand(proposal.order, proposal.driver, isTest = proposal.isTest)
         )
 
         ProposalAcceptanceOutcome(proposal, assignmentCreated)

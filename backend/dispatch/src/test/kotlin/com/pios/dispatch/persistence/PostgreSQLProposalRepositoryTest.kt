@@ -120,4 +120,28 @@ class PostgreSQLProposalRepositoryTest {
         assertEquals(respondedAt, reloaded?.respondedAt)
         assertEquals(ProposalStatus.ACCEPTED, reloaded?.status)
     }
+
+    // --- isTest (Owner Control Center test/production data separation, 2026-08-17) ---
+
+    @Test
+    fun `isTest true round-trips through PostgreSQL`() {
+        val created = Proposal.propose(
+            OrderReference("postgres-order-is-test-true"),
+            DriverReference("postgres-driver-is-test-true"),
+            isTest = true
+        )
+
+        repository.save(created.proposal)
+
+        assertEquals(true, repository.findById(created.proposal.id)?.isTest)
+    }
+
+    @Test
+    fun `a proposal saved without isTest loads back with isTest false`() {
+        val created = Proposal.propose(OrderReference("postgres-order-is-test-default"), DriverReference("postgres-driver-is-test-default"))
+
+        repository.save(created.proposal)
+
+        assertEquals(false, repository.findById(created.proposal.id)?.isTest)
+    }
 }

@@ -100,7 +100,8 @@ class DispatchAssignmentApplicationService(
         val created = Assignment.create(
             order = command.order,
             driver = command.driver,
-            existingAssignments = existingAssignments
+            existingAssignments = existingAssignments,
+            isTest = command.isTest
         )
         assignmentRepository.save(created.assignment)
         outboxRepository.save(outboxRecordFor(created.assignment.id, created.event))

@@ -1,0 +1,13 @@
+-- Test/production data separation (Owner Control Center audit,
+-- 2026-08-17): additive boolean, mirroring V6__add_optional_order_destination.sql's
+-- own precedent -- a plain column, no new domain concept.
+--
+-- DEFAULT FALSE means every existing row (including every historical
+-- test/sprint order already in this table) becomes `is_test = false` on
+-- migration -- this migration does not attempt to guess which existing
+-- rows were test data; it only stops NEW rows from being ambiguous going
+-- forward. The one real write path (OrderSubmissionRequestHandler via
+-- OrderSubmissionController) sets it explicitly through SubmitOrderCommand,
+-- always `false` unless the caller opts in, so no real order is ever
+-- marked test by omission.
+ALTER TABLE orders ADD COLUMN is_test BOOLEAN NOT NULL DEFAULT FALSE;

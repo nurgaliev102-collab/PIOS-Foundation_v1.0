@@ -15,5 +15,9 @@ import com.pios.drivermanagement.domain.DriverId
  * [displayName] -- the only other field
  * [com.pios.drivermanagement.domain.Driver]'s own public constructor
  * accepts.
+ *
+ * [isTest] (Owner Control Center test/production data separation,
+ * 2026-08-17) defaults to `false`, mirroring [displayName]'s own
+ * backward-compatible defaulting.
  */
-data class CreateDriverCommand(val driverId: DriverId, val displayName: String? = null)
+data class CreateDriverCommand(val driverId: DriverId, val displayName: String? = null, val isTest: Boolean = false)

@@ -109,4 +109,24 @@ class PostgreSQLOrderRepositoryTest {
 
         assertTrue(repository.findAll().any { it.id == submitted.order.id && it.origin == origin })
     }
+
+    // --- isTest (Owner Control Center test/production data separation, 2026-08-17) ---
+
+    @Test
+    fun `isTest true round-trips through PostgreSQL`() {
+        val submitted = Order.submit(origin, isTest = true)
+
+        repository.save(submitted.order)
+
+        assertEquals(true, repository.findById(submitted.order.id)?.isTest)
+    }
+
+    @Test
+    fun `an order saved without isTest loads back with isTest false`() {
+        val submitted = Order.submit(origin)
+
+        repository.save(submitted.order)
+
+        assertEquals(false, repository.findById(submitted.order.id)?.isTest)
+    }
 }

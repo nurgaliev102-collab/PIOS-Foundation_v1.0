@@ -40,18 +40,18 @@ const UP_HEALTHS: ModuleHealth[] = ['driver-management', 'passenger-experience',
   })
 )
 
-function driver(id: string, availability: DriverListItem['availability'] = 'AVAILABLE'): DriverListItem {
-  return { id, availability, displayName: null, registeredAt: null }
+function driver(id: string, availability: DriverListItem['availability'] = 'AVAILABLE', isTest = false): DriverListItem {
+  return { id, availability, displayName: null, registeredAt: null, isTest }
 }
 
-function order(id: string, status: OrderListItem['status']): OrderListItem {
-  return { id, status, origin: 'x', destination: null, passengerName: null, createdAt: null, pickupAddress: null, requestedPickupAt: null }
+function order(id: string, status: OrderListItem['status'], isTest = false): OrderListItem {
+  return { id, status, origin: 'x', destination: null, passengerName: null, createdAt: null, pickupAddress: null, requestedPickupAt: null, isTest }
 }
 
 function proposal(
   overrides: Partial<ProposalListItem> & Pick<ProposalListItem, 'proposalId' | 'orderId' | 'driverId' | 'status'>
 ): ProposalListItem {
-  return { statedPrice: null, statedEtaMinutes: null, createdAt: null, respondedAt: null, ...overrides }
+  return { statedPrice: null, statedEtaMinutes: null, createdAt: null, respondedAt: null, isTest: false, ...overrides }
 }
 
 describe('calculateAcceptanceRate', () => {
@@ -171,5 +171,46 @@ describe('collectPilotAnalyticsInput', () => {
     const result = await collectPilotAnalyticsInput(OWNER_CREDENTIAL, UP_HEALTHS)
 
     expect(result.orders).toEqual({ total: 0, completed: 0, cancelled: 0, open: 0 })
+  })
+
+  // --- isTest (Owner Control Center test/production data separation, 2026-08-17) ---
+  // AI Advisor must stay consistent with what Owner Control Center's own
+  // counters/EventFeed already exclude -- both read the same fetch functions.
+
+  it('excludes a test driver and a test order from the metrics fed to the AI Advisor', async () => {
+    mockedFetchDrivers.mockResolvedValue([driver('d-real', 'AVAILABLE', false), driver('d-e2e', 'AVAILABLE', true)])
+    mockedFetchOrders.mockResolvedValue([order('o-real', 'COMPLETED', false), order('o-e2e', 'COMPLETED', true)])
+    mockedFetchProposalsForDriver.mockResolvedValue([])
+
+    const result = await collectPilotAnalyticsInput(OWNER_CREDENTIAL, UP_HEALTHS)
+
+    expect(result.drivers.total).toBe(1)
+    expect(result.orders).toEqual({ total: 1, completed: 1, cancelled: 0, open: 0 })
+    // Only the real driver was ever fanned out to for its own proposals.
+    expect(mockedFetchProposalsForDriver).toHaveBeenCalledTimes(1)
+    expect(mockedFetchProposalsForDriver).toHaveBeenCalledWith('d-real', OWNER_CREDENTIAL)
+  })
+
+  it('excludes a test proposal from proposal/reaction-time metrics, even for a production driver', async () => {
+    mockedFetchDrivers.mockResolvedValue([driver('d-real')])
+    mockedFetchOrders.mockResolvedValue([])
+    mockedFetchProposalsForDriver.mockResolvedValue([
+      proposal({
+        proposalId: 'p-e2e',
+        orderId: 'o-e2e',
+        driverId: 'd-real',
+        status: 'ACCEPTED',
+        createdAt: '2026-08-17T10:00:00Z',
+        respondedAt: '2026-08-17T10:05:00Z',
+        isTest: true,
+      }),
+    ])
+
+    const result = await collectPilotAnalyticsInput(OWNER_CREDENTIAL, UP_HEALTHS)
+
+    expect(result.proposals).toEqual({ total: 0, accepted: 0, declined: 0, lapsed: 0, withdrawn: 0, open: 0 })
+    expect(result.reactionTime.sampleSize).toBe(0)
+    // A test-only-accepted proposal never contributes an order id to the assignments fan-out.
+    expect(mockedFetchAssignmentsForOrder).not.toHaveBeenCalled()
   })
 })

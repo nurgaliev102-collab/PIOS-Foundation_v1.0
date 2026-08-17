@@ -15,5 +15,6 @@ import com.pios.dispatch.domain.OrderReference
  */
 data class ProposeDriverCommand(
     val order: OrderReference,
-    val driver: DriverReference
+    val driver: DriverReference,
+    val isTest: Boolean = false
 )

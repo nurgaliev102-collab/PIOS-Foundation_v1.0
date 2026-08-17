@@ -43,6 +43,7 @@ export interface DriverListItem {
   availability: 'AVAILABLE' | 'UNAVAILABLE'
   displayName: string | null
   registeredAt: string | null
+  isTest: boolean
 }
 
 export interface OrderListItem {
@@ -54,6 +55,7 @@ export interface OrderListItem {
   createdAt: string | null
   pickupAddress: string | null
   requestedPickupAt: string | null
+  isTest: boolean
 }
 
 export interface ProposalListItem {
@@ -65,6 +67,7 @@ export interface ProposalListItem {
   statedEtaMinutes: number | null
   createdAt: string | null
   respondedAt: string | null
+  isTest: boolean
 }
 
 export interface AssignmentListItem {
@@ -75,6 +78,25 @@ export interface AssignmentListItem {
   arrivedAt: string | null
   startedAt: string | null
   completedAt: string | null
+  isTest: boolean
+}
+
+/**
+ * Test/production data separation (Owner Control Center audit,
+ * 2026-08-17): drops every record whose backend-owned `isTest` is `true`,
+ * used identically by [loadTodaySnapshot] (counters/EventFeed) and
+ * `pilotAnalytics.ts`'s own `collectPilotAnalyticsInput` (AI Advisor) —
+ * both already call the exact same `fetch*` functions below, so applying
+ * this filter immediately after each fetch, in both places, keeps the
+ * whole snapshot consistent: a filtered-out test driver is never fanned
+ * out to for proposals, a filtered-out test order never contributes a
+ * counter or an event, and nothing downstream ever sees a `isTest: true`
+ * record to begin with. Never infers test-ness from a name or id — the
+ * field is the backend's own authoritative value, set once at creation
+ * (see each domain aggregate's own `isTest` KDoc).
+ */
+export function excludeTestData<T extends { isTest: boolean }>(items: T[]): T[] {
+  return items.filter((item) => !item.isTest)
 }
 
 /** `GET /v1/drivers` — unauthenticated, unaffected by ADR-060. */
@@ -233,15 +255,17 @@ function passengerLabel(orderId: string, orders: OrderListItem[]): string {
  * this data can be trusted.
  */
 export async function loadTodaySnapshot(credential: OwnerCredential): Promise<TodaySnapshot> {
-  const [drivers, orders] = await Promise.all([
+  const [driversRaw, ordersRaw] = await Promise.all([
     fetchDrivers().catch(() => [] as DriverListItem[]),
     fetchOrders(credential).catch(() => [] as OrderListItem[]),
   ])
+  const drivers = excludeTestData(driversRaw)
+  const orders = excludeTestData(ordersRaw)
 
   const proposalLists = await mapWithConcurrency(drivers, FAN_OUT_CONCURRENCY_LIMIT, (driver) =>
     fetchProposalsForDriver(driver.id, credential).catch(() => [] as ProposalListItem[])
   )
-  const proposals = proposalLists.flat()
+  const proposals = excludeTestData(proposalLists.flat())
 
   const ordersWithAcceptedProposal = new Set(
     proposals.filter((proposal) => proposal.status === 'ACCEPTED').map((proposal) => proposal.orderId)
@@ -249,7 +273,7 @@ export async function loadTodaySnapshot(credential: OwnerCredential): Promise<To
   const assignmentLists = await mapWithConcurrency([...ordersWithAcceptedProposal], FAN_OUT_CONCURRENCY_LIMIT, (orderId) =>
     fetchAssignmentsForOrder(orderId).catch(() => [] as AssignmentListItem[])
   )
-  const assignments = assignmentLists.flat()
+  const assignments = excludeTestData(assignmentLists.flat())
 
   const todaysOrders = orders.filter((order) => isToday(order.createdAt))
 

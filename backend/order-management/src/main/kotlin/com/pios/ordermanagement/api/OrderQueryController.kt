@@ -130,7 +130,8 @@ class OrderQueryController(
             passengerName,
             createdAt?.toString(),
             pickupAddress,
-            requestedPickupAt?.toString()
+            requestedPickupAt?.toString(),
+            isTest
         )
 
     companion object {

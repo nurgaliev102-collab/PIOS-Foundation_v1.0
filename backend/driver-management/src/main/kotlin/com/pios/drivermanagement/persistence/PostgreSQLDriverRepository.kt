@@ -34,25 +34,27 @@ class PostgreSQLDriverRepository(
     override fun save(driver: Driver) {
         jdbcTemplate.update(
             """
-            INSERT INTO drivers (id, availability, display_name, created_at) VALUES (?, ?, ?, ?)
+            INSERT INTO drivers (id, availability, display_name, created_at, is_test) VALUES (?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET availability = EXCLUDED.availability
             """.trimIndent(),
             driver.id.value,
             driver.availability.name,
             driver.displayName,
-            driver.createdAt?.let { java.sql.Timestamp.from(it) }
+            driver.createdAt?.let { java.sql.Timestamp.from(it) },
+            driver.isTest
         )
     }
 
     override fun findById(id: DriverId): Driver? {
         val rows = jdbcTemplate.query(
-            "SELECT id, availability, display_name, created_at FROM drivers WHERE id = ?",
+            "SELECT id, availability, display_name, created_at, is_test FROM drivers WHERE id = ?",
             { rs, _ ->
                 Driver(
                     id = DriverId(rs.getString("id")),
                     availability = Availability.valueOf(rs.getString("availability")),
                     displayName = rs.getString("display_name"),
-                    createdAt = rs.getTimestamp("created_at")?.toInstant()
+                    createdAt = rs.getTimestamp("created_at")?.toInstant(),
+                    isTest = rs.getBoolean("is_test")
                 )
             },
             id.value
@@ -62,13 +64,14 @@ class PostgreSQLDriverRepository(
 
     override fun findAll(): List<Driver> =
         jdbcTemplate.query(
-            "SELECT id, availability, display_name, created_at FROM drivers"
+            "SELECT id, availability, display_name, created_at, is_test FROM drivers"
         ) { rs, _ ->
             Driver(
                 id = DriverId(rs.getString("id")),
                 availability = Availability.valueOf(rs.getString("availability")),
                 displayName = rs.getString("display_name"),
-                createdAt = rs.getTimestamp("created_at")?.toInstant()
+                createdAt = rs.getTimestamp("created_at")?.toInstant(),
+                isTest = rs.getBoolean("is_test")
             )
         }
 }

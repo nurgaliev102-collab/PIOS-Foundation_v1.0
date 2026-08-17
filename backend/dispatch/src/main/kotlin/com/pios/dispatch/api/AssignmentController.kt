@@ -111,7 +111,7 @@ class AssignmentController(
         try {
             val order = OrderReference(request.orderId)
             val driver = DriverReference(request.driverId)
-            val created = dispatchAssignmentApplicationService.handle(AssignOrderCommand(order, driver))
+            val created = dispatchAssignmentApplicationService.handle(AssignOrderCommand(order, driver, request.isTest))
             ResponseEntity.status(HttpStatus.CREATED).body(
                 AssignOrderResponse(created.assignment.id.value, created.assignment.status.name)
             )
@@ -181,6 +181,7 @@ class AssignmentController(
             statusChangedAt?.toString(),
             arrivedAt?.toString(),
             startedAt?.toString(),
-            completedAt?.toString()
+            completedAt?.toString(),
+            isTest
         )
 }

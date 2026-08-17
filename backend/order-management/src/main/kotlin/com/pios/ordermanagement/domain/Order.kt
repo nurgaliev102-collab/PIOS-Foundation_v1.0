@@ -97,7 +97,8 @@ class Order private constructor(
     val passengerName: String?,
     val createdAt: Instant?,
     val pickupAddress: String?,
-    val requestedPickupAt: Instant?
+    val requestedPickupAt: Instant?,
+    val isTest: Boolean = false
 ) {
     var status: OrderStatus = status
         private set
@@ -154,7 +155,8 @@ class Order private constructor(
             destination: String? = null,
             passengerName: String? = null,
             pickupAddress: String? = null,
-            requestedPickupAt: Instant? = null
+            requestedPickupAt: Instant? = null,
+            isTest: Boolean = false
         ): SubmittedOrder {
             val order = Order(
                 id = OrderId(UUID.randomUUID().toString()),
@@ -164,7 +166,8 @@ class Order private constructor(
                 passengerName = passengerName,
                 createdAt = Instant.now(),
                 pickupAddress = pickupAddress,
-                requestedPickupAt = requestedPickupAt
+                requestedPickupAt = requestedPickupAt,
+                isTest = isTest
             )
             return SubmittedOrder(order = order, event = OrderSubmitted(orderId = order.id))
         }

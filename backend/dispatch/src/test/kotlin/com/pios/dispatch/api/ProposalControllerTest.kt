@@ -600,4 +600,21 @@ class ProposalControllerTest {
 
         assertEquals(HttpStatus.CREATED, response.statusCode)
     }
+
+    // --- isTest (Owner Control Center test/production data separation, 2026-08-17) ---
+
+    @Test
+    fun `creating a proposal with isTest true returns and persists isTest true`() {
+        val response = controller.createProposal(ProposeDriverRequest("order-e2e", "driver-e2e", isTest = true))
+
+        assertEquals(true, assertNotNull(response.body).isTest)
+        assertEquals(true, repository.findByOrder(OrderReference("order-e2e")).single().isTest)
+    }
+
+    @Test
+    fun `creating a proposal without isTest defaults to isTest false -- a real proposal is never marked test by omission`() {
+        val response = controller.createProposal(ProposeDriverRequest("order-real", "driver-real"))
+
+        assertEquals(false, assertNotNull(response.body).isTest)
+    }
 }

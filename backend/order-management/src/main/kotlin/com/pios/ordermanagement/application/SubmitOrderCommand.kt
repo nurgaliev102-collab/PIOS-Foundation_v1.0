@@ -32,5 +32,6 @@ class SubmitOrderCommand(
     val destination: String? = null,
     val passengerName: String? = null,
     val pickupAddress: String? = null,
-    val requestedPickupAt: Instant? = null
+    val requestedPickupAt: Instant? = null,
+    val isTest: Boolean = false
 )

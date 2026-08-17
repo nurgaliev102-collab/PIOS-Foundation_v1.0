@@ -85,13 +85,13 @@ class PostgreSQLProposalRepository(
 ) : ProposalRepository {
 
     private val selectColumns =
-        "id, order_reference, driver_reference, status, stated_price, stated_eta_minutes, created_at, responded_at"
+        "id, order_reference, driver_reference, status, stated_price, stated_eta_minutes, created_at, responded_at, is_test"
 
     override fun save(proposal: Proposal) {
         jdbcTemplate.update(
             """
-            INSERT INTO proposals (id, order_reference, driver_reference, status, stated_price, stated_eta_minutes, created_at, responded_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO proposals (id, order_reference, driver_reference, status, stated_price, stated_eta_minutes, created_at, responded_at, is_test)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 status = EXCLUDED.status,
                 stated_price = EXCLUDED.stated_price,
@@ -105,7 +105,8 @@ class PostgreSQLProposalRepository(
             proposal.statedPrice,
             proposal.statedEtaMinutes,
             proposal.createdAt?.let { Timestamp.from(it) },
-            proposal.respondedAt?.let { Timestamp.from(it) }
+            proposal.respondedAt?.let { Timestamp.from(it) },
+            proposal.isTest
         )
     }
 
@@ -144,14 +145,16 @@ class PostgreSQLProposalRepository(
             String::class.java,
             String::class.java,
             String::class.java,
-            Instant::class.java
+            Instant::class.java,
+            Boolean::class.java
         )
         constructor.isAccessible = true
         val proposal = constructor.newInstance(
             rs.getString("id"),
             rs.getString("order_reference"),
             rs.getString("driver_reference"),
-            rs.getTimestamp("created_at")?.toInstant()
+            rs.getTimestamp("created_at")?.toInstant(),
+            rs.getBoolean("is_test")
         )
         val status = ProposalStatus.valueOf(rs.getString("status"))
         val statedPrice = rs.getString("stated_price")

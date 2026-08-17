@@ -133,4 +133,22 @@ class OrderSubmissionControllerTest {
 
         assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
     }
+
+    // --- isTest (Owner Control Center test/production data separation, 2026-08-17) ---
+
+    @Test
+    fun `a request with isTest true persists an order marked isTest true`() {
+        val response = controller.submitOrder(SubmitOrderRequest("passenger-e2e", isTest = true))
+
+        val orderId = assertNotNull(response.body).orderId
+        assertEquals(true, repository.findById(OrderId(orderId))?.isTest)
+    }
+
+    @Test
+    fun `a request without isTest persists an order marked isTest false -- a real order is never marked test by omission`() {
+        val response = controller.submitOrder(SubmitOrderRequest("passenger-real"))
+
+        val orderId = assertNotNull(response.body).orderId
+        assertEquals(false, repository.findById(OrderId(orderId))?.isTest)
+    }
 }

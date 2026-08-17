@@ -133,4 +133,32 @@ class ProposalAssignmentOrchestrationServiceTest {
             orchestrationService.acceptProposal(AcceptProposalCommand(ProposalId("never-created")))
         }
     }
+
+    // --- isTest (Owner Control Center test/production data separation, 2026-08-17) ---
+
+    @Test
+    fun `accepting an isTest proposal creates an isTest assignment -- same-module derivation, not a cross-module read`() {
+        val proposal = proposalApplicationService.handle(ProposeDriverCommand(order, driver, isTest = true)).proposal
+
+        val outcome = orchestrationService.acceptProposal(AcceptProposalCommand(proposal.id))
+
+        assertEquals(true, outcome.assignmentCreated.assignment.isTest)
+        assertEquals(true, assignmentRepository.findById(outcome.assignmentCreated.assignment.id)?.isTest)
+    }
+
+    @Test
+    fun `accepting a real (non-test) proposal creates a real assignment, even while other test data exists in the same repositories`() {
+        // A test order/driver/proposal already exist elsewhere in these same
+        // repositories -- proving the real proposal below is never "infected"
+        // by their presence, since Dispatch never cross-references isTest
+        // across unrelated aggregates, only carries it from the one Proposal
+        // each Assignment is actually created from.
+        proposalApplicationService.handle(ProposeDriverCommand(OrderReference("test-order"), DriverReference("test-driver"), isTest = true))
+
+        val realProposal = proposalApplicationService.handle(ProposeDriverCommand(order, driver, isTest = false)).proposal
+
+        val outcome = orchestrationService.acceptProposal(AcceptProposalCommand(realProposal.id))
+
+        assertEquals(false, outcome.assignmentCreated.assignment.isTest)
+    }
 }

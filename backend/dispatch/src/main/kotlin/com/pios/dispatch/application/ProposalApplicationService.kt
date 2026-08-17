@@ -133,7 +133,8 @@ class ProposalApplicationService(
         val created = Proposal.propose(
             order = command.order,
             driver = command.driver,
-            existingProposals = existingProposals
+            existingProposals = existingProposals,
+            isTest = command.isTest
         )
         proposalRepository.save(created.proposal)
         created

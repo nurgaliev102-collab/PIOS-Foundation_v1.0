@@ -94,7 +94,7 @@ class ProposalController(
         try {
             val order = OrderReference(request.orderId)
             val driver = DriverReference(request.driverId)
-            val created = proposalApplicationService.handle(ProposeDriverCommand(order, driver))
+            val created = proposalApplicationService.handle(ProposeDriverCommand(order, driver, request.isTest))
             ResponseEntity.status(HttpStatus.CREATED).body(created.proposal.toResponse())
         } catch (ex: IllegalArgumentException) {
             ResponseEntity.badRequest().build()
@@ -237,6 +237,7 @@ class ProposalController(
             statedPrice,
             createdAt?.toString(),
             respondedAt?.toString(),
-            statedEtaMinutes
+            statedEtaMinutes,
+            isTest
         )
 }

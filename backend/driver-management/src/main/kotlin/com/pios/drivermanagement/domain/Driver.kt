@@ -26,12 +26,22 @@ import java.time.Instant
  * every existing positional call site keeps compiling. `null` for every
  * driver created before this field existed (`V4__add_driver_created_at.sql`'s
  * own disclosed limitation) and for any caller that still omits it.
+ *
+ * [isTest] (Owner Control Center test/production data separation,
+ * 2026-08-17) marks a driver deliberately created by an automated or
+ * manual technical verification rather than a real pilot participant.
+ * Defaults to `false` so every existing caller (every real driver's own
+ * registration) is unaffected; only a caller that explicitly opts in
+ * produces `true`. Set once, at creation, and never changes afterward —
+ * the same immutability every other optional field on this class already
+ * has.
  */
 class Driver(
     val id: DriverId,
     availability: Availability = Availability.UNAVAILABLE,
     val displayName: String? = null,
-    val createdAt: Instant? = null
+    val createdAt: Instant? = null,
+    val isTest: Boolean = false
 ) {
     var availability: Availability = availability
         private set

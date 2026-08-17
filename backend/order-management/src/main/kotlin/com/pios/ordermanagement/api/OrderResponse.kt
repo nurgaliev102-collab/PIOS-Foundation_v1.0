@@ -41,5 +41,6 @@ data class OrderResponse(
     val passengerName: String?,
     val createdAt: String?,
     val pickupAddress: String?,
-    val requestedPickupAt: String? = null
+    val requestedPickupAt: String? = null,
+    val isTest: Boolean = false
 )

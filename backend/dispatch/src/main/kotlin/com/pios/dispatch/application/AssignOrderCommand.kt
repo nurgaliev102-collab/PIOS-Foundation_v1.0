@@ -16,5 +16,6 @@ import com.pios.dispatch.domain.OrderReference
  */
 data class AssignOrderCommand(
     val order: OrderReference,
-    val driver: DriverReference
+    val driver: DriverReference,
+    val isTest: Boolean = false
 )

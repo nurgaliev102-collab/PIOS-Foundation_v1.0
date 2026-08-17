@@ -35,5 +35,6 @@ data class ProposalResponse(
     val statedPrice: String? = null,
     val createdAt: String? = null,
     val respondedAt: String? = null,
-    val statedEtaMinutes: Int? = null
+    val statedEtaMinutes: Int? = null,
+    val isTest: Boolean = false
 )

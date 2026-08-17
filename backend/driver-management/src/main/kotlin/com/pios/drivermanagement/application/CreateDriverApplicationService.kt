@@ -50,7 +50,7 @@ class CreateDriverApplicationService(
         if (driverRepository.findById(command.driverId) != null) {
             throw DriverAlreadyExistsException(command.driverId)
         }
-        val driver = Driver(command.driverId, displayName = command.displayName, createdAt = Instant.now())
+        val driver = Driver(command.driverId, displayName = command.displayName, createdAt = Instant.now(), isTest = command.isTest)
         driverRepository.save(driver)
         driver
     }

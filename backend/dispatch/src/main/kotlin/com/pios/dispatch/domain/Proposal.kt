@@ -36,12 +36,23 @@ import java.util.UUID
  * ([com.pios.dispatch.persistence.PostgreSQLProposalRepository]'s own
  * reflective constructor lookup is widened to match, per that class's own
  * KDoc on this constructor being reflectively invoked).
+ *
+ * [isTest] (Owner Control Center test/production data separation,
+ * 2026-08-17) marks a proposal deliberately created by an automated or
+ * manual technical verification rather than real dispatch activity.
+ * Defaults to `false`. Set once, at [propose], and never changes
+ * afterward. **Not** derived from whether [order]/[driver] happen to
+ * reference a test order or test driver — Dispatch does not own that
+ * information (reference-not-ownership, ADR-005/009/019) and structurally
+ * cannot read it — it is only ever the caller's own explicit declaration
+ * at proposal-creation time.
  */
 class Proposal private constructor(
     val id: ProposalId,
     val order: OrderReference,
     val driver: DriverReference,
-    val createdAt: Instant? = null
+    val createdAt: Instant? = null,
+    val isTest: Boolean = false
 ) {
     var status: ProposalStatus = ProposalStatus.OPEN
         private set
@@ -219,7 +230,8 @@ class Proposal private constructor(
         fun propose(
             order: OrderReference,
             driver: DriverReference,
-            existingProposals: Collection<Proposal> = emptyList()
+            existingProposals: Collection<Proposal> = emptyList(),
+            isTest: Boolean = false
         ): ProposalCreated {
             check(existingProposals.none { it.order == order && it.status == ProposalStatus.OPEN }) {
                 "Order ${order.orderId} already has an open proposal"
@@ -228,7 +240,8 @@ class Proposal private constructor(
                 id = ProposalId(UUID.randomUUID().toString()),
                 order = order,
                 driver = driver,
-                createdAt = Instant.now()
+                createdAt = Instant.now(),
+                isTest = isTest
             )
             val event = OrderProposed(orderId = order, driverId = driver)
             return ProposalCreated(proposal = proposal, event = event)

@@ -45,5 +45,6 @@ data class SubmitOrderRequest(
     val destination: String? = null,
     val passengerName: String? = null,
     val pickupAddress: String? = null,
-    val requestedPickupAt: String? = null
+    val requestedPickupAt: String? = null,
+    val isTest: Boolean = false
 )

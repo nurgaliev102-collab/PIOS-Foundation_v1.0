@@ -26,5 +26,6 @@ data class AssignmentResponse(
     val statusChangedAt: String?,
     val arrivedAt: String? = null,
     val startedAt: String? = null,
-    val completedAt: String? = null
+    val completedAt: String? = null,
+    val isTest: Boolean = false
 )

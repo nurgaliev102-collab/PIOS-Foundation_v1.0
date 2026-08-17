@@ -104,4 +104,28 @@ class PostgreSQLAssignmentRepositoryTest {
         assertNull(reloaded?.startedAt)
         assertNull(reloaded?.completedAt)
     }
+
+    // --- isTest (Owner Control Center test/production data separation, 2026-08-17) ---
+
+    @Test
+    fun `isTest true round-trips through PostgreSQL`() {
+        val created = Assignment.create(
+            OrderReference("postgres-order-is-test-true"),
+            DriverReference("postgres-driver-is-test-true"),
+            isTest = true
+        )
+
+        repository.save(created.assignment)
+
+        assertEquals(true, repository.findById(created.assignment.id)?.isTest)
+    }
+
+    @Test
+    fun `an assignment saved without isTest loads back with isTest false`() {
+        val created = Assignment.create(OrderReference("postgres-order-is-test-default"), DriverReference("postgres-driver-is-test-default"))
+
+        repository.save(created.assignment)
+
+        assertEquals(false, repository.findById(created.assignment.id)?.isTest)
+    }
 }
