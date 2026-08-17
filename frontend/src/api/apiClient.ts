@@ -64,6 +64,18 @@ export class ApiError extends Error {
  * `Response.json()` throws on an empty body, so a 204 is returned as
  * `undefined` without attempting to parse one; every existing caller is
  * unaffected, since none of them receives 204 today.
+ *
+ * 2026-08-17: the non-2xx branch drains the response body before throwing,
+ * same reasoning as `healthPoll.ts`'s own fix for the same issue there — an
+ * unread body is what makes Chrome's Network panel label a request
+ * "(canceled)"/`net::ERR_ABORTED` even though it resolved with a real
+ * status and was handled correctly, which cost real time to rule out
+ * during that incident's own diagnosis. Every caller of [request] (every
+ * screen that hits a real, expected error status — a 404, a 403 from an
+ * IDOR check, a stale owner credential) shares this same cosmetic
+ * confusion; draining here fixes it in one place rather than at each call
+ * site. [ApiError] is still thrown with the same [status]/[path] on every
+ * caller, unchanged.
  */
 export async function request<T>(path: string, init?: RequestInit & { baseUrl?: string }): Promise<T> {
   const { baseUrl, ...fetchInit } = init ?? {}
@@ -75,6 +87,7 @@ export async function request<T>(path: string, init?: RequestInit & { baseUrl?: 
     },
   })
   if (!response.ok) {
+    await response.text().catch(() => undefined)
     throw new ApiError(response.status, path)
   }
   if (response.status === 204) {

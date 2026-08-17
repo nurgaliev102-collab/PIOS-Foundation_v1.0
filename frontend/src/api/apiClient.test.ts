@@ -37,4 +37,17 @@ describe('request', () => {
 
     await expect(request('/v1/example')).rejects.toBeInstanceOf(ApiError)
   })
+
+  // 2026-08-17: an unread body on a non-2xx response is what makes Chrome's
+  // Network panel label an already-handled, already-resolved request
+  // "(canceled)" -- indistinguishable at a glance from a genuine failure.
+  // Draining it here (mirroring healthPoll.ts's own fix) removes that
+  // cosmetic confusion for every caller of `request`.
+  it('drains the body on a non-2xx status before throwing', async () => {
+    const textSpy = vi.fn().mockResolvedValue('{"error":"not found"}')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, text: textSpy } as unknown as Response))
+
+    await expect(request('/v1/example')).rejects.toBeInstanceOf(ApiError)
+    expect(textSpy).toHaveBeenCalledTimes(1)
+  })
 })
