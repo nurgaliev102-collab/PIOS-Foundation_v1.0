@@ -5,6 +5,7 @@ import { LoginScreen } from './LoginScreen'
 import { StatusCard } from './StatusCard'
 import { TodayCard } from './TodayCard'
 import { EventFeed } from './EventFeed'
+import { AIAnalystCard } from './AIAnalystCard'
 import { pollAllModuleHealth, type ModuleHealth } from './healthPoll'
 import { loadTodaySnapshot, type TodaySnapshot } from './todayData'
 import { evaluateOwnerStatus } from './statusEvaluation'
@@ -173,6 +174,7 @@ export function OwnerControlCenter() {
         <>
           <TodayCard counters={today.counters} />
           <EventFeed events={today.events} />
+          <AIAnalystCard credential={credential} healths={healths} />
         </>
       )}
 

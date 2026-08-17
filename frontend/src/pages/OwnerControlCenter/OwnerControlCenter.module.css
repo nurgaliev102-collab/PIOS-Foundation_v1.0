@@ -162,6 +162,90 @@
   border-radius: 8px;
 }
 
+/* --- AI Analyst card --- */
+
+.aiAnalystCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.125rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.aiError {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #dc2626;
+}
+
+.aiResult {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.aiStatusBadge {
+  display: inline-block;
+  align-self: flex-start;
+  margin: 0;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  border-radius: 999px;
+}
+
+.aiStatusOk {
+  background: #16a34a;
+}
+
+.aiStatusAttention {
+  background: #ca8a04;
+}
+
+.aiStatusCritical {
+  background: #dc2626;
+}
+
+.aiStatusUnknown {
+  background: #94a3b8;
+}
+
+.aiSummary {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.aiSubheading {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.aiList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0 0 0 1.125rem;
+  font-size: 0.9375rem;
+  color: #334155;
+}
+
+.aiTimestamp {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  color: #64748b;
+}
+
 /* --- Actions --- */
 
 .actions {
