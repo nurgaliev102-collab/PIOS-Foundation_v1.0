@@ -12,6 +12,9 @@
   <!-- The application already writes its own rolling file log (T-1, ADR-049
        Decision 5) via Logback. WinSW's own wrapper log is disabled so there
        is exactly one log file per module, not two divergent copies. -->
+  <env name="PIOS_OWNER_USERNAME" value="__PIOS_OWNER_USERNAME__"/>
+  <env name="PIOS_OWNER_PASSWORD_HASH" value="__PIOS_OWNER_PASSWORD_HASH__"/>
+  <env name="PIOS_OWNER_PASSWORD_SALT" value="__PIOS_OWNER_PASSWORD_SALT__"/>
   <log mode="none"/>
   <onfailure action="restart" delay="30 sec"/>
   <onfailure action="restart" delay="60 sec"/>

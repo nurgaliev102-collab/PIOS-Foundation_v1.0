@@ -8,6 +8,9 @@
   <!-- See LOG_DIRECTORY_POLICY.md: working directory must match bootRun's
        own default so the T-1 log path keeps resolving correctly. -->
   <env name="PIOS_PILOT_FRONTEND_ORIGIN" value="https://home-pc.tail385153.ts.net"/>
+  <env name="PIOS_OWNER_USERNAME" value="__PIOS_OWNER_USERNAME__"/>
+  <env name="PIOS_OWNER_PASSWORD_HASH" value="__PIOS_OWNER_PASSWORD_HASH__"/>
+  <env name="PIOS_OWNER_PASSWORD_SALT" value="__PIOS_OWNER_PASSWORD_SALT__"/>
   <log mode="none"/>
   <onfailure action="restart" delay="30 sec"/>
   <onfailure action="restart" delay="60 sec"/>

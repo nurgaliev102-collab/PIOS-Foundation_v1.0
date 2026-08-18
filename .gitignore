@@ -246,6 +246,25 @@ yarn-error.log*
 # configuration next to it is committed.
 windows-services/**/*.exe
 
+# ai-advisor's WinSW config carries the shared ADR-044 owner credential
+# (username/password-hash/password-salt) and the Qwen API key as literal
+# <env> values -- machine-local secret material, same reasoning as the
+# cloudflared credentials below. Never enters version control. The five
+# domain modules' own WinSW configs carry the same shared owner credential
+# (username/password-hash/password-salt only, no Qwen key) for the same
+# reason.
+#
+# These six real .xml files are GENERATED artifacts (windows-services/
+# generate-service-xml.ps1, run against the committed *.xml.template next to
+# each one) -- not hand-maintained. Only the .template carries the structure
+# in git; these stay local-only and gitignored, by design, forever.
+windows-services/ai-advisor/pios-ai-advisor.xml
+windows-services/dispatch/pios-dispatch.xml
+windows-services/driver-management/pios-driver-management.xml
+windows-services/identity/pios-identity.xml
+windows-services/order-management/pios-order-management.xml
+windows-services/passenger-experience/pios-passenger-experience.xml
+
 # Cloudflare named tunnel (docs/PIOS_NAMED_TUNNEL_DEPLOYMENT.md): config.yml
 # and the tunnel credentials JSON are created once, by hand, on the machine
 # that runs the tunnel. The credentials file is the tunnel's private key

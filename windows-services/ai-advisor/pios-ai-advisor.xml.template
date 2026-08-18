@@ -9,6 +9,12 @@
        way platform-ops still is): this service writes its own rolling file
        log (../logs/ai-advisor.log, application.yml), so WinSW's own wrapper
        log would only duplicate it. -->
+  <env name="PIOS_OWNER_USERNAME" value="__PIOS_OWNER_USERNAME__"/>
+  <env name="PIOS_OWNER_PASSWORD_HASH" value="__PIOS_OWNER_PASSWORD_HASH__"/>
+  <env name="PIOS_OWNER_PASSWORD_SALT" value="__PIOS_OWNER_PASSWORD_SALT__"/>
+  <env name="PIOS_AI_ADVISOR_PROVIDER" value="__PIOS_AI_ADVISOR_PROVIDER__"/>
+  <env name="PIOS_AI_ADVISOR_QWEN_MODEL" value="__PIOS_AI_ADVISOR_QWEN_MODEL__"/>
+  <env name="PIOS_AI_ADVISOR_QWEN_API_KEY" value="__PIOS_AI_ADVISOR_QWEN_API_KEY__"/>
   <log mode="none"/>
   <onfailure action="restart" delay="30 sec"/>
   <onfailure action="restart" delay="60 sec"/>
