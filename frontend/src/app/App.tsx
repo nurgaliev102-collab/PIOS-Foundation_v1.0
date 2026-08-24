@@ -1,15 +1,16 @@
 import { useRoutes } from 'react-router-dom'
 import { routes } from './routes'
+import { PushPermissionPrompt } from '../features/push/PushPermissionPrompt'
 
-/**
- * Application shell — Sprint 0: Frontend Foundation.
- *
- * Composes routing only. No providers, state management, or business
- * logic are added here until a real feature actually needs one —
- * consistent with this sprint's own "no business functionality" scope.
- */
+/** Application shell with the explicit, opt-in Web Push control. */
 function App() {
-  return useRoutes(routes)
+  const routedElement = useRoutes(routes)
+  return (
+    <>
+      {routedElement}
+      <PushPermissionPrompt />
+    </>
+  )
 }
 
 export default App
