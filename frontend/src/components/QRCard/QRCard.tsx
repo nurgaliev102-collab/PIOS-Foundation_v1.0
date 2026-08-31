@@ -23,6 +23,15 @@ export interface QRCardProps {
    * only renders it.
    */
   feedback?: string | null
+  /**
+   * PIOS Install v1: this component's own label defaulted to "Ссылка для
+   * клиентов" (Driver Home's own invitation-link caption) since that was
+   * its only caller until now — wrong copy for `InstallPIOS.tsx`'s desktop
+   * fallback, where the code points at `/help/install`, not an invitation.
+   * Optional, defaulting to the original text unchanged, so Driver Home's
+   * own existing usage is unaffected.
+   */
+  label?: string
 }
 
 /**
@@ -36,7 +45,7 @@ export interface QRCardProps {
  * network call — nothing about the invitation ever leaves the device to
  * produce it). Regenerates whenever [invitationLink] changes.
  */
-export function QRCard({ invitationLink, linkTo, onCopy, onShare, feedback }: QRCardProps) {
+export function QRCard({ invitationLink, linkTo, onCopy, onShare, feedback, label = 'Ссылка для клиентов' }: QRCardProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
 
   useEffect(() => {
@@ -65,7 +74,7 @@ export function QRCard({ invitationLink, linkTo, onCopy, onShare, feedback }: QR
         {qrDataUrl && <img src={qrDataUrl} alt="" className={styles.qrImage} />}
       </div>
 
-      <p className={styles.linkLabel}>Ссылка для клиентов</p>
+      <p className={styles.linkLabel}>{label}</p>
       {linkTo ? (
         <Link to={linkTo} className={styles.link}>
           {invitationLink}

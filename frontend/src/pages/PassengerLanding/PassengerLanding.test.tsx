@@ -186,4 +186,46 @@ describe('PassengerLanding', () => {
     // Still on the confirmation screen -- never silently treated as success.
     expect(screen.getByText('Добавить Ахмад в круг доверия?')).toBeInTheDocument()
   })
+
+  // --- PIOS Install v1 (Product Owner exception) ---
+
+  it('shows "Установить PIOS" without blocking or replacing registration', async () => {
+    localStorage.setItem('pios.onboarding.passenger-seen', 'true')
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderAt('driver-1')
+
+    await screen.findByText('👋 Вас пригласил Иван')
+    expect(screen.getAllByText('Установить PIOS').length).toBeGreaterThan(0)
+    // The primary registration action is still present and unobstructed.
+    expect(screen.getByRole('button', { name: 'Начать' })).toBeInTheDocument()
+  })
+
+  it('opens the install overlay, and "Позже" returns to the real invited screen without registering anything', async () => {
+    localStorage.setItem('pios.onboarding.passenger-seen', 'true')
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderAt('driver-1')
+    await screen.findByText('👋 Вас пригласил Иван')
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Установить PIOS' })[0])
+    expect(await screen.findByRole('button', { name: 'Позже' })).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Позже' }))
+    expect(screen.queryByRole('button', { name: 'Позже' })).not.toBeInTheDocument()
+    expect(screen.getByText('👋 Вас пригласил Иван')).toBeInTheDocument()
+    // No account-related request was ever made for this.
+    expect(mockedRequest.mock.calls.length).toBe(1)
+  })
+
+  it('chains into install once, right after this passenger\'s very first onboarding completion', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('Вас пригласил Артур')).toBeInTheDocument() // onboarding auto-shown
+    await userEvent.click(screen.getByText('Пропустить'))
+
+    expect(await screen.findByRole('button', { name: 'Позже' })).toBeInTheDocument() // install chained in next
+  })
 })

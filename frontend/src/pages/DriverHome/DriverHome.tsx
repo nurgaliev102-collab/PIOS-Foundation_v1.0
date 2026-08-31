@@ -9,6 +9,10 @@ import { ApiError, request } from '../../api/apiClient'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
 import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
 import { LocalInvitationProvider } from '../../identity/InvitationProvider'
+import { DriverOnboarding } from './DriverOnboarding'
+import { hasSeenDriverOnboarding, markDriverOnboardingSeen } from '../../persistence/localOnboardingSeen'
+import { InstallPIOS, isStandalone } from '../../features/install'
+import { hasSeenInstallHelp } from '../../persistence/localInstallSeen'
 import styles from './DriverHome.module.css'
 
 const MIN_PASSWORD_LENGTH = 8
@@ -361,7 +365,43 @@ export function DriverHome() {
   const [assignments, setAssignments] = useState<Record<string, AssignmentInfo>>({})
   const [assignmentActions, setAssignmentActions] = useState<Record<string, AssignmentActionStatus>>({})
 
+  // PIOS Onboarding v1 (Product Owner exception, PIOS_PRODUCT_EVIDENCE.md
+  // gate): shown once, automatically, the first time this driver's real
+  // profile finishes loading -- not during the auth/name-entry steps above,
+  // which have their own explanatory copy already. `hasSeenDriverOnboarding`
+  // is only consulted here, at the point of first render; replay is a
+  // manual, explicit action (see the "Как это работает" control below), not
+  // re-triggered by this effect.
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const hasAutoShownOnboarding = useRef(false)
+
+  // PIOS Install v1 (Product Owner exception, same gate/note as onboarding
+  // above): a separate overlay and a separate "seen" flag
+  // (`localInstallSeen.ts`, never `localOnboardingSeen.ts` — Section 14).
+  // Chained once after this driver's very first onboarding completion
+  // (Section 10's own "правильная последовательность"), never on a manual
+  // "Как это работает" replay — [handleOnboardingDismiss] below only
+  // chains when `hasSeenDriverOnboarding()` was still false the moment
+  // dismiss fired, which is true only the first time ever.
+  const [showInstall, setShowInstall] = useState(false)
+
   const driverId = identity?.driverId ?? null
+
+  useEffect(() => {
+    if (status === 'ready' && driver && !hasAutoShownOnboarding.current && !hasSeenDriverOnboarding()) {
+      hasAutoShownOnboarding.current = true
+      setShowOnboarding(true)
+    }
+  }, [status, driver])
+
+  function handleOnboardingDismiss() {
+    const isFirstOnboarding = !hasSeenDriverOnboarding()
+    markDriverOnboardingSeen()
+    setShowOnboarding(false)
+    if (isFirstOnboarding && !hasSeenInstallHelp() && !isStandalone()) {
+      setShowInstall(true)
+    }
+  }
 
   // Sprint 2 (Identity MVP): runs once, on mount only — re-entry always
   // re-confirms this device's own identity against the real backend
@@ -987,6 +1027,10 @@ export function DriverHome() {
                 Coordinator.tsx already gives its own section titles. */}
             <h1 className={styles.pageTitle}>Мой бизнес</h1>
 
+            <button type="button" className={styles.linkAction} onClick={() => setShowOnboarding(true)}>
+              Как это работает
+            </button>
+
             <section className={styles.availabilityCard}>
               <p className={styles.availabilityTitle}>
                 {driver.availability === 'AVAILABLE' ? '🟢 Я на линии' : '🔴 Сегодня не работаю'}
@@ -1046,6 +1090,19 @@ export function DriverHome() {
               feedback={feedback}
             />
             <p className={styles.hint}>Отправьте эту ссылку клиенту — он сможет заказать поездку прямо у вас.</p>
+
+            {/* PIOS Install v1 (Product Owner exception): a separate,
+                additive card -- never replaces "Как это работает" above,
+                which stays the onboarding-replay control. Hidden once PIOS
+                is already running installed (`isStandalone()`) -- nothing
+                to offer a driver who already has it. */}
+            {!isStandalone() && (
+              <section className={styles.installCard}>
+                <p className={styles.growthTitle}>PIOS всегда под рукой</p>
+                <p className={styles.installCardText}>Добавьте PIOS на экран телефона.</p>
+                <ActionButton label="Установить PIOS" variant="secondary" onClick={() => setShowInstall(true)} />
+              </section>
+            )}
 
             {/* Sprint "My Business + Circle of Trust", journey item 8 --
                 "Мои пассажиры", not "Пассажиры PIOS" (Section 14 of the
@@ -1254,6 +1311,10 @@ export function DriverHome() {
           Выйти
         </button>
       </main>
+      {showOnboarding && (
+        <DriverOnboarding onComplete={handleOnboardingDismiss} onSkip={handleOnboardingDismiss} />
+      )}
+      {showInstall && <InstallPIOS onClose={() => setShowInstall(false)} />}
     </div>
   )
 }

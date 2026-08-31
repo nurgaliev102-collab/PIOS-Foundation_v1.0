@@ -206,4 +206,72 @@ describe('DriverHome', () => {
     await screen.findByText('Куда: Аэропорт Уфа')
     expect(screen.queryByText(/Предварительный заказ/)).not.toBeInTheDocument()
   })
+
+  // --- PIOS Install v1 (Product Owner exception) ---
+
+  it('shows the "PIOS всегда под рукой" install card alongside, never instead of, "Как это работает"', async () => {
+    localStorage.setItem('pios.onboarding.driver-seen', 'true')
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
+
+    renderDriverHome()
+
+    await screen.findByText('Мой бизнес')
+    expect(screen.getByText('Как это работает')).toBeInTheDocument()
+    expect(screen.getByText('PIOS всегда под рукой')).toBeInTheDocument()
+    expect(screen.getByText('Добавьте PIOS на экран телефона.')).toBeInTheDocument()
+  })
+
+  it('opens the install overlay from the card, and closes it back to the real screen', async () => {
+    localStorage.setItem('pios.onboarding.driver-seen', 'true')
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderDriverHome()
+    await screen.findByText('Мой бизнес')
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Установить PIOS' })[0])
+    expect(await screen.findByRole('button', { name: 'Закрыть' })).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Закрыть' }))
+    expect(screen.queryByRole('button', { name: 'Закрыть' })).not.toBeInTheDocument()
+    expect(screen.getByText('Мой бизнес')).toBeInTheDocument()
+  })
+
+  it('chains into the install overlay once, right after this driver\'s very first onboarding completion', async () => {
+    // Neither onboarding nor install-help has been seen yet -- the very first ready render.
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderDriverHome()
+
+    expect(await screen.findByText('Как работает PIOS')).toBeInTheDocument() // onboarding auto-shown
+    await userEvent.click(screen.getByText('Пропустить'))
+
+    expect(await screen.findByRole('button', { name: 'Закрыть' })).toBeInTheDocument() // install chained in next
+  })
+
+  it('does not chain into install after a manual "Как это работает" replay (only after the true first time)', async () => {
+    localStorage.setItem('pios.onboarding.driver-seen', 'true')
+    localStorage.setItem('pios.install.help-seen', 'true')
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderDriverHome()
+    await screen.findByText('Мой бизнес')
+
+    await userEvent.click(screen.getByText('Как это работает'))
+    expect(await screen.findByText('Как работает PIOS')).toBeInTheDocument()
+    await userEvent.click(screen.getByText('Пропустить'))
+
+    expect(screen.queryByRole('button', { name: 'Закрыть' })).not.toBeInTheDocument()
+  })
 })

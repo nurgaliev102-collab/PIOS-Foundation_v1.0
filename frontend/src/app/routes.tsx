@@ -5,6 +5,7 @@ import { RideRequest } from '../pages/RideRequest'
 import { Coordinator } from '../pages/Coordinator'
 import { NetworkTest } from '../pages/NetworkTest'
 import { OwnerControlCenter } from '../pages/OwnerControlCenter'
+import { InstallHelp } from '../pages/InstallHelp'
 import { NotFound } from '../pages/NotFound'
 
 /**
@@ -34,6 +35,14 @@ export const routes: RouteObject[] = [
   {
     path: '/network-test',
     element: <NetworkTest />,
+  },
+  {
+    // PIOS Install v1 (Product Owner exception): public, unauthenticated
+    // by design (Section 7) — the one link an owner/driver can send
+    // through Telegram/WhatsApp/SMS to someone with no PIOS session on
+    // this device at all yet. See `InstallHelp.tsx`'s own KDoc.
+    path: '/help/install',
+    element: <InstallHelp />,
   },
   {
     // ADR-044 Decision 5: gated, but not by the router — OwnerControlCenter

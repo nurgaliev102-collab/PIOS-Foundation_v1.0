@@ -142,6 +142,37 @@
   text-align: left;
 }
 
+/* PIOS Install v1 -- same card shape as .stepsCard just above, so this
+   reads as one more fact about this screen, not a separate widget bolted
+   on. */
+.installCard {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 1rem 1.125rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.installCardTitle {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.installCardText {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
 .stepsTitle {
   margin: 0 0 0.75rem;
   font-size: 1rem;

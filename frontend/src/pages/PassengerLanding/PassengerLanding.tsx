@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Header } from '../../components/Header'
 import { ActionButton } from '../../components/ActionButton'
@@ -10,6 +10,10 @@ import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
 import { saveDisplayName } from '../../persistence/localDisplayName'
 import { ApiError, request } from '../../api/apiClient'
+import { PassengerOnboarding } from './PassengerOnboarding'
+import { hasSeenPassengerOnboarding, markPassengerOnboardingSeen } from '../../persistence/localOnboardingSeen'
+import { InstallPIOS, isStandalone } from '../../features/install'
+import { hasSeenInstallHelp } from '../../persistence/localInstallSeen'
 import styles from './PassengerLanding.module.css'
 
 // ADR-038/ADR-039/ADR-055: today's only IdentityProvider — see its own
@@ -81,6 +85,36 @@ export function PassengerLanding() {
   const [authError, setAuthError] = useState<string | null>(null)
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
   const [addStatus, setAddStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
+
+  // PIOS Onboarding v1 (Product Owner exception, PIOS_PRODUCT_EVIDENCE.md
+  // gate): shown once, automatically, the first time this passenger reaches
+  // the real "invited" screen -- mirrors DriverHome.tsx's own approach.
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const hasAutoShownOnboarding = useRef(false)
+
+  // PIOS Install v1 (Product Owner exception, same gate/note as
+  // `DriverHome.tsx`'s own identical addition): a separate overlay and a
+  // separate "seen" flag (`localInstallSeen.ts`, never
+  // `localOnboardingSeen.ts` — Section 14). Chained once after this
+  // passenger's very first onboarding completion, never on a manual "Как
+  // это работает" replay.
+  const [showInstall, setShowInstall] = useState(false)
+
+  useEffect(() => {
+    if (step === 'invited' && !hasAutoShownOnboarding.current && !hasSeenPassengerOnboarding()) {
+      hasAutoShownOnboarding.current = true
+      setShowOnboarding(true)
+    }
+  }, [step])
+
+  function handleOnboardingDismiss() {
+    const isFirstOnboarding = !hasSeenPassengerOnboarding()
+    markPassengerOnboardingSeen()
+    setShowOnboarding(false)
+    if (isFirstOnboarding && !hasSeenInstallHelp() && !isStandalone()) {
+      setShowInstall(true)
+    }
+  }
 
   // Sprint 6 (Passenger Entry-Path Failure Handling): pulled out of the
   // effect (mirrors DriverHome.tsx's own loadDriver) so the same fetch can
@@ -337,6 +371,9 @@ export function PassengerLanding() {
             <p className={styles.subtitle}>
               Теперь вы можете быстро заказывать поездки через личный профиль {invitation.driverName}.
             </p>
+            <button type="button" className={styles.linkAction} onClick={() => setShowOnboarding(true)}>
+              Как это работает
+            </button>
 
             <section className={styles.stepsCard}>
               <h2 className={styles.stepsTitle}>Как работает PIOS</h2>
@@ -377,6 +414,20 @@ export function PassengerLanding() {
             <div className={styles.actionRow}>
               <ActionButton label="Начать" variant="primary" onClick={handleContinue} />
             </div>
+
+            {/* PIOS Install v1 (Product Owner exception): additive, placed
+                after the primary "Начать" action so it never competes with
+                registration (Section 9's own explicit rule) — hidden once
+                PIOS is already running installed. */}
+            {!isStandalone() && (
+              <section className={styles.installCard}>
+                <p className={styles.installCardTitle}>Установить PIOS</p>
+                <p className={styles.installCardText}>
+                  Добавьте PIOS на экран телефона, чтобы в следующий раз быстро заказать поездку.
+                </p>
+                <ActionButton label="Установить PIOS" variant="secondary" onClick={() => setShowInstall(true)} />
+              </section>
+            )}
 
             <section className={styles.faqSection}>
               {FAQ_ITEMS.map((item) => (
@@ -495,6 +546,10 @@ export function PassengerLanding() {
           </>
         )}
       </main>
+      {showOnboarding && (
+        <PassengerOnboarding onComplete={handleOnboardingDismiss} onSkip={handleOnboardingDismiss} />
+      )}
+      {showInstall && <InstallPIOS onClose={() => setShowInstall(false)} />}
     </div>
   )
 }
