@@ -4,7 +4,9 @@ import com.pios.dispatch.domain.Assignment
 import com.pios.dispatch.domain.AssignmentStatus
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
+import com.pios.dispatch.domain.TripStatus
 import com.pios.dispatch.persistence.InMemoryAssignmentRepository
+import com.pios.dispatch.persistence.InMemoryTripRepository
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -12,7 +14,8 @@ import kotlin.test.assertFailsWith
 class DispatchAssignmentApplicationServiceTest {
 
     private val repository = InMemoryAssignmentRepository()
-    private val service = DispatchAssignmentApplicationService(repository)
+    private val tripRepository = InMemoryTripRepository()
+    private val service = DispatchAssignmentApplicationService(repository, tripRepository = tripRepository)
     private val order = OrderReference("order-1")
     private val driver = DriverReference("driver-1")
 
@@ -97,32 +100,39 @@ class DispatchAssignmentApplicationServiceTest {
         assertEquals(AssignmentStatus.ACCEPTED, repository.findById(assignment.id)?.status)
     }
 
-    // --- Ride lifecycle (ADR-040: Assignment Ride Lifecycle) ---
+    // --- Ride lifecycle (ADR-040: Assignment Ride Lifecycle; converged onto Trip, ADR-063/Task 12) ---
+    //
+    // Ride-progress is now validated and persisted by Trip, not Assignment
+    // (Task 12, Trip Ride-Progress Convergence) -- these three tests assert
+    // against `tripRepository`, not `repository` (Assignment's own repository),
+    // for exactly the status/timestamp fields that moved. Assignment's own
+    // status is proven to stay put (never reaches ARRIVED/IN_PROGRESS/COMPLETED)
+    // in the dedicated convergence test below.
 
     @Test
-    fun `arriving a saved assignment produces an AssignmentArrived event and persists ARRIVED`() {
+    fun `arriving a saved assignment produces an AssignmentArrived event and persists ARRIVED on its trip`() {
         val created = service.handle(AssignOrderCommand(order, driver))
 
         val event = service.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
 
         assertEquals(order, event.orderId)
         assertEquals(driver, event.driverId)
-        assertEquals(AssignmentStatus.ARRIVED, repository.findById(created.assignment.id)?.status)
+        assertEquals(TripStatus.ARRIVED, tripRepository.findByAssignmentId(created.assignment.id)?.status)
     }
 
     @Test
-    fun `starting a saved, arrived assignment produces an AssignmentStarted event and persists IN_PROGRESS`() {
+    fun `starting a saved, arrived assignment produces an AssignmentStarted event and persists IN_PROGRESS on its trip`() {
         val created = service.handle(AssignOrderCommand(order, driver))
         service.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
 
         val event = service.startAssignment(StartAssignmentCommand(created.assignment.id))
 
         assertEquals(order, event.orderId)
-        assertEquals(AssignmentStatus.IN_PROGRESS, repository.findById(created.assignment.id)?.status)
+        assertEquals(TripStatus.IN_PROGRESS, tripRepository.findByAssignmentId(created.assignment.id)?.status)
     }
 
     @Test
-    fun `completing a saved, in-progress assignment produces an AssignmentCompleted event and persists COMPLETED`() {
+    fun `completing a saved, in-progress assignment produces an AssignmentCompleted event and persists COMPLETED on its trip`() {
         val created = service.handle(AssignOrderCommand(order, driver))
         service.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
         service.startAssignment(StartAssignmentCommand(created.assignment.id))
@@ -130,7 +140,7 @@ class DispatchAssignmentApplicationServiceTest {
         val event = service.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
 
         assertEquals(order, event.orderId)
-        assertEquals(AssignmentStatus.COMPLETED, repository.findById(created.assignment.id)?.status)
+        assertEquals(TripStatus.COMPLETED, tripRepository.findByAssignmentId(created.assignment.id)?.status)
     }
 
     @Test
@@ -140,5 +150,16 @@ class DispatchAssignmentApplicationServiceTest {
         assertFailsWith<IllegalStateException> {
             service.startAssignment(StartAssignmentCommand(created.assignment.id))
         }
+    }
+
+    @Test
+    fun `the full ride lifecycle never changes Assignment's own status -- Trip alone owns ride progress`() {
+        val created = service.handle(AssignOrderCommand(order, driver))
+
+        service.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
+        service.startAssignment(StartAssignmentCommand(created.assignment.id))
+        service.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
+
+        assertEquals(AssignmentStatus.CREATED, repository.findById(created.assignment.id)?.status)
     }
 }

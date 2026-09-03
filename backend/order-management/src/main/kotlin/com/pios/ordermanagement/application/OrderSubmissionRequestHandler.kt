@@ -51,7 +51,8 @@ class OrderSubmissionRequestHandler(
         passengerName: String? = null,
         pickupAddress: String? = null,
         requestedPickupAt: String? = null,
-        isTest: Boolean = false
+        isTest: Boolean = false,
+        explicitDriverIntent: Boolean = false
     ): String {
         val submitted = orderLifecycleApplicationService.submitOrder(
             SubmitOrderCommand(
@@ -60,7 +61,8 @@ class OrderSubmissionRequestHandler(
                 passengerName = passengerName,
                 pickupAddress = pickupAddress,
                 requestedPickupAt = parseRequestedPickupAt(requestedPickupAt),
-                isTest = isTest
+                isTest = isTest,
+                explicitDriverIntent = explicitDriverIntent
             )
         )
         return submitted.order.id.value

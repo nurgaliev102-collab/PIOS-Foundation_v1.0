@@ -8,6 +8,17 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration/passengerexperience
+  # Task 14 (First Refusal Foundation): this module's first-ever RabbitMQ
+  # connection -- mirrors dispatch's own identical block exactly (same
+  # broker instance, same default vhost `/` in production, per the
+  # pre-existing, disclosed, not-fixed-here condition already tracked in
+  # docs/PIOS_TAXI_ARCHITECTURE_RATIFICATION.md Section 6 item 3).
+  rabbitmq:
+    host: 127.0.0.1
+    port: 5672
+    username: guest
+    password: guest
+    publisher-confirm-type: correlated
 
 server:
   port: 8082

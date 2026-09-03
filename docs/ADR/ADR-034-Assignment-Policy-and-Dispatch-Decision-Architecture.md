@@ -47,6 +47,8 @@ What architectural boundary governs the eventual assignment decision's inputs, a
 **Future candidate inputs** — plausible, but not ratified by any approved document; noted, not decided:
 
 - **Personal Client Relationship** — PRODUCT_FOUNDATION.md Section 5 names "supporting durable relationships between drivers and recurring passengers or customers" as a product-philosophy element, and DOMAIN_MODEL.md Section 5 catalogs Personal Client Relationship as an entity. No document attributes this relationship a role in the assignment decision specifically.
+
+  **Partially promoted, narrowly, as of 2026-09-03 — historical text above preserved, not deleted.** [ADR-062: Primary Driver / First Refusal — Passenger Experience → Dispatch Contract](ADR-062-Primary-Driver-First-Refusal-Passenger-Experience-Dispatch-Contract.md) (Accepted, Task 10B) ratifies Personal Client Relationship as an input to Dispatch's behavior for **one specific, binary purpose only**: whether a passenger's Primary Driver receives first refusal on a new order, before that order falls through to normal matching. This is a **narrow promotion out of this Future-candidate tier, not a general one**, and it must not be read as authorizing Personal Client Relationship for the *assignment decision itself* (Part 3 below, the Assignment Policy port) or as any weighted/ranking input — both remain exactly as undecided as before this ADR, per `PRODUCT_DECISION_DISPATCH_PHILOSOPHY.md` Section 4/8 and `PRODUCT_DECISION_FAIR_OPPORTUNITY_POLICY.md` Section 6, neither of which `ADR-062` touches. The distinction that matters: First Refusal is a pre-Assignment-Policy routing courtesy, evaluated once, binary, never a comparison among eligible drivers; a future Assignment Policy input would be a different, still entirely open, question.
 - **Any Driver Management-owned information beyond availability** (standing, participation) — would require both a new INTERFACE_CONTRACTS.md contract and a Driver Management-side decision to expose it, neither of which exists.
 
 **Structurally unsupported** — not yet even a candidate, since no domain model exists to draw it from:
@@ -56,7 +58,7 @@ What architectural boundary governs the eventual assignment decision's inputs, a
 **Forbidden inputs** — excluded by already-ratified ownership and interaction boundaries (ADR-005, ADR-009, ADR-019; INTERFACE_CONTRACTS.md Section 3's exhaustive list of the four currently-justified cross-module relationships):
 
 - Payment or pricing information (Payments).
-- Passenger or Corporate Customer profile data (Passenger Experience — Dispatch has no contract with it at all).
+- Passenger or Corporate Customer **profile** data — name, phone, contact, rating, reputation, or any other social/personal fact (Passenger Experience). **Unaffected by `ADR-062`**: that ADR's own data contract is explicitly limited to two opaque identifiers (a passenger reference and a driver reference) and explicitly forbids sending any of the fields named on this line — see `ADR-062`'s own Context, Decision, and `docs/PIOS_TAXI_ARCHITECTURE_CONTRACT.md` Section 7 ("forbidden fields"). The narrow Primary Driver *relationship signal* promoted above (Future candidate inputs) is not, and must never become, a channel for this still-fully-forbidden profile data.
 - Driver profile, standing, participation, or ranking beyond availability (Driver Management — the contract is availability-only).
 - Notification history (Notifications).
 - Analytics or Insight (Analytics).

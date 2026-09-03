@@ -39,6 +39,13 @@ package com.pios.ordermanagement.api
  * to [java.time.Instant] at the application boundary
  * ([com.pios.ordermanagement.application.OrderSubmissionRequestHandler.handle]);
  * a value that does not parse is a 400.
+ *
+ * [explicitDriverIntent] (Task 15C: First Refusal Contract Completion and
+ * Concurrency Safety) follows the same optional, defaulting-to-`false`
+ * shape — see [com.pios.ordermanagement.domain.Order.explicitDriverIntent]'s
+ * own KDoc. Not sent by any current caller; the field exists so a future
+ * caller that already knows it is about to make an explicit driver
+ * choice for this order can record that fact atomically with submission.
  */
 data class SubmitOrderRequest(
     val passengerReference: String,
@@ -46,5 +53,6 @@ data class SubmitOrderRequest(
     val passengerName: String? = null,
     val pickupAddress: String? = null,
     val requestedPickupAt: String? = null,
-    val isTest: Boolean = false
+    val isTest: Boolean = false,
+    val explicitDriverIntent: Boolean = false
 )

@@ -11,6 +11,7 @@ import com.pios.dispatch.domain.AssignmentId
 import com.pios.dispatch.domain.AssignmentStatus
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
+import com.pios.dispatch.domain.TripStatus
 import org.springframework.jdbc.core.JdbcTemplate
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -27,7 +28,8 @@ import kotlin.test.assertNotNull
 class PostgreSQLAssignmentLifecycleTest {
 
     private val repository = PostgreSQLAssignmentRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
-    private val service = DispatchAssignmentApplicationService(repository)
+    private val tripRepository = PostgreSQLTripRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
+    private val service = DispatchAssignmentApplicationService(repository, tripRepository = tripRepository)
 
     @Test
     fun `an assignment created through PostgreSQL can be restored by id and accepted`() {
@@ -46,30 +48,53 @@ class PostgreSQLAssignmentLifecycleTest {
         }
     }
 
-    // --- Ride lifecycle (ADR-040: Assignment Ride Lifecycle) ---
+    // --- Ride lifecycle (ADR-040: Assignment Ride Lifecycle; converged onto Trip, ADR-063/Task 12) ---
     //
     // This is the one test in this module that actually exercises
-    // PostgreSQLAssignmentRepository.reconstruct()'s replayed chain for
-    // IN_PROGRESS/COMPLETED against a real database, not just CREATED or
-    // ACCEPTED -- a bug in that replay (wrong order, wrong precondition,
-    // the persisted status_changed_at not surviving the round trip) would
-    // only be caught here, not by the in-memory variant.
+    // PostgreSQLTripRepository.reconstruct()'s replayed chain for
+    // IN_PROGRESS/COMPLETED against a real database, not just CREATED --
+    // a bug in that replay (wrong order, wrong precondition, the
+    // persisted status_changed_at not surviving the round trip) would
+    // only be caught here, not by the in-memory variant. Reads
+    // [tripRepository], not [repository] (Assignment's own), for exactly
+    // the fields ride-progress convergence moved onto Trip -- Assignment's
+    // own status is separately proven to stay CREATED below.
 
     @Test
-    fun `an assignment can be carried through the full ride lifecycle and restored at each step`() {
+    fun `an assignment can be carried through the full ride lifecycle and its trip restored at each step`() {
         val created = service.handle(
             AssignOrderCommand(OrderReference("postgres-lifecycle-order-2"), DriverReference("postgres-lifecycle-driver-2"))
         )
 
         service.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
-        assertEquals(AssignmentStatus.ARRIVED, repository.findById(created.assignment.id)?.status)
+        assertEquals(TripStatus.ARRIVED, tripRepository.findByAssignmentId(created.assignment.id)?.status)
 
         service.startAssignment(StartAssignmentCommand(created.assignment.id))
-        assertEquals(AssignmentStatus.IN_PROGRESS, repository.findById(created.assignment.id)?.status)
+        assertEquals(TripStatus.IN_PROGRESS, tripRepository.findByAssignmentId(created.assignment.id)?.status)
 
         service.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
-        val final = repository.findById(created.assignment.id)
-        assertEquals(AssignmentStatus.COMPLETED, final?.status)
+        val final = tripRepository.findByAssignmentId(created.assignment.id)
+        assertEquals(TripStatus.COMPLETED, final?.status)
         assertNotNull(final?.statusChangedAt)
+    }
+
+    @Test
+    fun `the full ride lifecycle never changes the assignment's own persisted status in PostgreSQL`() {
+        // Randomized, not a fixed literal like the two tests above (Task 11's
+        // own known, deliberately-not-fixed-at-source test-hygiene finding) --
+        // this is a new test, so it is written correctly from the start
+        // rather than repeating that same latent residual-data risk.
+        val created = service.handle(
+            AssignOrderCommand(
+                OrderReference("postgres-lifecycle-order-3-${java.util.UUID.randomUUID()}"),
+                DriverReference("postgres-lifecycle-driver-3")
+            )
+        )
+
+        service.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
+        service.startAssignment(StartAssignmentCommand(created.assignment.id))
+        service.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
+
+        assertEquals(AssignmentStatus.CREATED, repository.findById(created.assignment.id)?.status)
     }
 }

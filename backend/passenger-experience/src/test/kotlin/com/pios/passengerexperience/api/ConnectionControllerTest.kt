@@ -50,7 +50,7 @@ class ConnectionControllerTest {
         RetrieveConnectionsForDriverHandler(repository),
         RetrieveConnectionsForPassengerHandler(repository, primaryConnectionRepository),
         SetPrimaryConnectionApplicationService(repository, primaryConnectionRepository),
-        RemoveConnectionApplicationService(repository),
+        RemoveConnectionApplicationService(repository, primaryConnectionRepository),
         RetrieveConnectionHandler(repository),
         sessionTokenVerifier
     )

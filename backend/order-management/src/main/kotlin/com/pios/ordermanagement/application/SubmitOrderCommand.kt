@@ -26,6 +26,11 @@ import java.time.Instant
  * Carries [pickupAddress] (Sprint H5: Entrepreneur Working Cycle
  * Integrity), defaulting to `null` for the same reason — see
  * [com.pios.ordermanagement.domain.Order]'s own KDoc.
+ *
+ * Carries [explicitDriverIntent] (Task 15C: First Refusal Contract
+ * Completion and Concurrency Safety), defaulting to `false` — see
+ * [com.pios.ordermanagement.domain.Order.explicitDriverIntent]'s own
+ * KDoc for why this must be knowable atomically at submission time.
  */
 class SubmitOrderCommand(
     val origin: OrderOrigin,
@@ -33,5 +38,6 @@ class SubmitOrderCommand(
     val passengerName: String? = null,
     val pickupAddress: String? = null,
     val requestedPickupAt: Instant? = null,
-    val isTest: Boolean = false
+    val isTest: Boolean = false,
+    val explicitDriverIntent: Boolean = false
 )

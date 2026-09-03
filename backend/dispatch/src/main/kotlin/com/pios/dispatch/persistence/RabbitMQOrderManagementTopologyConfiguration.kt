@@ -10,10 +10,12 @@ import org.springframework.context.annotation.Configuration
 
 /**
  * Dispatch's own consumer-owned RabbitMQ topology for Order Management's
- * `OrderCancelled` (ADR-031; ADR-053, Proposal Resolution on Order
- * Cancellation — Accepted): a queue and dead-letter queue Dispatch alone
- * declares, administers, and binds — never a queue or binding declared
- * by, or shared with, Order Management.
+ * events: originally `OrderCancelled` alone (ADR-031; ADR-053, Proposal
+ * Resolution on Order Cancellation — Accepted), extended by Task 16
+ * (First Refusal Runtime Integration) to also declare a second, dedicated
+ * queue for `OrderSubmitted` (ADR-062). Every queue and dead-letter queue
+ * this class declares is administered by Dispatch alone — never a queue
+ * or binding declared by, or shared with, Order Management.
  *
  * Named distinctly from [RabbitMQTopologyConfiguration] — which declares
  * Dispatch's own consumer topology for Driver Management's events — for
@@ -82,10 +84,53 @@ class RabbitMQOrderManagementTopologyConfiguration {
             .to(orderManagementEventsExchange)
             .with(ORDER_CANCELLED_ROUTING_KEY)
 
+    /**
+     * Task 16 (First Refusal Runtime Integration): a **second**, dedicated
+     * queue and dead-letter queue for `OrderSubmitted` — not a second
+     * binding on [dispatchFromOrderManagementQueue], for the identical
+     * reason that queue is itself already dedicated to `OrderCancelled`
+     * alone (ADR-053 Part 4's own rule, restated in this class's own KDoc
+     * above): [OrderSubmittedFirstRefusalListener] hard-requires
+     * `eventType == "OrderSubmitted"`, so sharing a queue with
+     * [OrderCancelledListener]'s own hard-required `"OrderCancelled"`
+     * would dead-letter every message of whichever kind arrived at the
+     * "wrong" listener.
+     */
+    @Bean
+    fun dispatchFromOrderManagementOrderSubmittedDeadLetterQueue(): Queue =
+        QueueBuilder.durable(ORDER_SUBMITTED_DEAD_LETTER_QUEUE_NAME).build()
+
+    @Bean
+    fun dispatchFromOrderManagementOrderSubmittedQueue(): Queue =
+        QueueBuilder.durable(ORDER_SUBMITTED_QUEUE_NAME)
+            .withArgument("x-dead-letter-exchange", "")
+            .withArgument("x-dead-letter-routing-key", ORDER_SUBMITTED_DEAD_LETTER_QUEUE_NAME)
+            .build()
+
+    /**
+     * Binds only the already-ratified routing key for OrderSubmitted
+     * (verified against Order Management's actual committed publisher,
+     * `OrderLifecycleApplicationService.outboxRecordFor(OrderSubmitted)`:
+     * routing key `"order.submitted"`, unchanged by Task 15C/16's own
+     * additive payload changes) — never a wildcard, for the identical
+     * reason [dispatchFromOrderManagementBinding] above is not one.
+     */
+    @Bean
+    fun dispatchFromOrderManagementOrderSubmittedBinding(
+        dispatchFromOrderManagementOrderSubmittedQueue: Queue,
+        orderManagementEventsExchange: TopicExchange
+    ): Binding =
+        BindingBuilder.bind(dispatchFromOrderManagementOrderSubmittedQueue)
+            .to(orderManagementEventsExchange)
+            .with(ORDER_SUBMITTED_ROUTING_KEY)
+
     companion object {
         const val PRODUCER_EXCHANGE_NAME = "order-management.events"
         const val QUEUE_NAME = "dispatch.from-order-management"
         const val DEAD_LETTER_QUEUE_NAME = "dispatch.from-order-management.dlq"
         const val ORDER_CANCELLED_ROUTING_KEY = "order.cancelled"
+        const val ORDER_SUBMITTED_QUEUE_NAME = "dispatch.from-order-management.order-submitted"
+        const val ORDER_SUBMITTED_DEAD_LETTER_QUEUE_NAME = "dispatch.from-order-management.order-submitted.dlq"
+        const val ORDER_SUBMITTED_ROUTING_KEY = "order.submitted"
     }
 }

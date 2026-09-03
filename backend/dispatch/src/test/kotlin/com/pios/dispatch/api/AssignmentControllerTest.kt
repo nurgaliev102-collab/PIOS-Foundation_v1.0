@@ -5,6 +5,7 @@ import com.pios.dispatch.domain.Assignment
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import com.pios.dispatch.persistence.InMemoryAssignmentRepository
+import com.pios.dispatch.persistence.InMemoryTripRepository
 import org.springframework.http.HttpStatus
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -16,12 +17,19 @@ import kotlin.test.assertTrue
  * [DispatchAssignmentApplicationService]/[InMemoryAssignmentRepository],
  * no Spring MVC context -- mirroring this project's own constructor-based
  * testing convention (Tranche 2: Passenger Experience REST Transport).
+ *
+ * [tripRepository] is shared between [service] and [controller] (Task 12,
+ * Trip Ride-Progress Convergence) -- the two must see the same Trip store,
+ * exactly as the real Spring-wired beans do, or the controller's own
+ * response projection can never observe a ride-progress transition the
+ * service just made.
  */
 class AssignmentControllerTest {
 
     private val repository = InMemoryAssignmentRepository()
-    private val service = DispatchAssignmentApplicationService(repository)
-    private val controller = AssignmentController(service, repository)
+    private val tripRepository = InMemoryTripRepository()
+    private val service = DispatchAssignmentApplicationService(repository, tripRepository = tripRepository)
+    private val controller = AssignmentController(service, repository, tripRepository)
 
     @Test
     fun `assigning an order to a driver returns 201 with a new assignment id and CREATED status`() {

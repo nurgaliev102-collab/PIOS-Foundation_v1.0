@@ -11,6 +11,7 @@ import com.pios.dispatch.domain.AssignmentId
 import com.pios.dispatch.domain.AssignmentStatus
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
+import com.pios.dispatch.domain.TripStatus
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -29,7 +30,8 @@ import kotlin.test.assertFailsWith
 class AssignmentRepositoryLifecycleTest {
 
     private val repository = InMemoryAssignmentRepository()
-    private val service = DispatchAssignmentApplicationService(repository)
+    private val tripRepository = InMemoryTripRepository()
+    private val service = DispatchAssignmentApplicationService(repository, tripRepository = tripRepository)
 
     @Test
     fun `an assignment created and saved can be restored by id and continue to acceptance`() {
@@ -49,17 +51,17 @@ class AssignmentRepositoryLifecycleTest {
         assertEquals(AssignmentId("never-saved"), exception.assignmentId)
     }
 
-    // --- Ride lifecycle (ADR-040: Assignment Ride Lifecycle) ---
+    // --- Ride lifecycle (ADR-040: Assignment Ride Lifecycle; converged onto Trip, ADR-063/Task 12) ---
 
     @Test
-    fun `an assignment can be restored and carried through the full ride lifecycle`() {
+    fun `an assignment can be restored and carried through the full ride lifecycle, recorded on its trip`() {
         val created = service.handle(AssignOrderCommand(OrderReference("order-2"), DriverReference("driver-2")))
 
         service.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
         service.startAssignment(StartAssignmentCommand(created.assignment.id))
         service.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
 
-        assertEquals(AssignmentStatus.COMPLETED, repository.findById(created.assignment.id)?.status)
+        assertEquals(TripStatus.COMPLETED, tripRepository.findByAssignmentId(created.assignment.id)?.status)
     }
 
     @Test

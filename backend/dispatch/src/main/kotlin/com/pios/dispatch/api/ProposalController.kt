@@ -100,6 +100,21 @@ class ProposalController(
             ResponseEntity.badRequest().build()
         } catch (ex: IllegalStateException) {
             ResponseEntity.status(HttpStatus.CONFLICT).build()
+        } catch (ex: org.springframework.dao.DataIntegrityViolationException) {
+            // Task 15C (First Refusal Contract Completion and Concurrency
+            // Safety): `proposals_one_open_per_order` (V14) now enforces,
+            // at the database level, the same "order already has an OPEN
+            // proposal" fact `Proposal.propose`'s own in-memory check
+            // already maps to 409 above -- a genuinely concurrent request
+            // racing another can reach this constraint instead of that
+            // check (the in-memory SELECT ran before the other request's
+            // own INSERT committed). Mapped to the identical status code
+            // this endpoint already documents for "an order that already
+            // has an active proposal" (this class's own KDoc), so this
+            // endpoint's own observable contract is unchanged by the new
+            // constraint existing -- only which of two equivalent causes
+            // produced it.
+            ResponseEntity.status(HttpStatus.CONFLICT).build()
         }
 
     @PostMapping("/{proposalId}/accept")

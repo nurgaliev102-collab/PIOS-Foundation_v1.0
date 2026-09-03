@@ -88,6 +88,29 @@ import java.util.UUID
  * ordinary [OrderStatus.SUBMITTED] order that happens to carry a requested
  * time, so every existing invariant, guard, and lifecycle path applies to
  * it unchanged.
+ *
+ * Task 15C (First Refusal Contract Completion and Concurrency Safety) adds
+ * [explicitDriverIntent] — records, atomically with submission, that the
+ * caller already knows (or is about to act on) a specific driver choice
+ * for this order, so that a future automatic First-Refusal consumer of
+ * [OrderSubmitted] can determine, deterministically and without any
+ * timing assumption, that it must not attempt to propose the passenger's
+ * primary driver for this order at all. This is the *only* point in the
+ * current runtime that can record this fact with a genuine atomicity
+ * guarantee: submission is, by construction, always causally prior to any
+ * processing [OrderSubmitted] itself can ever trigger, so a value set
+ * here can never race a downstream consumer's own read of it — unlike a
+ * flag set at proposal-creation time, which would race exactly the
+ * consumer this fact exists to gate. Defaults to `false` — every existing
+ * caller of [submit] that does not know about this concept continues to
+ * compile and behave unchanged, and `false` is the correct, conservative
+ * default (an order with no known explicit intent remains eligible for
+ * automatic First Refusal, exactly today's implicit behavior). Set once,
+ * at submission, and never changes for the rest of the order's lifecycle,
+ * mirroring every other optional field's own immutability. Carries no
+ * driver identity — Order Management does not own that information — only
+ * the bare fact that one is already spoken for; see [OrderSubmitted]'s own
+ * KDoc for how this crosses the module boundary.
  */
 class Order private constructor(
     val id: OrderId,
@@ -98,7 +121,8 @@ class Order private constructor(
     val createdAt: Instant?,
     val pickupAddress: String?,
     val requestedPickupAt: Instant?,
-    val isTest: Boolean = false
+    val isTest: Boolean = false,
+    val explicitDriverIntent: Boolean = false
 ) {
     var status: OrderStatus = status
         private set
@@ -156,7 +180,8 @@ class Order private constructor(
             passengerName: String? = null,
             pickupAddress: String? = null,
             requestedPickupAt: Instant? = null,
-            isTest: Boolean = false
+            isTest: Boolean = false,
+            explicitDriverIntent: Boolean = false
         ): SubmittedOrder {
             val order = Order(
                 id = OrderId(UUID.randomUUID().toString()),
@@ -167,9 +192,18 @@ class Order private constructor(
                 createdAt = Instant.now(),
                 pickupAddress = pickupAddress,
                 requestedPickupAt = requestedPickupAt,
-                isTest = isTest
+                isTest = isTest,
+                explicitDriverIntent = explicitDriverIntent
             )
-            return SubmittedOrder(order = order, event = OrderSubmitted(orderId = order.id))
+            return SubmittedOrder(
+                order = order,
+                event = OrderSubmitted(
+                    orderId = order.id,
+                    origin = origin,
+                    explicitDriverIntent = explicitDriverIntent,
+                    isTest = isTest
+                )
+            )
         }
     }
 }

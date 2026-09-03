@@ -263,4 +263,50 @@ class OrderTest {
         }
         assertEquals(OrderStatus.COMPLETED, order.status)
     }
+
+    // --- Explicit driver intent (Task 15C: First Refusal Contract Completion and Concurrency Safety) ---
+
+    @Test
+    fun `an order submitted with no explicit driver intent defaults to false, exactly today's implicit behavior`() {
+        val submitted = Order.submit(origin)
+
+        assertEquals(false, submitted.order.explicitDriverIntent)
+        assertEquals(false, submitted.event.explicitDriverIntent)
+    }
+
+    @Test
+    fun `an order submitted with explicit driver intent carries it on both the order and its own event`() {
+        val submitted = Order.submit(origin, explicitDriverIntent = true)
+
+        assertEquals(true, submitted.order.explicitDriverIntent)
+        assertEquals(true, submitted.event.explicitDriverIntent)
+    }
+
+    @Test
+    fun `explicit driver intent is recorded atomically with submission -- it is a constructor-time fact, not settable afterward`() {
+        val submitted = Order.submit(origin, explicitDriverIntent = true)
+
+        // No method on Order exists to set this after construction --
+        // completing or cancelling the order leaves it unchanged, mirroring
+        // origin/destination/passengerName's own already-established
+        // immutability (Order.kt's own KDoc).
+        submitted.order.complete()
+
+        assertEquals(true, submitted.order.explicitDriverIntent)
+    }
+
+    @Test
+    fun `the event's own passenger reference matches the order's own origin`() {
+        val submitted = Order.submit(origin)
+
+        assertEquals(origin, submitted.event.origin)
+    }
+
+    @Test
+    fun `Task 16 -- the event's own isTest matches the order's own isTest`() {
+        val submitted = Order.submit(origin, isTest = true)
+
+        assertEquals(true, submitted.order.isTest)
+        assertEquals(true, submitted.event.isTest)
+    }
 }

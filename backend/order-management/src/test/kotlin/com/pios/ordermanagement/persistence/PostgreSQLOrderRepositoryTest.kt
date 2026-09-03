@@ -41,6 +41,38 @@ class PostgreSQLOrderRepositoryTest {
         assertEquals(origin, loaded?.origin)
     }
 
+    // --- Explicit driver intent (Task 15C: First Refusal Contract Completion and Concurrency Safety) ---
+
+    @Test
+    fun `an order saved with explicit driver intent survives a real round trip through PostgreSQL`() {
+        val submitted = Order.submit(origin, explicitDriverIntent = true)
+
+        repository.save(submitted.order)
+        val loaded = repository.findById(submitted.order.id)
+
+        assertEquals(true, loaded?.explicitDriverIntent)
+    }
+
+    @Test
+    fun `an order saved with no explicit driver intent loads back false, not null or a default placeholder`() {
+        val submitted = Order.submit(origin, explicitDriverIntent = false)
+
+        repository.save(submitted.order)
+        val loaded = repository.findById(submitted.order.id)
+
+        assertEquals(false, loaded?.explicitDriverIntent)
+    }
+
+    @Test
+    fun `explicit driver intent survives a fresh read through a brand new repository instance -- proving real persistence`() {
+        val submitted = Order.submit(origin, explicitDriverIntent = true)
+        repository.save(submitted.order)
+
+        val freshRepository = PostgreSQLOrderRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
+
+        assertEquals(true, freshRepository.findById(submitted.order.id)?.explicitDriverIntent)
+    }
+
     @Test
     fun `loading an id that was never saved returns null`() {
         assertNull(repository.findById(OrderId("postgres-repository-test-never-saved")))

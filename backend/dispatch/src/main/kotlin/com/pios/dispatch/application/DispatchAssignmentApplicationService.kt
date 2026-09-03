@@ -9,6 +9,10 @@ import com.pios.dispatch.domain.AssignmentCreated
 import com.pios.dispatch.domain.AssignmentId
 import com.pios.dispatch.domain.AssignmentStarted
 import com.pios.dispatch.domain.OrderAssigned
+import com.pios.dispatch.domain.Trip
+import com.pios.dispatch.domain.TripArrived
+import com.pios.dispatch.domain.TripCompleted
+import com.pios.dispatch.domain.TripStarted
 import org.springframework.stereotype.Service
 import java.util.UUID
 
@@ -47,13 +51,72 @@ import java.util.UUID
  * the [Assignment] from [assignmentRepository] by id first, proving the
  * aggregate can be saved, loaded back, and continue its own domain
  * operation exactly as it would if it had never left memory.
+ *
+ * ## Trip creation (ADR-063; Task 11, Trip Domain Foundation)
+ *
+ * [handle] and [handleWithinCallerTransaction] each create the connected
+ * [Trip] immediately after the [Assignment] itself, inside the same
+ * [transactionRunner] boundary — the authoritative, corrected (Task 11A)
+ * trigger for Trip's own creation is `OrderAssigned`, i.e. the moment
+ * [Assignment.create] succeeds, not [AssignmentAccepted] (never actually
+ * published by any live production path — see `ADR-063`'s own Status
+ * section) and never a read of [Assignment.status]. Both real production
+ * paths that create an Assignment — [AssignmentController.assignOrder]
+ * (via the self-fetching [handle] overload) and
+ * [ProposalAssignmentOrchestrationService.acceptProposal] (via
+ * [handleWithinCallerTransaction]) — therefore also create a Trip,
+ * without either of those two call sites needing any change themselves.
+ * [tripRepository] defaults to a no-op for the same reason
+ * [outboxRepository]/[transactionRunner] do — existing tests exercising
+ * only Assignment behavior continue to work unmodified.
+ *
+ * ## Ride-progress convergence onto Trip (ADR-063; Task 12, Trip Ride-Progress Convergence)
+ *
+ * [arriveAssignment], [startAssignment] and [completeAssignment] no longer
+ * transition [Assignment] itself — they transition the connected [Trip]
+ * instead, via [tripFor], which is now the sole validator of these three
+ * moves ([Trip.arrive]/[Trip.start]/[Trip.complete]'s own `check()`
+ * preconditions). [Assignment]'s own `arrive`/`start`/`complete` methods,
+ * its `arrivedAt`/`startedAt`/`completedAt` fields, and its `ARRIVED`/
+ * `IN_PROGRESS`/`COMPLETED` [AssignmentStatus] values are **not deleted**
+ * — ADR-063's Decision section calls for their eventual removal, but Task
+ * 12's own Phase 3 instruction is more specific and takes precedence for
+ * this implementation: "Do NOT delete existing Assignment fields ...
+ * Only remove old behavior after proving that no active consumer depends
+ * on it." A live consumer does: `AssignmentController.arrive/start/complete`
+ * are called today by `DriverHome.tsx`'s own `respondToAssignment`, and
+ * `AssignmentStatus.ARRIVED/IN_PROGRESS/COMPLETED` rows already exist in
+ * the pilot's own PostgreSQL data from before this change. Deleting the
+ * fields now would silently strand that historical data. They are
+ * therefore kept, verbatim, simply no longer written to by this service —
+ * a frozen, read-only remnant of pre-Trip history, not a second live
+ * source of truth. `AssignmentTest.kt`'s own direct unit tests of those
+ * methods continue to pass unmodified, since `Assignment.kt` itself is not
+ * touched by this convergence at all.
+ *
+ * [tripFor] self-heals: an [Assignment] saved before Trip existed (or
+ * through any path that predates this wiring) has no connected [Trip] yet
+ * — [tripFor] creates one on first ride-progress action, exactly as
+ * [Trip.create] would have at Assignment-creation time, so a legacy
+ * Assignment can still be carried through its ride lifecycle without
+ * requiring a backfill migration.
+ *
+ * Each transition still also publishes the *original* `Assignment*` outbox
+ * event (`AssignmentArrived`/`AssignmentStarted`/`AssignmentCompleted`,
+ * unchanged `eventType`/routing key), alongside the new `Trip*` one — the
+ * dual-publish migration window ADR-063's own Consequences section
+ * requires, so Order Management's real, already-wired
+ * `AssignmentCompletedListener` (bound to routing key
+ * `assignment.completed`) keeps receiving exactly what it always has,
+ * unmodified, per this task's own Order Management Rule.
  */
 @Service
 class DispatchAssignmentApplicationService(
     private val assignmentRepository: AssignmentRepository,
     private val outboxRepository: OutboxRepository = NoOpOutboxRepository,
     private val transactionRunner: TransactionRunner = NoOpTransactionRunner,
-    private val objectMapper: ObjectMapper = ObjectMapper()
+    private val objectMapper: ObjectMapper = ObjectMapper(),
+    private val tripRepository: TripRepository = NoOpTripRepository
 ) {
 
     fun handle(
@@ -67,6 +130,7 @@ class DispatchAssignmentApplicationService(
         )
         assignmentRepository.save(created.assignment)
         outboxRepository.save(outboxRecordFor(created.assignment.id, created.event))
+        createTripFor(created.assignment)
         created
     }
 
@@ -105,7 +169,25 @@ class DispatchAssignmentApplicationService(
         )
         assignmentRepository.save(created.assignment)
         outboxRepository.save(outboxRecordFor(created.assignment.id, created.event))
+        createTripFor(created.assignment)
         return created
+    }
+
+    /**
+     * Creates and persists the [Trip] connected to [assignment], per the
+     * corrected (Task 11A) `OrderAssigned` trigger described in this
+     * class's own KDoc. Idempotent: checks [tripRepository] for an
+     * already-existing Trip for this Assignment first — mirroring
+     * [Assignment.create]'s own `existingAssignments` check — so a
+     * duplicate invocation for the same Assignment (however it might
+     * arise) never creates a second Trip; `trips.assignment_id`'s own
+     * database-level `UNIQUE` constraint (V12 migration) is the
+     * persistent backstop this in-memory check alone cannot be.
+     */
+    private fun createTripFor(assignment: Assignment) {
+        val existingTrip = tripRepository.findByAssignmentId(assignment.id)
+        val tripCreated = Trip.create(assignment, existingTrip)
+        tripRepository.save(tripCreated.trip)
     }
 
     /**
@@ -142,45 +224,126 @@ class DispatchAssignmentApplicationService(
     }
 
     /**
-     * Records that the driver has reached the passenger (ADR-040, Assignment
-     * Ride Lifecycle), by first restoring the targeted Assignment through
-     * [assignmentRepository]. Throws [AssignmentNotFoundException] if none
-     * is saved under [ArriveAssignmentCommand.assignmentId]. Mirrors
-     * [acceptAssignment]'s own self-fetching shape exactly; no separate
+     * Records that the driver has reached the passenger, by first
+     * restoring the targeted Assignment through [assignmentRepository] —
+     * purely to confirm it exists and to seed [tripFor]'s own self-heal
+     * path, since [Trip] (not [Assignment]) now validates and persists
+     * this transition (see this class's own "Ride-progress convergence"
+     * KDoc). Throws [AssignmentNotFoundException] if none is saved under
+     * [ArriveAssignmentCommand.assignmentId]. Mirrors [acceptAssignment]'s
+     * own self-fetching shape exactly; no separate
      * caller-supplies-the-instance overload exists for this or the two
      * transitions below, since — unlike acceptance, which
      * [ProposalAssignmentOrchestrationService] calls from inside its own
      * shared transaction — nothing in this sprint's scope needs one.
+     *
+     * Returns [AssignmentArrived] (not [TripArrived]) — the pre-existing
+     * compatibility event type, so every current caller and test
+     * (`event.orderId`/`event.driverId`) keeps compiling and passing
+     * unmodified; the new [TripArrived] is still published to the outbox
+     * (dual-publish), just not returned from this method.
      */
     fun arriveAssignment(command: ArriveAssignmentCommand): AssignmentArrived = transactionRunner.run {
         val assignment = assignmentRepository.findById(command.assignmentId)
             ?: throw AssignmentNotFoundException(command.assignmentId)
-        val event = assignment.arrive()
-        assignmentRepository.save(assignment)
-        outboxRepository.save(outboxRecordFor(assignment.id, event))
-        event
+        val trip = tripFor(assignment)
+        val tripEvent = trip.arrive()
+        tripRepository.save(trip)
+        outboxRepository.save(outboxRecordFor(assignment.id, tripEvent))
+        val compatEvent = AssignmentArrived(orderId = tripEvent.orderId, driverId = tripEvent.driverId, occurredAt = tripEvent.occurredAt)
+        outboxRepository.save(outboxRecordFor(assignment.id, compatEvent))
+        compatEvent
     }
 
-    /** Records that the ride itself has begun (ADR-040). See [arriveAssignment]'s own KDoc for shape. */
+    /** Records that the ride itself has begun. See [arriveAssignment]'s own KDoc for shape and rationale. */
     fun startAssignment(command: StartAssignmentCommand): AssignmentStarted = transactionRunner.run {
         val assignment = assignmentRepository.findById(command.assignmentId)
             ?: throw AssignmentNotFoundException(command.assignmentId)
-        val event = assignment.start()
-        assignmentRepository.save(assignment)
-        outboxRepository.save(outboxRecordFor(assignment.id, event))
-        event
+        val trip = tripFor(assignment)
+        val tripEvent = trip.start()
+        tripRepository.save(trip)
+        outboxRepository.save(outboxRecordFor(assignment.id, tripEvent))
+        val compatEvent = AssignmentStarted(orderId = tripEvent.orderId, driverId = tripEvent.driverId, occurredAt = tripEvent.occurredAt)
+        outboxRepository.save(outboxRecordFor(assignment.id, compatEvent))
+        compatEvent
     }
 
-    /** Records that the ride has finished (ADR-040). See [arriveAssignment]'s own KDoc for shape. */
+    /** Records that the ride has finished. See [arriveAssignment]'s own KDoc for shape and rationale. */
     fun completeAssignment(command: CompleteAssignmentCommand): AssignmentCompleted = transactionRunner.run {
         val assignment = assignmentRepository.findById(command.assignmentId)
             ?: throw AssignmentNotFoundException(command.assignmentId)
-        val event = assignment.complete()
-        assignmentRepository.save(assignment)
-        outboxRepository.save(outboxRecordFor(assignment.id, event))
-        event
+        val trip = tripFor(assignment)
+        val tripEvent = trip.complete()
+        tripRepository.save(trip)
+        outboxRepository.save(outboxRecordFor(assignment.id, tripEvent))
+        val compatEvent = AssignmentCompleted(orderId = tripEvent.orderId, driverId = tripEvent.driverId, occurredAt = tripEvent.occurredAt)
+        outboxRepository.save(outboxRecordFor(assignment.id, compatEvent))
+        compatEvent
     }
 
+    /**
+     * Returns the [Trip] connected to [assignment], self-healing by
+     * creating one on the spot if none exists yet — see this class's own
+     * "Ride-progress convergence" KDoc for why a pre-existing Assignment
+     * might reach a ride-progress transition with no Trip already
+     * connected. Idempotent the same way [createTripFor] is: looks up
+     * before creating, never produces a second Trip for an Assignment that
+     * already has one.
+     */
+    private fun tripFor(assignment: Assignment): Trip =
+        tripRepository.findByAssignmentId(assignment.id)
+            ?: Trip.create(assignment).trip.also { tripRepository.save(it) }
+
+    /**
+     * The *new* half of the dual-publish migration window (ADR-063
+     * Consequences; Task 12). `eventType`/routing key are `Trip*`, not
+     * `Assignment*` — a genuinely new contract, additive alongside the
+     * unchanged legacy one below, not a replacement for it. No consumer
+     * binds to `trip.arrived`/`trip.started`/`trip.completed` yet; adding
+     * one (in Order Management or elsewhere) is explicitly out of this
+     * task's own scope.
+     */
+    private fun outboxRecordFor(assignmentId: AssignmentId, event: TripArrived): OutboxRecord = OutboxRecord(
+        aggregateId = assignmentId.value,
+        eventType = "TripArrived",
+        routingKey = "trip.arrived",
+        payload = envelopeFor(
+            eventType = "TripArrived",
+            occurredAt = event.occurredAt.toString(),
+            payload = mapOf("orderId" to event.orderId.orderId, "driverId" to event.driverId.driverId)
+        )
+    )
+
+    private fun outboxRecordFor(assignmentId: AssignmentId, event: TripStarted): OutboxRecord = OutboxRecord(
+        aggregateId = assignmentId.value,
+        eventType = "TripStarted",
+        routingKey = "trip.started",
+        payload = envelopeFor(
+            eventType = "TripStarted",
+            occurredAt = event.occurredAt.toString(),
+            payload = mapOf("orderId" to event.orderId.orderId, "driverId" to event.driverId.driverId)
+        )
+    )
+
+    private fun outboxRecordFor(assignmentId: AssignmentId, event: TripCompleted): OutboxRecord = OutboxRecord(
+        aggregateId = assignmentId.value,
+        eventType = "TripCompleted",
+        routingKey = "trip.completed",
+        payload = envelopeFor(
+            eventType = "TripCompleted",
+            occurredAt = event.occurredAt.toString(),
+            payload = mapOf("orderId" to event.orderId.orderId, "driverId" to event.driverId.driverId)
+        )
+    )
+
+    /**
+     * The *legacy* half of the dual-publish window: identical shape to
+     * what this service has always published for these three transitions
+     * (`eventType`/routing key unchanged) — kept so Order Management's
+     * real `AssignmentCompletedListener` (routing key
+     * `assignment.completed`) keeps working unmodified. See this class's
+     * own "Ride-progress convergence" KDoc.
+     */
     private fun outboxRecordFor(assignmentId: AssignmentId, event: AssignmentArrived): OutboxRecord = OutboxRecord(
         aggregateId = assignmentId.value,
         eventType = "AssignmentArrived",

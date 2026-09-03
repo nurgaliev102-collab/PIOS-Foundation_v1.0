@@ -66,7 +66,8 @@ class OrderLifecycleApplicationService(
             command.passengerName,
             command.pickupAddress,
             command.requestedPickupAt,
-            command.isTest
+            command.isTest,
+            command.explicitDriverIntent
         )
         orderRepository.save(submitted.order)
         outboxRepository.save(outboxRecordFor(submitted.event))
@@ -127,11 +128,35 @@ class OrderLifecycleApplicationService(
         cancelOrder(order, command)
     }
 
+    /**
+     * Task 15C (First Refusal Contract Completion and Concurrency Safety):
+     * unlike [OrderCompleted]/[OrderCancelled] below, this envelope carries
+     * a richer payload than a bare `orderId` — `passengerReference` (the
+     * opaque identifier a future Dispatch-side `PrimaryDriverRecord`
+     * lookup needs, ADR-062) and `explicitDriverIntent` (see
+     * [com.pios.ordermanagement.domain.Order.explicitDriverIntent]'s own
+     * KDoc). Built with its own dedicated envelope call rather than
+     * widening the shared [envelopeFor] this class's other two events
+     * still use unchanged.
+     */
     private fun outboxRecordFor(event: OrderSubmitted): OutboxRecord = OutboxRecord(
         aggregateId = event.orderId.value,
         eventType = "OrderSubmitted",
         routingKey = "order.submitted",
-        payload = envelopeFor("OrderSubmitted", event.orderId.value, event.occurredAt.toString())
+        payload = objectMapper.writeValueAsString(
+            mapOf(
+                "eventId" to UUID.randomUUID().toString(),
+                "eventType" to "OrderSubmitted",
+                "eventVersion" to 1,
+                "occurredAt" to event.occurredAt.toString(),
+                "payload" to mapOf(
+                    "orderId" to event.orderId.value,
+                    "passengerReference" to event.origin.reference,
+                    "explicitDriverIntent" to event.explicitDriverIntent,
+                    "isTest" to event.isTest
+                )
+            )
+        )
     )
 
     private fun outboxRecordFor(event: OrderCompleted): OutboxRecord = OutboxRecord(

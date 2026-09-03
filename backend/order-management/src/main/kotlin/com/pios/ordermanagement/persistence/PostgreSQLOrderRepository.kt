@@ -125,6 +125,16 @@ import org.springframework.stereotype.Repository
  * `Boolean` constructor parameter as the JVM primitive `boolean`, the same
  * unboxed representation `Boolean::class.java` resolves to, so no
  * boxed-type mismatch applies here the way it would for a nullable one.
+ *
+ * Task 15C (First Refusal Contract Completion and Concurrency Safety)
+ * adds `explicit_driver_intent`, read and written below exactly like
+ * `is_test` — excluded from `ON CONFLICT ... UPDATE` since
+ * [Order.explicitDriverIntent] is likewise set once, at submission, and
+ * never changes. It is [Order]'s own new last constructor parameter
+ * (declared after [Order.isTest]), a non-nullable `Boolean`, so the
+ * reflected constructor below gains a tenth, trailing
+ * `Boolean::class.java` parameter, for the identical unboxing reason
+ * `is_test`'s own paragraph above already explains.
  */
 @Repository
 class PostgreSQLOrderRepository(
@@ -134,7 +144,7 @@ class PostgreSQLOrderRepository(
     override fun save(order: Order) {
         jdbcTemplate.update(
             """
-            INSERT INTO orders (id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO orders (id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test, explicit_driver_intent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status
             """.trimIndent(),
             order.id.value,
@@ -145,13 +155,14 @@ class PostgreSQLOrderRepository(
             order.createdAt?.let { java.sql.Timestamp.from(it) },
             order.pickupAddress,
             order.requestedPickupAt?.let { java.sql.Timestamp.from(it) },
-            order.isTest
+            order.isTest,
+            order.explicitDriverIntent
         )
     }
 
     override fun findById(id: OrderId): Order? {
         val rows = jdbcTemplate.query(
-            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test FROM orders WHERE id = ?",
+            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test, explicit_driver_intent FROM orders WHERE id = ?",
             { rs, _ ->
                 reconstruct(
                     id = rs.getString("id"),
@@ -162,7 +173,8 @@ class PostgreSQLOrderRepository(
                     createdAt = rs.getTimestamp("created_at"),
                     pickupAddress = rs.getString("pickup_address"),
                     requestedPickupAt = rs.getTimestamp("requested_pickup_at"),
-                    isTest = rs.getBoolean("is_test")
+                    isTest = rs.getBoolean("is_test"),
+                    explicitDriverIntent = rs.getBoolean("explicit_driver_intent")
                 )
             },
             id.value
@@ -172,7 +184,7 @@ class PostgreSQLOrderRepository(
 
     override fun findAll(): List<Order> =
         jdbcTemplate.query(
-            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test FROM orders"
+            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test, explicit_driver_intent FROM orders"
         ) { rs, _ ->
             reconstruct(
                 id = rs.getString("id"),
@@ -183,7 +195,8 @@ class PostgreSQLOrderRepository(
                 createdAt = rs.getTimestamp("created_at"),
                 pickupAddress = rs.getString("pickup_address"),
                 requestedPickupAt = rs.getTimestamp("requested_pickup_at"),
-                isTest = rs.getBoolean("is_test")
+                isTest = rs.getBoolean("is_test"),
+                explicitDriverIntent = rs.getBoolean("explicit_driver_intent")
             )
         }
 
@@ -196,7 +209,8 @@ class PostgreSQLOrderRepository(
         createdAt: java.sql.Timestamp?,
         pickupAddress: String?,
         requestedPickupAt: java.sql.Timestamp?,
-        isTest: Boolean
+        isTest: Boolean,
+        explicitDriverIntent: Boolean
     ): Order {
         val constructor = Order::class.java.getDeclaredConstructor(
             String::class.java,
@@ -207,6 +221,7 @@ class PostgreSQLOrderRepository(
             java.time.Instant::class.java,
             String::class.java,
             java.time.Instant::class.java,
+            Boolean::class.java,
             Boolean::class.java
         )
         constructor.isAccessible = true
@@ -219,7 +234,8 @@ class PostgreSQLOrderRepository(
             createdAt?.toInstant(),
             pickupAddress,
             requestedPickupAt?.toInstant(),
-            isTest
+            isTest,
+            explicitDriverIntent
         )
     }
 }

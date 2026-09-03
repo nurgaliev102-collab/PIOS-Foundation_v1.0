@@ -6,11 +6,15 @@ import com.pios.dispatch.application.AssignmentNotFoundException
 import com.pios.dispatch.application.AssignmentRepository
 import com.pios.dispatch.application.CompleteAssignmentCommand
 import com.pios.dispatch.application.DispatchAssignmentApplicationService
+import com.pios.dispatch.application.NoOpTripRepository
 import com.pios.dispatch.application.StartAssignmentCommand
+import com.pios.dispatch.application.TripRepository
 import com.pios.dispatch.domain.Assignment
 import com.pios.dispatch.domain.AssignmentId
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
+import com.pios.dispatch.domain.Trip
+import com.pios.dispatch.domain.TripStatus
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
@@ -94,12 +98,29 @@ import org.springframework.web.bind.annotation.RestController
  * an aggregate-rejected transition (wrong current status) to 409 — the
  * same two-status convention [ProposalController]'s own `accept`/`decline`
  * endpoints already established for the identical shape of failure.
+ *
+ * ## Ride-progress convergence onto Trip (ADR-063; Task 12)
+ *
+ * `arrive`/`start`/`complete` still call
+ * [DispatchAssignmentApplicationService.arriveAssignment]/`startAssignment`/`completeAssignment`
+ * exactly as before — that service now transitions the connected [Trip]
+ * rather than the [Assignment] itself (see that class's own KDoc). This
+ * controller's own [toResponse] therefore now projects from **both**:
+ * [Assignment] for identity/order/driver/isTest (unaffected by this
+ * convergence), [Trip] for `status`/`statusChangedAt`/`arrivedAt`/
+ * `startedAt`/`completedAt` once the connected Trip has moved past
+ * [TripStatus.CREATED] — otherwise falling back to [Assignment]'s own
+ * `status`/`statusChangedAt` exactly as before (still `CREATED` or
+ * `ACCEPTED`, the only two states Trip does not itself model). The wire
+ * shape ([AssignmentResponse]'s own fields, this endpoint's own URLs) is
+ * completely unchanged — no frontend caller needs to know Trip exists.
  */
 @RestController
 @RequestMapping("/v1/assignments")
 class AssignmentController(
     private val dispatchAssignmentApplicationService: DispatchAssignmentApplicationService,
-    private val assignmentRepository: AssignmentRepository
+    private val assignmentRepository: AssignmentRepository,
+    private val tripRepository: TripRepository = NoOpTripRepository
 ) {
 
     @Deprecated(
@@ -127,7 +148,10 @@ class AssignmentController(
             if (orderId == null) {
                 ResponseEntity.badRequest().build()
             } else {
-                ResponseEntity.ok(assignmentRepository.findByOrder(OrderReference(orderId)).map { it.toResponse() })
+                ResponseEntity.ok(
+                    assignmentRepository.findByOrder(OrderReference(orderId))
+                        .map { it.toResponse(tripRepository.findByAssignmentId(it.id)) }
+                )
             }
         } catch (ex: IllegalArgumentException) {
             ResponseEntity.badRequest().build()
@@ -137,7 +161,9 @@ class AssignmentController(
     fun arrive(@PathVariable assignmentId: String): ResponseEntity<AssignmentResponse> =
         try {
             dispatchAssignmentApplicationService.arriveAssignment(ArriveAssignmentCommand(AssignmentId(assignmentId)))
-            ResponseEntity.ok(assignmentRepository.findById(AssignmentId(assignmentId))!!.toResponse())
+            ResponseEntity.ok(assignmentRepository.findById(AssignmentId(assignmentId))!!.let {
+                it.toResponse(tripRepository.findByAssignmentId(it.id))
+            })
         } catch (ex: AssignmentNotFoundException) {
             ResponseEntity.notFound().build()
         } catch (ex: IllegalArgumentException) {
@@ -150,7 +176,9 @@ class AssignmentController(
     fun start(@PathVariable assignmentId: String): ResponseEntity<AssignmentResponse> =
         try {
             dispatchAssignmentApplicationService.startAssignment(StartAssignmentCommand(AssignmentId(assignmentId)))
-            ResponseEntity.ok(assignmentRepository.findById(AssignmentId(assignmentId))!!.toResponse())
+            ResponseEntity.ok(assignmentRepository.findById(AssignmentId(assignmentId))!!.let {
+                it.toResponse(tripRepository.findByAssignmentId(it.id))
+            })
         } catch (ex: AssignmentNotFoundException) {
             ResponseEntity.notFound().build()
         } catch (ex: IllegalArgumentException) {
@@ -163,7 +191,9 @@ class AssignmentController(
     fun complete(@PathVariable assignmentId: String): ResponseEntity<AssignmentResponse> =
         try {
             dispatchAssignmentApplicationService.completeAssignment(CompleteAssignmentCommand(AssignmentId(assignmentId)))
-            ResponseEntity.ok(assignmentRepository.findById(AssignmentId(assignmentId))!!.toResponse())
+            ResponseEntity.ok(assignmentRepository.findById(AssignmentId(assignmentId))!!.let {
+                it.toResponse(tripRepository.findByAssignmentId(it.id))
+            })
         } catch (ex: AssignmentNotFoundException) {
             ResponseEntity.notFound().build()
         } catch (ex: IllegalArgumentException) {
@@ -172,16 +202,24 @@ class AssignmentController(
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         }
 
-    private fun Assignment.toResponse() =
-        AssignmentResponse(
+    /**
+     * Projects [this] Assignment merged with its connected [trip] (`null`
+     * for an Assignment with no Trip yet — the same as a Trip still at
+     * [TripStatus.CREATED]: no ride-progress fact exists). See this
+     * class's own "Ride-progress convergence" KDoc.
+     */
+    private fun Assignment.toResponse(trip: Trip?): AssignmentResponse {
+        val rideProgressed = trip != null && trip.status != TripStatus.CREATED
+        return AssignmentResponse(
             id.value,
             order.orderId,
             driver.driverId,
-            status.name,
-            statusChangedAt?.toString(),
-            arrivedAt?.toString(),
-            startedAt?.toString(),
-            completedAt?.toString(),
+            if (rideProgressed) trip!!.status.name else status.name,
+            if (rideProgressed) trip!!.statusChangedAt?.toString() else statusChangedAt?.toString(),
+            trip?.arrivedAt?.toString(),
+            trip?.startedAt?.toString(),
+            trip?.completedAt?.toString(),
             isTest
         )
+    }
 }

@@ -1,0 +1,35 @@
+-- Enforces, at the database level, the Proposal aggregate's own root
+-- invariant ("an order may have at most one open proposal at any time",
+-- domain/Proposal.kt) -- previously enforced only by application code
+-- (Proposal.propose's own existingProposals check, computed from a SELECT
+-- with no locking against a concurrent INSERT). Task 15B's own audit found
+-- this gap; Task 15C (First Refusal Contract Completion and Concurrency
+-- Safety) closes it.
+--
+-- Investigated before writing this migration (Task 15C Part 4): the
+-- isolated pios_dispatch_test database was queried directly for any
+-- order_reference with more than one OPEN proposal -- none were found.
+-- Every one of Proposal's own transition methods (propose/accept/decline/
+-- lapse/withdraw) checks `status == OPEN` as its own precondition, so at
+-- most one row can ever be OPEN for a given order under the application's
+-- own logic; this index makes that already-true fact enforced by
+-- PostgreSQL itself rather than by discipline alone, closing the specific
+-- window (two concurrent INSERTs, both passing the same stale SELECT)
+-- application code alone cannot close.
+--
+-- A partial index, not a plain UNIQUE(order_reference): Proposal rows for
+-- an order that already resolved (ACCEPTED/DECLINED/LAPSED/WITHDRAWN) must
+-- remain unrestricted -- a new proposal for the same order, after the
+-- previous one resolved, is the ordinary, expected fallback/re-proposal
+-- flow (Task 12/13's own findings) and must not be blocked.
+--
+-- PostgreSQLProposalRepository.save's own INSERT already conflicts only on
+-- (id) -- a different row's own id never collides there, so this new
+-- index is the first and only thing that will ever reject a second OPEN
+-- row for the same order, surfacing as a real
+-- org.springframework.dao.DataIntegrityViolationException to the caller,
+-- exactly the same shape this codebase's own existing UNIQUE-constraint
+-- proofs (e.g. trips.assignment_id, V12__trips.sql) already establish.
+CREATE UNIQUE INDEX proposals_one_open_per_order
+    ON proposals (order_reference)
+    WHERE status = 'OPEN';

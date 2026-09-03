@@ -34,6 +34,11 @@ dependencies {
     implementation("org.flywaydb:flyway-core")
     implementation("org.flywaydb:flyway-database-postgresql")
 
+    // Task 14 (First Refusal Foundation): this module's first-ever
+    // event-publishing capability -- ADR-062 authorizes it. Mirrors every
+    // other module's own identical dependency (ADR-029, ADR-031, ADR-032).
+    implementation("org.springframework.boot:spring-boot-starter-amqp")
+
     testImplementation(kotlin("test"))
 
     // Test-scoped only, per ADR-027 (MVP Integration Mechanism): used

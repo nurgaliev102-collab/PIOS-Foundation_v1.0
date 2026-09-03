@@ -45,11 +45,47 @@ class OrderSubmittedEnvelopeTest {
         assertEquals(submitted.event.occurredAt.toString(), envelope.get("occurredAt").asText())
         assertEquals(submitted.order.id.value, envelope.get("payload").get("orderId").asText())
 
+        // Task 15C (First Refusal Contract Completion and Concurrency
+        // Safety), Test 1: the envelope now also carries the opaque
+        // passenger identifier a future Dispatch-side PrimaryDriverRecord
+        // lookup needs, and the explicit-driver-intent flag -- and nothing
+        // else. No passenger name, phone number, or other profile data.
+        // Task 16 (First Refusal Runtime Integration) adds isTest, for the
+        // same Owner Control Center test/production separation every
+        // downstream Dispatch aggregate this order can produce already has.
+        assertEquals(origin.reference, envelope.get("payload").get("passengerReference").asText())
+        assertEquals(false, envelope.get("payload").get("explicitDriverIntent").asBoolean())
+        assertEquals(false, envelope.get("payload").get("isTest").asBoolean())
+        assertEquals(
+            setOf("orderId", "passengerReference", "explicitDriverIntent", "isTest"),
+            envelope.get("payload").fieldNames().asSequence().toSet()
+        )
+
         // The envelope's own business occurredAt must be a distinct field
         // from the outbox row's persistence timestamp -- never the same
         // value read twice under two names.
         assertNotNull(record.createdAt)
         assertNotEquals(record.createdAt.toString(), envelope.get("occurredAt").asText())
+    }
+
+    @Test
+    fun `Test 1 -- explicit driver intent set at submission is carried through to the envelope`() {
+        val submitted = service.submitOrder(SubmitOrderCommand(origin, explicitDriverIntent = true))
+
+        val record = outboxRepository.findUnpublished().single { it.aggregateId == submitted.order.id.value }
+        val envelope = objectMapper.readTree(record.payload)
+
+        assertEquals(true, envelope.get("payload").get("explicitDriverIntent").asBoolean())
+    }
+
+    @Test
+    fun `Task 16 -- isTest set at submission is carried through to the envelope`() {
+        val submitted = service.submitOrder(SubmitOrderCommand(origin, isTest = true))
+
+        val record = outboxRepository.findUnpublished().single { it.aggregateId == submitted.order.id.value }
+        val envelope = objectMapper.readTree(record.payload)
+
+        assertEquals(true, envelope.get("payload").get("isTest").asBoolean())
     }
 
     @Test
