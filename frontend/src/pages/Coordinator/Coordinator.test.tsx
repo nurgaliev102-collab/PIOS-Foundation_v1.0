@@ -180,4 +180,41 @@ describe('Coordinator', () => {
     expect(screen.getByLabelText('Логин')).toBeInTheDocument()
     expect(getStoredOwnerCredential()).toBeNull()
   })
+
+  // --- Manual assignment / Proposal API security (Task 21) ---
+
+  it('sends the owner Basic credential on POST /v1/proposals when manually assigning a driver', async () => {
+    seedOwnerCredential()
+    mockedRequest.mockResolvedValueOnce([
+      { id: 'driver-1', availability: 'AVAILABLE', displayName: null, registeredAt: null },
+    ]) // GET /v1/drivers
+    mockedRequest.mockResolvedValueOnce([
+      {
+        id: 'order-1',
+        status: 'SUBMITTED',
+        origin: 'passenger-1',
+        destination: 'Аэропорт Уфа',
+        passengerName: 'Аня',
+        createdAt: '2026-08-16T09:00:00Z',
+        pickupAddress: 'Агидель',
+        requestedPickupAt: null,
+      },
+    ]) // GET /v1/orders
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals?orderId=order-1 -- no proposal yet, order stays selectable
+
+    render(<Coordinator />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /Заказ №/ }))
+    await userEvent.click(screen.getByRole('button', { name: /driver-1/ }))
+
+    mockedRequest.mockResolvedValueOnce({ proposalId: 'p-new', orderId: 'order-1', driverId: 'driver-1', status: 'OPEN' })
+    mockedRequest.mockResolvedValueOnce([]) // refreshProposalsForOrder's own GET /v1/proposals?orderId=order-1
+
+    await userEvent.click(screen.getByRole('button', { name: 'Отправить' }))
+
+    const assignCall = await vi.waitUntil(() => mockedRequest.mock.calls.find(([path]) => path === '/v1/proposals'))
+    expect(assignCall).toBeDefined()
+    const init = assignCall?.[1] as RequestInit
+    expect((init.headers as Record<string, string>).Authorization).toBe(EXPECTED_BASIC_HEADER)
+  })
 })

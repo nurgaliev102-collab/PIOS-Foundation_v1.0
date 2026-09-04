@@ -589,13 +589,26 @@ export function RideRequest() {
    * itself already exists and is confirmed regardless of what happens
    * here — a failure never deletes it or blocks the confirmation screen,
    * per this sprint's own explicit requirement; it only offers a Retry.
+   *
+   * Task 21 (Proposal API Security Remediation): `POST /v1/proposals` now
+   * requires an `Authorization` header -- this passenger's own already-held
+   * session token (`identity.token`, the same one already sent on this
+   * screen's own Circle-of-Trust calls) is sufficient; Dispatch's own new
+   * check only requires *some* authenticated caller for `create`, not a
+   * verified relationship to this specific order or driver (see
+   * `docs/PIOS_TAXI_TASK_20_PROPOSAL_SECURITY_AUDIT.md`).
    */
   async function attemptProposal(forOrderId: string) {
     setProposalStatus('proposing')
     try {
       await request('/v1/proposals', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // Non-null assertion: this function is only ever reachable from a
+        // click on JSX that itself only renders once identity is non-null
+        // (the component's own early `if (!identity) return ...` above) --
+        // same reasoning already applied elsewhere in this codebase (e.g.
+        // DriverHome.tsx's own `identity.driverId!`).
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity!.token}` },
         body: JSON.stringify({ orderId: forOrderId, driverId: driverCode ?? '' }),
         baseUrl: DISPATCH_BASE_URL,
       })

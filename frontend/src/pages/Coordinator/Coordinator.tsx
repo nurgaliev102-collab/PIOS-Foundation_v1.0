@@ -6,7 +6,12 @@ import { Spinner } from '../../components/Spinner'
 import { ApiError, request } from '../../api/apiClient'
 import { DISPATCH_BASE_URL } from '../OwnerControlCenter/moduleBaseUrls'
 import { LoginScreen } from '../OwnerControlCenter/LoginScreen'
-import { clearOwnerCredential, getStoredOwnerCredential, type OwnerCredential } from '../OwnerControlCenter/ownerCredential'
+import {
+  clearOwnerCredential,
+  getStoredOwnerCredential,
+  toBasicAuthorizationHeader,
+  type OwnerCredential,
+} from '../OwnerControlCenter/ownerCredential'
 import {
   driverLabel,
   fetchDrivers,
@@ -236,8 +241,17 @@ export function Coordinator() {
     }
   }
 
+  // Task 21 (Proposal API Security Remediation): POST /v1/proposals now
+  // requires an Authorization header -- the owner/coordinator credential
+  // this screen already holds and already gates itself behind
+  // (credential is guaranteed non-null here: the page renders LoginScreen
+  // instead of this JSX entirely until one is held, same guarantee
+  // fetchOrders(credential)/fetchDrivers already rely on) is exactly what
+  // Dispatch's own new check accepts for this endpoint, mirroring
+  // OwnerControlCenter/todayData.ts's own toBasicAuthorizationHeader use
+  // for this screen's other owner-gated calls.
   async function handleAssign() {
-    if (assignStatus === 'submitting' || !selectedOrderId || !selectedDriverId) {
+    if (assignStatus === 'submitting' || !selectedOrderId || !selectedDriverId || !credential) {
       return
     }
     setAssignStatus('submitting')
@@ -245,7 +259,7 @@ export function Coordinator() {
     try {
       const response = await request<ProposalResponse>('/v1/proposals', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: toBasicAuthorizationHeader(credential) },
         body: JSON.stringify({ orderId: selectedOrderId, driverId: selectedDriverId }),
         baseUrl: DISPATCH_BASE_URL,
       })

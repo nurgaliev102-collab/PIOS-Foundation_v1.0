@@ -135,6 +135,33 @@ describe('RideRequest', () => {
     expect(mockedRequest).toHaveBeenCalledTimes(3)
   })
 
+  // --- Proposal API security (Task 21: Proposal API Security Remediation) ---
+
+  it('sends this passenger\'s own Bearer token on POST /v1/proposals, since that endpoint now requires authentication', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-auth' }) // POST /v1/orders
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
+    mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
+
+    const proposalCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/proposals')
+    expect(proposalCall).toBeDefined()
+    const headers = (proposalCall?.[1] as RequestInit).headers as Record<string, string>
+    expect(headers.Authorization).toBe(`Bearer ${TEST_IDENTITY.token}`)
+  })
+
   // --- Cancellation (P0-2 Tier 1, docs/SPRINT_PILOT_BLOCKERS.md; ADR-053) ---
 
   it('offers to cancel an order still waiting for the driver, and does so on confirmation', async () => {
