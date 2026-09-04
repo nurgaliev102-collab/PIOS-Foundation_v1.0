@@ -25,6 +25,19 @@ const SAMPLE_INPUT: PilotAnalyticsInput = {
   drivers: { total: 2, available: 1, withActivity: 2 },
   reactionTime: { averageMinutes: null, medianMinutes: null, sampleSize: 0 },
   health: { modulesUp: 5, modulesTotal: 5 },
+  // Build fix (Release Candidate Hygiene, 2026-09-04): PilotAnalyticsInput
+  // gained currentDay/history (both required, non-optional -- pilotAnalytics.ts
+  // is untouched by this fix) since this fixture was last written. `null`/`[]`
+  // mirror exactly what a real day with no dated activity yet, and an empty
+  // history window, already look like elsewhere in this same file's own
+  // pilotAnalytics.test.ts sibling -- not a fabricated value, the same "absent"
+  // case that module's own KDoc already documents. This fixture only proves
+  // BackendAIProvider forwards whatever PilotAnalyticsInput it's given
+  // unchanged (see the test below); it was never exercising currentDay/history
+  // specifically, so their presence here is structural, not a new behavior
+  // under test.
+  currentDay: null,
+  history: [],
 }
 
 describe('BackendAIProvider', () => {
