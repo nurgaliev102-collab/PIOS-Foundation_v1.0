@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
 import java.time.Instant
 import java.util.Base64
+import java.util.UUID
 import javax.crypto.Mac
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
@@ -57,6 +58,25 @@ import kotlin.test.assertTrue
  * production shape (`pios.owner.*`), so [lapseProposal]'s own new
  * owner-only requirement can be exercised against a real, valid
  * credential rather than only its failure path.
+ *
+ * Fixture isolation fix (Second Security Gate, 2026-09-04): every
+ * order/driver identifier below used to be a fixed literal
+ * (`"postgres-vertical-order-3"`, etc.), so a fresh run of this class
+ * against an already-populated `pios_dispatch_test` (left over from an
+ * earlier run of this same file) collided with its own prior rows --
+ * `postgres-vertical-order-3` already `ACCEPTED` from a previous run made
+ * *this* run's own "create then accept" sequence see a `409 CONFLICT` it
+ * did not expect, which is exactly the failure mode the Second Security
+ * Gate audit root-caused via a read-only `SELECT` against the test
+ * database (never production). Every identifier is now suffixed with
+ * [UUID.randomUUID] -- the same fix [AssignmentControllerPostgreSQLSecurityTest]/
+ * [DriverControllerPostgreSQLSecurityTest]/
+ * `OrderCancellationControllerPostgreSQLSecurityTest` (order-management)
+ * already used from the start, per each of their own KDoc. This changes
+ * no assertion's meaning: each test still creates exactly the same
+ * relationships it always did, just under identifiers unique to this one
+ * run, so leftover rows from any prior run -- this file's own historical
+ * ones included -- can never again collide with a fresh one.
  */
 class ProposalControllerPostgreSQLIntegrationTest {
 
@@ -112,7 +132,7 @@ class ProposalControllerPostgreSQLIntegrationTest {
 
     private fun driverToken(driverId: String): String = bearer(issueToken(sub = "$driverId-identity", drv = driverId))
 
-    private fun passengerToken(): String = bearer(issueToken(sub = "postgres-vertical-passenger"))
+    private fun passengerToken(): String = bearer(issueToken(sub = "postgres-vertical-passenger-${UUID.randomUUID()}"))
 
     private fun ownerAuth(): String =
         "Basic " + Base64.getEncoder().encodeToString("owner:$ownerPassword".toByteArray())
@@ -122,10 +142,18 @@ class ProposalControllerPostgreSQLIntegrationTest {
         return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
     }
 
+    /** Fixture isolation fix (see class KDoc): a fresh, unique order id every call, never a fixed literal. */
+    private fun uniqueOrderId(label: String): String = "postgres-vertical-order-$label-${UUID.randomUUID()}"
+
+    /** Same reasoning as [uniqueOrderId], for driver identifiers. */
+    private fun uniqueDriverId(label: String): String = "postgres-vertical-driver-$label-${UUID.randomUUID()}"
+
     @Test
     fun `creating a proposal through REST persists it to PostgreSQL, loadable by id`() {
+        val order = uniqueOrderId("1")
+        val driver = uniqueDriverId("1")
         val created = controller.createProposal(
-            ProposeDriverRequest("postgres-vertical-order-1", "postgres-vertical-driver-1"),
+            ProposeDriverRequest(order, driver),
             authorization = passengerToken()
         )
 
@@ -136,14 +164,14 @@ class ProposalControllerPostgreSQLIntegrationTest {
 
         assertEquals(HttpStatus.OK, loaded.statusCode)
         assertEquals("OPEN", loaded.body?.status)
-        assertEquals("postgres-vertical-order-1", loaded.body?.orderId)
-        assertEquals("postgres-vertical-driver-1", loaded.body?.driverId)
+        assertEquals(order, loaded.body?.orderId)
+        assertEquals(driver, loaded.body?.driverId)
     }
 
     @Test
     fun `creating a proposal through REST with no Authorization header is rejected`() {
         val response = controller.createProposal(
-            ProposeDriverRequest("postgres-vertical-order-1-anon", "postgres-vertical-driver-1")
+            ProposeDriverRequest(uniqueOrderId("1-anon"), uniqueDriverId("1"))
         )
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
@@ -151,13 +179,14 @@ class ProposalControllerPostgreSQLIntegrationTest {
 
     @Test
     fun `creating a second proposal through REST for an order with an open proposal already in PostgreSQL is rejected`() {
+        val order = uniqueOrderId("2")
         controller.createProposal(
-            ProposeDriverRequest("postgres-vertical-order-2", "postgres-vertical-driver-1"),
+            ProposeDriverRequest(order, uniqueDriverId("1")),
             authorization = passengerToken()
         )
 
         val second = controller.createProposal(
-            ProposeDriverRequest("postgres-vertical-order-2", "postgres-vertical-driver-2"),
+            ProposeDriverRequest(order, uniqueDriverId("2")),
             authorization = passengerToken()
         )
 
@@ -166,12 +195,13 @@ class ProposalControllerPostgreSQLIntegrationTest {
 
     @Test
     fun `accepting a proposal through REST persists ACCEPTED to PostgreSQL`() {
+        val driver = uniqueDriverId("1")
         val created = controller.createProposal(
-            ProposeDriverRequest("postgres-vertical-order-3", "postgres-vertical-driver-1"),
+            ProposeDriverRequest(uniqueOrderId("3"), driver),
             authorization = passengerToken()
         ).body!!
 
-        val accepted = controller.acceptProposal(created.proposalId, authorization = driverToken("postgres-vertical-driver-1"))
+        val accepted = controller.acceptProposal(created.proposalId, authorization = driverToken(driver))
 
         assertEquals(HttpStatus.OK, accepted.statusCode)
         assertEquals("ACCEPTED", accepted.body?.status)
@@ -180,12 +210,14 @@ class ProposalControllerPostgreSQLIntegrationTest {
 
     @Test
     fun `accepting a proposal through REST as a different driver, backed by PostgreSQL, is rejected`() {
+        val driver1 = uniqueDriverId("1")
+        val driver2 = uniqueDriverId("2")
         val created = controller.createProposal(
-            ProposeDriverRequest("postgres-vertical-order-3-idor", "postgres-vertical-driver-1"),
+            ProposeDriverRequest(uniqueOrderId("3-idor"), driver1),
             authorization = passengerToken()
         ).body!!
 
-        val response = controller.acceptProposal(created.proposalId, authorization = driverToken("postgres-vertical-driver-2"))
+        val response = controller.acceptProposal(created.proposalId, authorization = driverToken(driver2))
 
         assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
         assertEquals("OPEN", controller.getProposal(created.proposalId).body?.status)
@@ -193,29 +225,31 @@ class ProposalControllerPostgreSQLIntegrationTest {
 
     @Test
     fun `accepting a proposal through REST also persists a real Assignment to PostgreSQL`() {
-        val order = OrderReference("postgres-vertical-order-3b")
+        val order = OrderReference(uniqueOrderId("3b"))
+        val driver = uniqueDriverId("1")
         val created = controller.createProposal(
-            ProposeDriverRequest(order.orderId, "postgres-vertical-driver-1"),
+            ProposeDriverRequest(order.orderId, driver),
             authorization = passengerToken()
         ).body!!
 
-        controller.acceptProposal(created.proposalId, authorization = driverToken("postgres-vertical-driver-1"))
+        controller.acceptProposal(created.proposalId, authorization = driverToken(driver))
 
         val assignments = assignmentRepository.findByOrder(order)
         assertEquals(1, assignments.size)
-        assertEquals("postgres-vertical-driver-1", assignments.first().driver.driverId)
+        assertEquals(driver, assignments.first().driver.driverId)
     }
 
     @Test
     fun `accepting an already-accepted proposal through REST does not create a second Assignment in PostgreSQL`() {
-        val order = OrderReference("postgres-vertical-order-3c")
+        val order = OrderReference(uniqueOrderId("3c"))
+        val driver = uniqueDriverId("1")
         val created = controller.createProposal(
-            ProposeDriverRequest(order.orderId, "postgres-vertical-driver-1"),
+            ProposeDriverRequest(order.orderId, driver),
             authorization = passengerToken()
         ).body!!
-        controller.acceptProposal(created.proposalId, authorization = driverToken("postgres-vertical-driver-1"))
+        controller.acceptProposal(created.proposalId, authorization = driverToken(driver))
 
-        val second = controller.acceptProposal(created.proposalId, authorization = driverToken("postgres-vertical-driver-1"))
+        val second = controller.acceptProposal(created.proposalId, authorization = driverToken(driver))
 
         assertEquals(HttpStatus.CONFLICT, second.statusCode)
         assertEquals(1, assignmentRepository.findByOrder(order).size)
@@ -223,16 +257,17 @@ class ProposalControllerPostgreSQLIntegrationTest {
 
     @Test
     fun `an order with a pre-existing Assignment in PostgreSQL rejects acceptance of a new Proposal`() {
-        val order = OrderReference("postgres-vertical-order-3d")
+        val order = OrderReference(uniqueOrderId("3d"))
+        val driver = uniqueDriverId("1")
         assignmentRepository.save(
-            Assignment.create(order, DriverReference("postgres-vertical-driver-preexisting")).assignment
+            Assignment.create(order, DriverReference(uniqueDriverId("preexisting"))).assignment
         )
         val created = controller.createProposal(
-            ProposeDriverRequest(order.orderId, "postgres-vertical-driver-1"),
+            ProposeDriverRequest(order.orderId, driver),
             authorization = passengerToken()
         ).body!!
 
-        val response = controller.acceptProposal(created.proposalId, authorization = driverToken("postgres-vertical-driver-1"))
+        val response = controller.acceptProposal(created.proposalId, authorization = driverToken(driver))
 
         assertEquals(HttpStatus.CONFLICT, response.statusCode)
         assertEquals(1, assignmentRepository.findByOrder(order).size)
@@ -240,12 +275,13 @@ class ProposalControllerPostgreSQLIntegrationTest {
 
     @Test
     fun `declining a proposal through REST persists DECLINED to PostgreSQL`() {
+        val driver = uniqueDriverId("1")
         val created = controller.createProposal(
-            ProposeDriverRequest("postgres-vertical-order-4", "postgres-vertical-driver-1"),
+            ProposeDriverRequest(uniqueOrderId("4"), driver),
             authorization = passengerToken()
         ).body!!
 
-        val declined = controller.declineProposal(created.proposalId, authorization = driverToken("postgres-vertical-driver-1"))
+        val declined = controller.declineProposal(created.proposalId, authorization = driverToken(driver))
 
         assertEquals(HttpStatus.OK, declined.statusCode)
         assertEquals("DECLINED", declined.body?.status)
@@ -254,12 +290,14 @@ class ProposalControllerPostgreSQLIntegrationTest {
 
     @Test
     fun `declining a proposal through REST as a different driver, backed by PostgreSQL, is rejected`() {
+        val driver1 = uniqueDriverId("1")
+        val driver2 = uniqueDriverId("2")
         val created = controller.createProposal(
-            ProposeDriverRequest("postgres-vertical-order-4-idor", "postgres-vertical-driver-1"),
+            ProposeDriverRequest(uniqueOrderId("4-idor"), driver1),
             authorization = passengerToken()
         ).body!!
 
-        val response = controller.declineProposal(created.proposalId, authorization = driverToken("postgres-vertical-driver-2"))
+        val response = controller.declineProposal(created.proposalId, authorization = driverToken(driver2))
 
         assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
         assertEquals("OPEN", controller.getProposal(created.proposalId).body?.status)
@@ -268,7 +306,7 @@ class ProposalControllerPostgreSQLIntegrationTest {
     @Test
     fun `lapsing a proposal through REST persists LAPSED to PostgreSQL`() {
         val created = controller.createProposal(
-            ProposeDriverRequest("postgres-vertical-order-5", "postgres-vertical-driver-1"),
+            ProposeDriverRequest(uniqueOrderId("5"), uniqueDriverId("1")),
             authorization = passengerToken()
         ).body!!
 
@@ -282,7 +320,7 @@ class ProposalControllerPostgreSQLIntegrationTest {
     @Test
     fun `lapsing a proposal through REST with no Authorization header is rejected`() {
         val created = controller.createProposal(
-            ProposeDriverRequest("postgres-vertical-order-5-anon", "postgres-vertical-driver-1"),
+            ProposeDriverRequest(uniqueOrderId("5-anon"), uniqueDriverId("1")),
             authorization = passengerToken()
         ).body!!
 
@@ -294,14 +332,17 @@ class ProposalControllerPostgreSQLIntegrationTest {
 
     @Test
     fun `a proposal resolved in PostgreSQL frees its order for a new proposal through REST`() {
+        val order = uniqueOrderId("6")
+        val driver1 = uniqueDriverId("1")
+        val driver2 = uniqueDriverId("2")
         val first = controller.createProposal(
-            ProposeDriverRequest("postgres-vertical-order-6", "postgres-vertical-driver-1"),
+            ProposeDriverRequest(order, driver1),
             authorization = passengerToken()
         ).body!!
-        controller.declineProposal(first.proposalId, authorization = driverToken("postgres-vertical-driver-1"))
+        controller.declineProposal(first.proposalId, authorization = driverToken(driver1))
 
         val second = controller.createProposal(
-            ProposeDriverRequest("postgres-vertical-order-6", "postgres-vertical-driver-2"),
+            ProposeDriverRequest(order, driver2),
             authorization = passengerToken()
         )
 
@@ -310,21 +351,22 @@ class ProposalControllerPostgreSQLIntegrationTest {
 
     @Test
     fun `listing proposals for an order through REST reflects PostgreSQL state`() {
+        val order = uniqueOrderId("7")
         controller.createProposal(
-            ProposeDriverRequest("postgres-vertical-order-7", "postgres-vertical-driver-1"),
+            ProposeDriverRequest(order, uniqueDriverId("1")),
             authorization = passengerToken()
         )
 
-        val listed = controller.listProposals(orderId = "postgres-vertical-order-7", driverId = null)
+        val listed = controller.listProposals(orderId = order, driverId = null)
 
         assertEquals(HttpStatus.OK, listed.statusCode)
         assertEquals(1, listed.body?.size)
-        assertEquals("postgres-vertical-order-7", listed.body?.first()?.orderId)
+        assertEquals(order, listed.body?.first()?.orderId)
     }
 
     @Test
     fun `loading a proposal id never created in PostgreSQL returns 404 through REST`() {
-        val response = controller.getProposal("postgres-vertical-never-created")
+        val response = controller.getProposal("postgres-vertical-never-created-${UUID.randomUUID()}")
 
         assertEquals(HttpStatus.NOT_FOUND, response.statusCode)
     }
