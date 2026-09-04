@@ -1,5 +1,6 @@
 package com.pios.drivermanagement.api
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.drivermanagement.application.CreateDriverApplicationService
 import com.pios.drivermanagement.application.DriverAvailabilityApplicationService
 import com.pios.drivermanagement.application.RetrieveDriverAvailabilityHandler
@@ -8,6 +9,10 @@ import com.pios.drivermanagement.domain.Driver
 import com.pios.drivermanagement.domain.DriverId
 import com.pios.drivermanagement.persistence.InMemoryDriverRepository
 import org.springframework.http.HttpStatus
+import java.time.Instant
+import java.util.Base64
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -19,6 +24,18 @@ import kotlin.test.assertTrue
  * [CreateDriverApplicationService], no Spring MVC context -- mirroring
  * this project's own constructor-based testing convention (Tranche 2:
  * Passenger Experience REST Transport).
+ *
+ * Task 25 (Orders Cancellation & Driver Availability Security
+ * Remediation): `declareAvailability` now requires an `Authorization`
+ * header (see [DriverController]'s own KDoc). Token minting mirrors
+ * `com.pios.dispatch.api.ProposalControllerTest`'s own already-established
+ * pattern exactly (Task 21) -- this module has no build-time dependency on
+ * `identity` and never calls it (ADR-055 Decision 1), so a token is minted
+ * locally, in the exact format `SessionTokenIssuer` mints and this
+ * module's own new [SessionTokenVerifier] checks. `createDriver`/
+ * `getDriver`/`listDrivers` are untouched by Task 25 (see that task's own
+ * scope) -- every test exercising them below is unchanged from before this
+ * task.
  */
 class DriverControllerTest {
 
@@ -26,7 +43,31 @@ class DriverControllerTest {
     private val handler = RetrieveDriverAvailabilityHandler(repository)
     private val availabilityService = DriverAvailabilityApplicationService(repository)
     private val createDriverService = CreateDriverApplicationService(repository)
-    private val controller = DriverController(handler, availabilityService, createDriverService)
+    private val secret = Base64.getEncoder().encodeToString("driver-controller-test-secret".toByteArray())
+    private val sessionTokenVerifier = SessionTokenVerifier(secretBase64 = secret)
+    private val controller = DriverController(handler, availabilityService, createDriverService, sessionTokenVerifier)
+
+    // --- Token minting test helper (mirrors ProposalControllerTest's own) ---
+
+    private val objectMapper = ObjectMapper()
+
+    private fun issueToken(sub: String, drv: String? = null, ttlSeconds: Long = 3600): String {
+        val payloadNode = objectMapper.createObjectNode()
+        payloadNode.put("sub", sub)
+        if (drv == null) payloadNode.putNull("drv") else payloadNode.put("drv", drv)
+        payloadNode.put("exp", Instant.now().plusSeconds(ttlSeconds).epochSecond)
+        val encodedPayload = base64UrlEncode(objectMapper.writeValueAsBytes(payloadNode))
+        val secretBytes = Base64.getDecoder().decode(secret)
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(secretBytes, "HmacSHA256"))
+        val encodedSignature = base64UrlEncode(mac.doFinal(encodedPayload.toByteArray(Charsets.UTF_8)))
+        return "$encodedPayload.$encodedSignature"
+    }
+
+    private fun base64UrlEncode(bytes: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+
+    /** A valid session token naming [driverId] as its own `drv` -- what `DriverHome.tsx` now sends on toggleAvailability. */
+    private fun driverToken(driverId: String): String = "Bearer " + issueToken(sub = "$driverId-identity", drv = driverId)
 
     @Test
     fun `creating a driver returns 201 with the new driver's id and default availability`() {
@@ -130,7 +171,7 @@ class DriverControllerTest {
     fun `declaring availability for a known driver returns 200 with the new availability`() {
         repository.save(Driver(DriverId("driver-2"), Availability.UNAVAILABLE))
 
-        val response = controller.declareAvailability("driver-2", DeclareAvailabilityRequest("AVAILABLE"))
+        val response = controller.declareAvailability("driver-2", DeclareAvailabilityRequest("AVAILABLE"), authorization = driverToken("driver-2"))
 
         assertEquals(HttpStatus.OK, response.statusCode)
         val body = assertNotNull(response.body)
@@ -141,7 +182,7 @@ class DriverControllerTest {
 
     @Test
     fun `declaring availability for an unknown driver returns 404`() {
-        val response = controller.declareAvailability("unknown", DeclareAvailabilityRequest("AVAILABLE"))
+        val response = controller.declareAvailability("unknown", DeclareAvailabilityRequest("AVAILABLE"), authorization = driverToken("unknown"))
 
         assertEquals(HttpStatus.NOT_FOUND, response.statusCode)
     }
@@ -150,9 +191,74 @@ class DriverControllerTest {
     fun `declaring an unrecognized availability value returns 400`() {
         repository.save(Driver(DriverId("driver-3"), Availability.UNAVAILABLE))
 
-        val response = controller.declareAvailability("driver-3", DeclareAvailabilityRequest("BUSY"))
+        val response = controller.declareAvailability("driver-3", DeclareAvailabilityRequest("BUSY"), authorization = driverToken("driver-3"))
 
         assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
+    // --- Task 25: Orders Cancellation & Driver Availability Security Remediation ---
+
+    @Test
+    fun `availability -- no Authorization header is rejected`() {
+        repository.save(Driver(DriverId("driver-sec-1"), Availability.UNAVAILABLE))
+
+        val response = controller.declareAvailability("driver-sec-1", DeclareAvailabilityRequest("AVAILABLE"))
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+        assertEquals(Availability.UNAVAILABLE, repository.findById(DriverId("driver-sec-1"))?.availability)
+    }
+
+    @Test
+    fun `availability -- a malformed Authorization header is rejected exactly like a missing one`() {
+        repository.save(Driver(DriverId("driver-sec-2"), Availability.UNAVAILABLE))
+
+        val response = controller.declareAvailability("driver-sec-2", DeclareAvailabilityRequest("AVAILABLE"), authorization = "not-a-real-scheme")
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
+    fun `availability -- the driver's own token succeeds`() {
+        repository.save(Driver(DriverId("driver-sec-own"), Availability.UNAVAILABLE))
+
+        val response = controller.declareAvailability("driver-sec-own", DeclareAvailabilityRequest("AVAILABLE"), authorization = driverToken("driver-sec-own"))
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals("AVAILABLE", response.body?.availability)
+    }
+
+    @Test
+    fun `availability -- a different driver's token is rejected -- IDOR`() {
+        repository.save(Driver(DriverId("driver-sec-victim"), Availability.UNAVAILABLE))
+
+        val response = controller.declareAvailability("driver-sec-victim", DeclareAvailabilityRequest("AVAILABLE"), authorization = driverToken("driver-sec-attacker"))
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+        assertEquals(Availability.UNAVAILABLE, repository.findById(DriverId("driver-sec-victim"))?.availability)
+    }
+
+    @Test
+    fun `availability -- a passenger-only token (drv null) is rejected, even for a real driver`() {
+        repository.save(Driver(DriverId("driver-sec-3"), Availability.UNAVAILABLE))
+
+        val response = controller.declareAvailability(
+            "driver-sec-3",
+            DeclareAvailabilityRequest("AVAILABLE"),
+            authorization = "Bearer " + issueToken(sub = "some-passenger")
+        )
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+    }
+
+    @Test
+    fun `availability -- an unknown driver id with a valid, matching token still returns 404`() {
+        val response = controller.declareAvailability(
+            "driver-sec-unknown",
+            DeclareAvailabilityRequest("AVAILABLE"),
+            authorization = driverToken("driver-sec-unknown")
+        )
+
+        assertEquals(HttpStatus.NOT_FOUND, response.statusCode)
     }
 
     // --- isTest (Owner Control Center test/production data separation, 2026-08-17) ---

@@ -58,3 +58,16 @@ pios:
   #     failure-delay-ms: 500
   #     max-failures-per-window: 20
   #     window-ms: 900000
+  # Task 25 (Orders Cancellation & Driver Availability Security
+  # Remediation), extending ADR-055 (Session Authentication and Password
+  # Credential): the shared HMAC secret this module's own new
+  # SessionTokenVerifier checks a session token against, used only by
+  # POST /v1/drivers/{id}/availability. Deliberately left unset here -- an
+  # unset pios.session.secret makes SessionTokenVerifier.verify() return
+  # null for every token, so that endpoint responds 401, the same
+  # fail-closed posture pios.owner.* already establishes above. Must be
+  # set to the exact same value `identity`'s own pios.session.secret
+  # carries -- this module has no build-time dependency on identity and
+  # never calls it; verification is entirely local (ADR-055 Decision 1).
+  # session:
+  #   secret: ""

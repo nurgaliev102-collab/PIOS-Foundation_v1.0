@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
@@ -58,14 +59,37 @@ import org.springframework.web.bind.annotation.RestController
  * default availability; a [driverId] that already identifies a saved
  * Driver surfaces as [DriverAlreadyExistsException], mapped to 409
  * Conflict, the same status Dispatch's own `ProposalController` uses for
- * its own conflicting-creation cases.
+ * its own conflicting-creation cases. Left unauthenticated by this
+ * controller, including after Task 25 (below) -- Task 24's own audit
+ * classified this endpoint LOW/informational, not a remediation target:
+ * it is a pre-authentication "first contact" action creating a brand-new
+ * resource named by a caller-generated, unguessable UUID, the same
+ * legitimate shape `IdentityController.register` already has, not a
+ * mutation of an existing, already-owned resource.
+ *
+ * ## Task 25 (Orders Cancellation & Driver Availability Security Remediation)
+ *
+ * `declareAvailability` now requires a `Bearer` session token whose own
+ * `drv` equals the path's own [driverId] -- closing the gap Task 24's own
+ * audit found (`docs/PIOS_TAXI_TASK_24_REMAINING_MUTATION_API_SECURITY_AUDIT.md`).
+ * [sessionTokenVerifier] is a new file in this module (no copy existed
+ * before this task), but not a new mechanism -- the fifth replica of the
+ * identical class already present in `dispatch`/`order-management`/
+ * `passenger-experience`/`identity` (ADR-055 Decision 1's own "replicate,
+ * don't share" rule, `MODULE_STRUCTURE.md` Section 4). The check itself
+ * mirrors [com.pios.dispatch.api.ProposalController.acceptProposal]'s own
+ * identical shape (Task 21): 401 with no valid token, 403 for a
+ * differently-named or passenger-only (`drv == null`) token, checked
+ * before the existing 404/400 mapping below, exactly the same ordering
+ * that controller already established.
  */
 @RestController
 @RequestMapping("/v1/drivers")
 class DriverController(
     private val retrieveDriverAvailabilityHandler: RetrieveDriverAvailabilityHandler,
     private val driverAvailabilityApplicationService: DriverAvailabilityApplicationService,
-    private val createDriverApplicationService: CreateDriverApplicationService
+    private val createDriverApplicationService: CreateDriverApplicationService,
+    private val sessionTokenVerifier: SessionTokenVerifier
 ) {
 
     @PostMapping
@@ -103,10 +127,16 @@ class DriverController(
     @PostMapping("/{driverId}/availability")
     fun declareAvailability(
         @PathVariable driverId: String,
-        @RequestBody request: DeclareAvailabilityRequest
-    ): ResponseEntity<DriverResponse> =
-        try {
+        @RequestBody request: DeclareAvailabilityRequest,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<DriverResponse> {
+        return try {
             val id = DriverId(driverId)
+            val verified = sessionTokenVerifier.verify(authorization)
+                ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            if (verified.drv != driverId) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+            }
             val availability = Availability.valueOf(request.availability)
             driverAvailabilityApplicationService.handle(DeclareAvailabilityCommand(id, availability))
             ResponseEntity.ok(DriverResponse(id.value, availability.name))
@@ -115,4 +145,5 @@ class DriverController(
         } catch (ex: IllegalArgumentException) {
             ResponseEntity.badRequest().build()
         }
+    }
 }

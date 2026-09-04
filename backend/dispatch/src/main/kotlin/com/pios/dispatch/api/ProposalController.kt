@@ -78,6 +78,24 @@ import org.springframework.web.bind.annotation.RestController
  * returned domain event's `orderId`/`driverId`, plus the terminal status
  * the domain guarantees on success, since [ProposalDeclined]/[ProposalLapsed]
  * do not themselves carry the proposal's id or status.
+ *
+ * ## Task 21 (Proposal API Security Remediation)
+ *
+ * `createProposal`, `acceptProposal`, `declineProposal`, and
+ * `lapseProposal` each now require an `Authorization` header, closing the
+ * previously fully public, unauthenticated write surface Task 19/20
+ * documented and audited. No new authentication mechanism was introduced
+ * -- [sessionTokenVerifier] and [ownerCredentialGate], both already
+ * constructor-injected into this class (previously used only by
+ * `listProposalsForDriver`), are the only collaborators this change adds
+ * to any method. See each method's own KDoc for the exact check; see
+ * `docs/PIOS_TAXI_TASK_20_PROPOSAL_SECURITY_AUDIT.md` and
+ * `docs/PIOS_TAXI_TASK_21_PROPOSAL_SECURITY_REMEDIATION_REPORT.md` for
+ * the full audit and remediation record, including what this change
+ * deliberately does not attempt to close (verifying that an authenticated
+ * passenger actually owns the order they are proposing on — `Proposal`
+ * carries no `passengerReference`, and closing that gap is a named,
+ * separate architectural decision, not part of this remediation).
  */
 @RestController
 @RequestMapping("/v1/proposals")
@@ -90,10 +108,27 @@ class ProposalController(
 ) {
 
     @PostMapping
-    fun createProposal(@RequestBody request: ProposeDriverRequest): ResponseEntity<ProposalResponse> =
-        try {
+    fun createProposal(
+        @RequestBody request: ProposeDriverRequest,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<ProposalResponse> {
+        return try {
             val order = OrderReference(request.orderId)
             val driver = DriverReference(request.driverId)
+            // Task 21 (Proposal API Security Remediation): anonymous
+            // creation is no longer permitted -- any authenticated caller
+            // (any passenger's own verified session token, `sub` alone,
+            // no further check) or the owner/coordinator credential is
+            // sufficient. Deliberately does NOT verify the token's `sub`
+            // against the order's own passenger, and deliberately does NOT
+            // restrict which `driverId` may be named -- both are Task 20's
+            // own named, out-of-scope residual gap (Proposal carries no
+            // `passengerReference`; naming any driver is this product's
+            // own existing, legitimate behavior for both real callers).
+            val authorized = sessionTokenVerifier.verify(authorization) != null || ownerCredentialGate.verify(authorization)
+            if (!authorized) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            }
             val created = proposalApplicationService.handle(ProposeDriverCommand(order, driver, request.isTest))
             ResponseEntity.status(HttpStatus.CREATED).body(created.proposal.toResponse())
         } catch (ex: IllegalArgumentException) {
@@ -116,14 +151,44 @@ class ProposalController(
             // produced it.
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         }
+    }
 
+    /**
+     * Task 21 (Proposal API Security Remediation): requires a `Bearer`
+     * session token verifying as the exact driver named on this proposal
+     * -- mirrors `listProposalsForDriver`'s own already-established
+     * `?driverId=` pattern (ADR-060 Decision 4/Answer 2) exactly, the
+     * first precedent for this same identity check inside this same
+     * controller. The proposal is read once, directly
+     * ([proposalRepository.findById]), before delegating to the existing
+     * self-fetching orchestration -- 404 if it does not exist, checked
+     * *before* the 403 comparison so a fully anonymous/unauthenticated
+     * caller never learns whether a given id exists at all (401, before
+     * any lookup), and an authenticated-but-wrong-driver caller sees the
+     * same 404/403 split this controller already gives every other
+     * not-found/conflict case. Does not touch
+     * [ProposalAssignmentOrchestrationService.acceptProposal]'s own
+     * internal self-fetch -- that re-read, moments later in the same
+     * request, is redundant but harmless, and keeps this change entirely
+     * inside the transport boundary, exactly as this controller's own
+     * KDoc already states its own scope to be ("no business logic beyond
+     * transport-level conversion").
+     */
     @PostMapping("/{proposalId}/accept")
     fun acceptProposal(
         @PathVariable proposalId: String,
-        @RequestBody(required = false) request: AcceptProposalRequest? = null
-    ): ResponseEntity<ProposalResponse> =
-        try {
+        @RequestBody(required = false) request: AcceptProposalRequest? = null,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<ProposalResponse> {
+        return try {
             val id = ProposalId(proposalId)
+            val verified = sessionTokenVerifier.verify(authorization)
+                ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            val proposal = proposalRepository.findById(id)
+                ?: return ResponseEntity.notFound().build()
+            if (verified.drv != proposal.driver.driverId) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+            }
             val outcome = proposalAssignmentOrchestrationService.acceptProposal(
                 AcceptProposalCommand(id, request?.statedPrice, request?.statedEtaMinutes)
             )
@@ -135,11 +200,23 @@ class ProposalController(
         } catch (ex: IllegalStateException) {
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         }
+    }
 
+    /** Task 21: identical identity check to [acceptProposal]'s own — see that method's own KDoc. */
     @PostMapping("/{proposalId}/decline")
-    fun declineProposal(@PathVariable proposalId: String): ResponseEntity<ProposalResponse> =
-        try {
+    fun declineProposal(
+        @PathVariable proposalId: String,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<ProposalResponse> {
+        return try {
             val id = ProposalId(proposalId)
+            val verified = sessionTokenVerifier.verify(authorization)
+                ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            val proposal = proposalRepository.findById(id)
+                ?: return ResponseEntity.notFound().build()
+            if (verified.drv != proposal.driver.driverId) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+            }
             val event = proposalApplicationService.declineProposal(DeclineProposalCommand(id))
             ResponseEntity.ok(
                 ProposalResponse(id.value, event.orderId.orderId, event.driverId.driverId, ProposalStatus.DECLINED.name)
@@ -151,11 +228,29 @@ class ProposalController(
         } catch (ex: IllegalStateException) {
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         }
+    }
 
+    /**
+     * Task 21: restricted to the owner/coordinator credential only --
+     * unlike [acceptProposal]/[declineProposal], no driver or passenger
+     * has a legitimate reason to call this endpoint directly.
+     * [com.pios.dispatch.application.ProposalLapseScheduler] (the real,
+     * periodic production trigger for this transition) calls
+     * [ProposalApplicationService.lapseProposal] directly, in-process --
+     * never through this HTTP endpoint, never through this
+     * `Authorization` check -- so it is entirely unaffected by this
+     * change.
+     */
     @PostMapping("/{proposalId}/lapse")
-    fun lapseProposal(@PathVariable proposalId: String): ResponseEntity<ProposalResponse> =
-        try {
+    fun lapseProposal(
+        @PathVariable proposalId: String,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<ProposalResponse> {
+        return try {
             val id = ProposalId(proposalId)
+            if (!ownerCredentialGate.verify(authorization)) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            }
             val event = proposalApplicationService.lapseProposal(LapseProposalCommand(id))
             ResponseEntity.ok(
                 ProposalResponse(id.value, event.orderId.orderId, event.driverId.driverId, ProposalStatus.LAPSED.name)
@@ -167,6 +262,7 @@ class ProposalController(
         } catch (ex: IllegalStateException) {
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         }
+    }
 
     @GetMapping("/{proposalId}")
     fun getProposal(@PathVariable proposalId: String): ResponseEntity<ProposalResponse> =

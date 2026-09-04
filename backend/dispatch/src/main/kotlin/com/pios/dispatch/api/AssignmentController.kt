@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
@@ -114,13 +115,30 @@ import org.springframework.web.bind.annotation.RestController
  * `ACCEPTED`, the only two states Trip does not itself model). The wire
  * shape ([AssignmentResponse]'s own fields, this endpoint's own URLs) is
  * completely unchanged — no frontend caller needs to know Trip exists.
+ *
+ * ## Task 23 (Assignment API Security Remediation)
+ *
+ * `arrive`/`start`/`complete` now require an `Authorization` header
+ * naming, via a verified `Bearer` session token, the exact driver this
+ * Assignment's own [Assignment.driver] names — closing the gap Task 22's
+ * own audit found (`docs/PIOS_TAXI_TASK_22_ASSIGNMENT_SECURITY_AUDIT.md`),
+ * using no new mechanism: [sessionTokenVerifier] is the same class
+ * [ProposalController]'s own `acceptProposal`/`declineProposal` already
+ * use for the identical check (Task 21), and [Assignment.driver] already
+ * carried the field this check reads — nothing new was added to the
+ * domain model. `listAssignments` and the deprecated `assignOrder` are
+ * deliberately **not** touched by this task (Task 22's own Section 6/9:
+ * the former is an already-ratified, deliberately open read; the latter
+ * has no real caller today and Task 23's own scope names only
+ * `arrive`/`start`/`complete`).
  */
 @RestController
 @RequestMapping("/v1/assignments")
 class AssignmentController(
     private val dispatchAssignmentApplicationService: DispatchAssignmentApplicationService,
     private val assignmentRepository: AssignmentRepository,
-    private val tripRepository: TripRepository = NoOpTripRepository
+    private val tripRepository: TripRepository = NoOpTripRepository,
+    private val sessionTokenVerifier: SessionTokenVerifier
 ) {
 
     @Deprecated(
@@ -157,11 +175,33 @@ class AssignmentController(
             ResponseEntity.badRequest().build()
         }
 
+    /**
+     * Task 23: requires a `Bearer` session token verifying as the exact
+     * driver named on this Assignment -- mirrors
+     * [ProposalController.acceptProposal]'s own identical check (Task 21)
+     * exactly, down to the ordering: the token is verified first (401,
+     * before any lookup, so a fully anonymous caller never learns whether
+     * a given id exists at all); the Assignment is then looked up (404 if
+     * it does not exist); only then is the verified driver compared
+     * against [Assignment.driver] (403 on mismatch, including a
+     * passenger-only token with `drv == null`).
+     */
     @PostMapping("/{assignmentId}/arrive")
-    fun arrive(@PathVariable assignmentId: String): ResponseEntity<AssignmentResponse> =
-        try {
-            dispatchAssignmentApplicationService.arriveAssignment(ArriveAssignmentCommand(AssignmentId(assignmentId)))
-            ResponseEntity.ok(assignmentRepository.findById(AssignmentId(assignmentId))!!.let {
+    fun arrive(
+        @PathVariable assignmentId: String,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<AssignmentResponse> {
+        return try {
+            val id = AssignmentId(assignmentId)
+            val verified = sessionTokenVerifier.verify(authorization)
+                ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            val assignment = assignmentRepository.findById(id)
+                ?: return ResponseEntity.notFound().build()
+            if (verified.drv != assignment.driver.driverId) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+            }
+            dispatchAssignmentApplicationService.arriveAssignment(ArriveAssignmentCommand(id))
+            ResponseEntity.ok(assignmentRepository.findById(id)!!.let {
                 it.toResponse(tripRepository.findByAssignmentId(it.id))
             })
         } catch (ex: AssignmentNotFoundException) {
@@ -171,12 +211,25 @@ class AssignmentController(
         } catch (ex: IllegalStateException) {
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         }
+    }
 
+    /** Task 23: identical identity check to [arrive]'s own — see that method's own KDoc. */
     @PostMapping("/{assignmentId}/start")
-    fun start(@PathVariable assignmentId: String): ResponseEntity<AssignmentResponse> =
-        try {
-            dispatchAssignmentApplicationService.startAssignment(StartAssignmentCommand(AssignmentId(assignmentId)))
-            ResponseEntity.ok(assignmentRepository.findById(AssignmentId(assignmentId))!!.let {
+    fun start(
+        @PathVariable assignmentId: String,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<AssignmentResponse> {
+        return try {
+            val id = AssignmentId(assignmentId)
+            val verified = sessionTokenVerifier.verify(authorization)
+                ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            val assignment = assignmentRepository.findById(id)
+                ?: return ResponseEntity.notFound().build()
+            if (verified.drv != assignment.driver.driverId) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+            }
+            dispatchAssignmentApplicationService.startAssignment(StartAssignmentCommand(id))
+            ResponseEntity.ok(assignmentRepository.findById(id)!!.let {
                 it.toResponse(tripRepository.findByAssignmentId(it.id))
             })
         } catch (ex: AssignmentNotFoundException) {
@@ -186,12 +239,25 @@ class AssignmentController(
         } catch (ex: IllegalStateException) {
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         }
+    }
 
+    /** Task 23: identical identity check to [arrive]'s own — see that method's own KDoc. */
     @PostMapping("/{assignmentId}/complete")
-    fun complete(@PathVariable assignmentId: String): ResponseEntity<AssignmentResponse> =
-        try {
-            dispatchAssignmentApplicationService.completeAssignment(CompleteAssignmentCommand(AssignmentId(assignmentId)))
-            ResponseEntity.ok(assignmentRepository.findById(AssignmentId(assignmentId))!!.let {
+    fun complete(
+        @PathVariable assignmentId: String,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<AssignmentResponse> {
+        return try {
+            val id = AssignmentId(assignmentId)
+            val verified = sessionTokenVerifier.verify(authorization)
+                ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            val assignment = assignmentRepository.findById(id)
+                ?: return ResponseEntity.notFound().build()
+            if (verified.drv != assignment.driver.driverId) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+            }
+            dispatchAssignmentApplicationService.completeAssignment(CompleteAssignmentCommand(id))
+            ResponseEntity.ok(assignmentRepository.findById(id)!!.let {
                 it.toResponse(tripRepository.findByAssignmentId(it.id))
             })
         } catch (ex: AssignmentNotFoundException) {
@@ -201,6 +267,7 @@ class AssignmentController(
         } catch (ex: IllegalStateException) {
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         }
+    }
 
     /**
      * Projects [this] Assignment merged with its connected [trip] (`null`
