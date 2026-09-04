@@ -638,6 +638,7 @@ export function RideRequest() {
       await request(`/v1/orders/${orderId}/cancel`, {
         method: 'POST',
         baseUrl: ORDER_MANAGEMENT_BASE_URL,
+        headers: { Authorization: `Bearer ${identity!.token}` },
       })
       setRideStatus('WITHDRAWN')
       setCancelStatus('idle')

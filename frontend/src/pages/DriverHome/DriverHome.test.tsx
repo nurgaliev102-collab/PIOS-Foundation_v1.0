@@ -51,6 +51,26 @@ describe('DriverHome', () => {
     vi.restoreAllMocks()
   })
 
+  // --- Driver availability security (Task 25: Orders Cancellation & Driver Availability Security Remediation) ---
+
+  it('sends this driver\'s own Bearer token on POST /v1/drivers/:id/availability', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'UNAVAILABLE', displayName: 'Иван' })
+
+    renderDriverHome()
+
+    const toggleButton = await screen.findByRole('button', { name: 'Выйти на линию' })
+
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE' })
+    await userEvent.click(toggleButton)
+
+    const availabilityCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/drivers/driver-1/availability')
+    expect(availabilityCall).toBeDefined()
+    expect((availabilityCall?.[1] as RequestInit).headers as Record<string, string>).toMatchObject({
+      Authorization: `Bearer ${TEST_IDENTITY.token}`,
+    })
+  })
+
   // --- Order query authorization (ADR-060) ---
 
   it('sends this driver\'s own Bearer token on both /v1/proposals?driverId= and the chained /v1/orders?ids=', async () => {
@@ -121,6 +141,74 @@ describe('DriverHome', () => {
     expect(acceptCall).toBeDefined()
     const init = acceptCall?.[1] as RequestInit
     expect(JSON.parse(init.body as string)).toEqual({ statedEtaMinutes: 5 })
+    // Task 21 (Proposal API Security Remediation): accept now requires
+    // this driver's own Bearer token, verified server-side against the
+    // proposal's own named driver.
+    expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TEST_IDENTITY.token}`)
+  })
+
+  // --- Proposal API security (Task 21: Proposal API Security Remediation) ---
+
+  it('sends this driver\'s own Bearer token on POST /v1/proposals/:id/decline', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p2', orderId: 'o2', driverId: 'driver-1', status: 'OPEN', statedPrice: null, statedEtaMinutes: null },
+    ])
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderDriverHome()
+
+    await screen.findByRole('button', { name: 'Отклонить' })
+
+    mockedRequest.mockResolvedValueOnce({
+      proposalId: 'p2',
+      orderId: 'o2',
+      driverId: 'driver-1',
+      status: 'DECLINED',
+      statedPrice: null,
+      statedEtaMinutes: null,
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Отклонить' }))
+
+    const declineCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/proposals/p2/decline')
+    expect(declineCall).toBeDefined()
+    const init = declineCall?.[1] as RequestInit
+    expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TEST_IDENTITY.token}`)
+  })
+
+  // --- Assignment API security (Task 23: Assignment API Security Remediation) ---
+
+  it('sends this driver\'s own Bearer token on POST /v1/assignments/:id/arrive', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p3', orderId: 'o3', driverId: 'driver-1', status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: null },
+    ])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
+    mockedRequest.mockResolvedValueOnce([
+      { assignmentId: 'a1', orderId: 'o3', driverId: 'driver-1', status: 'CREATED', statusChangedAt: null },
+    ]) // GET /v1/assignments?orderId=o3
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o3
+
+    renderDriverHome()
+
+    await screen.findByRole('button', { name: 'Прибыл' })
+
+    mockedRequest.mockResolvedValueOnce({
+      assignmentId: 'a1',
+      orderId: 'o3',
+      driverId: 'driver-1',
+      status: 'ARRIVED',
+      statusChangedAt: '2026-08-16T09:03:00Z',
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Прибыл' }))
+
+    const arriveCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/assignments/a1/arrive')
+    expect(arriveCall).toBeDefined()
+    const init = arriveCall?.[1] as RequestInit
+    expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TEST_IDENTITY.token}`)
   })
 
   it('shows the driver\'s own stated ETA once a proposal is accepted', async () => {

@@ -155,6 +155,12 @@ describe('RideRequest', () => {
     const cancelCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/orders/order-1/cancel')
     expect(cancelCall).toBeDefined()
     expect((cancelCall?.[1] as RequestInit).method).toBe('POST')
+    // Task 25 (Orders Cancellation & Driver Availability Security
+    // Remediation): cancel now requires this passenger's own Bearer
+    // token, verified server-side against the order's own origin.
+    expect((cancelCall?.[1] as RequestInit).headers as Record<string, string>).toMatchObject({
+      Authorization: `Bearer ${TEST_IDENTITY.token}`,
+    })
   })
 
   it('does not offer to cancel once the driver has already accepted', async () => {

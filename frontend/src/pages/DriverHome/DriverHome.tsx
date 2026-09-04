@@ -600,8 +600,18 @@ export function DriverHome() {
     })
   }
 
+  // Task 23 (Assignment API Security Remediation): arrive/start/complete
+  // now require an Authorization header naming this driver's own
+  // session -- Dispatch verifies it names the exact driver this
+  // Assignment belongs to before permitting any of the three (see
+  // docs/PIOS_TAXI_TASK_22_ASSIGNMENT_SECURITY_AUDIT.md and
+  // docs/PIOS_TAXI_TASK_23_ASSIGNMENT_SECURITY_REMEDIATION_REPORT.md).
+  // identity is guaranteed non-null here for the same reason Task 21
+  // already established for respondToProposal, moments away in this same
+  // file: this whole screen returns early, before any JSX, when identity
+  // is null.
   async function respondToAssignment(assignmentId: string, action: 'arrive' | 'start' | 'complete') {
-    if (assignmentActions[assignmentId] === 'submitting') {
+    if (assignmentActions[assignmentId] === 'submitting' || !identity) {
       return
     }
     setAssignmentActions((current) => ({ ...current, [assignmentId]: 'submitting' }))
@@ -609,6 +619,7 @@ export function DriverHome() {
       const updated = await request<AssignmentInfo>(`/v1/assignments/${assignmentId}/${action}`, {
         method: 'POST',
         baseUrl: DISPATCH_BASE_URL,
+        headers: { Authorization: `Bearer ${identity.token}` },
       })
       setAssignments((current) => ({ ...current, [updated.orderId]: updated }))
       setAssignmentActions((current) => ({ ...current, [assignmentId]: 'idle' }))
@@ -759,16 +770,28 @@ export function DriverHome() {
     }
   }
 
+  // Task 21 (Proposal API Security Remediation): accept/decline now
+  // require an Authorization header naming this driver's own session --
+  // Dispatch verifies it names the exact driver a proposal was made to
+  // before permitting either action (see
+  // docs/PIOS_TAXI_TASK_20_PROPOSAL_SECURITY_AUDIT.md). identity is
+  // guaranteed non-null here: this whole screen already returns early,
+  // before any JSX (and so before this function could ever be invoked by
+  // a click), when identity is null -- same guarantee `identity.token`
+  // already relies on elsewhere in this component (e.g. loadProposals's
+  // own call sites).
   async function respondToProposal(proposalId: string, action: 'accept' | 'decline') {
-    if (proposalActions[proposalId] === 'submitting') {
+    if (proposalActions[proposalId] === 'submitting' || !identity) {
       return
     }
     setProposalActions((current) => ({ ...current, [proposalId]: 'submitting' }))
     try {
+      const extra = action === 'accept' ? acceptRequestInit(proposalId) : {}
       const updated = await request<ProposalListItem>(`/v1/proposals/${proposalId}/${action}`, {
         method: 'POST',
         baseUrl: DISPATCH_BASE_URL,
-        ...(action === 'accept' ? acceptRequestInit(proposalId) : {}),
+        ...extra,
+        headers: { ...(extra.headers ?? {}), Authorization: `Bearer ${identity.token}` },
       })
       setProposals((current) => current.map((proposal) => (proposal.proposalId === proposalId ? updated : proposal)))
       setProposalActions((current) => ({ ...current, [proposalId]: 'idle' }))
@@ -784,13 +807,23 @@ export function DriverHome() {
 
   /**
    * Flips this driver's own state via the existing, already-tested
-   * `POST /v1/drivers/:id/availability` (`DriverController.declareAvailability`,
-   * Driver Management — untouched by this change). Only `availability`
-   * from the response is merged into [driver] (see [AvailabilityResponse]'s
-   * own KDoc for why the response is not used wholesale).
+   * `POST /v1/drivers/:id/availability` (`DriverController.declareAvailability`).
+   * Only `availability` from the response is merged into [driver] (see
+   * [AvailabilityResponse]'s own KDoc for why the response is not used
+   * wholesale).
+   *
+   * Task 25 (Orders Cancellation & Driver Availability Security
+   * Remediation): now sends this driver's own Bearer token --
+   * `DriverController` verifies it names the exact driver in the URL
+   * before permitting the change (see
+   * docs/PIOS_TAXI_TASK_24_REMAINING_MUTATION_API_SECURITY_AUDIT.md and
+   * docs/PIOS_TAXI_TASK_25_SECURITY_REMEDIATION_REPORT.md). identity is
+   * guaranteed non-null here for the same reason already established for
+   * `respondToProposal`/`respondToAssignment` (Task 21/23): this whole
+   * screen returns early, before any JSX, when identity is null.
    */
   async function toggleAvailability() {
-    if (!driver || availabilityAction === 'submitting') {
+    if (!driver || availabilityAction === 'submitting' || !identity) {
       return
     }
     const nextAvailability = driver.availability === 'AVAILABLE' ? 'UNAVAILABLE' : 'AVAILABLE'
@@ -798,7 +831,7 @@ export function DriverHome() {
     try {
       const response = await request<AvailabilityResponse>(`/v1/drivers/${driver.id}/availability`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity.token}` },
         body: JSON.stringify({ availability: nextAvailability }),
       })
       setDriver((current) => (current ? { ...current, availability: response.availability } : current))
@@ -1081,7 +1114,6 @@ export function DriverHome() {
               availability={driver.availability}
               hideCode
             />
-            <p className={styles.hint}>Скоро: подтверждение номера телефона.</p>
             <QRCard
               invitationLink={invitationProvider.linkFor(driver.id)}
               linkTo={`/i/${driver.id}`}
@@ -1132,6 +1164,10 @@ export function DriverHome() {
         <div className={styles.sectionHeader}>
           <h2 className={styles.sectionTitle}>Ваши заказы</h2>
         </div>
+        <p className={styles.hint}>
+          Здесь появляются заявки от ваших клиентов. Проверьте, откуда забрать пассажира и куда его отвезти, и
+          нажмите «Принять», если готовы выполнить поездку.
+        </p>
 
         {proposalsStatus === 'loading' && <Spinner label="Загружаем заказы…" />}
         {proposalsStatus === 'error' && (
