@@ -1,0 +1,94 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pios-space-2);
+  min-height: var(--pios-touch-target-min);
+  padding: 0.625rem var(--pios-space-5);
+  border-radius: var(--pios-radius-full);
+  border: 1px solid transparent;
+  font-family: var(--pios-font-family);
+  font-size: var(--pios-font-size-button);
+  font-weight: var(--pios-font-weight-button);
+  cursor: pointer;
+  transition: transform var(--pios-motion-fast) var(--pios-motion-ease-out), opacity var(--pios-motion-fast) var(--pios-motion-ease-out),
+    background-color var(--pios-motion-fast) var(--pios-motion-ease-out);
+  flex: 1;
+}
+
+.button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--pios-color-focus-ring);
+  outline-offset: 2px;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.primary {
+  background: var(--pios-color-accent);
+  color: var(--pios-color-surface);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--pios-color-accent-hover);
+}
+
+.secondary {
+  background: var(--pios-color-background);
+  color: var(--pios-color-text-primary);
+  border-color: var(--pios-color-border);
+}
+
+.secondary:hover:not(:disabled) {
+  background: var(--pios-color-border);
+}
+
+.destructive {
+  background: var(--pios-color-error-surface);
+  color: var(--pios-color-error);
+  border-color: var(--pios-color-error-surface);
+}
+
+.destructive:hover:not(:disabled) {
+  border-color: var(--pios-color-error);
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  opacity: 0.85;
+  animation: pios-button-spin 0.7s linear infinite;
+}
+
+@keyframes pios-button-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button {
+    transition: none;
+  }
+  .button:active:not(:disabled) {
+    transform: none;
+  }
+  .spinner {
+    animation-duration: 1.6s;
+  }
+}

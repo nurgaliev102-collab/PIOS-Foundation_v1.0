@@ -1,0 +1,28 @@
+.wrap {
+  width: 100%;
+  border-left: 3px solid var(--pios-color-accent);
+  border-radius: var(--pios-radius-md);
+}
+
+.wrap > * {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: var(--pios-space-3);
+}
+
+.actions {
+  display: flex;
+  gap: var(--pios-space-3);
+  width: 100%;
+}
+
+.actions > * {
+  flex: 1;
+}

@@ -1,0 +1,143 @@
+/**
+ * PIOS design tokens — docs/PIOS_DESIGN_SYSTEM.md Section 3.
+ *
+ * Semantic roles, not component-specific colors. Every value below either
+ * (a) matches the de facto palette already in use across the app's own
+ * `.module.css` files (docs/PIOS_DESIGN_SYSTEM.md Section 0's own audit —
+ * consolidation, not invention), or (b) is a documented, deliberate
+ * decision for a role that document flagged as needing one before a real
+ * implementation could exist. Every deviation from Section 0 is called out
+ * inline, per this task's own instruction: "Where the existing palette
+ * conflicts with the PIOS Design Brief, follow the Design Brief and
+ * document the decision."
+ *
+ * Consumed by CSS Modules as `var(--pios-*)`. Nothing here is a component
+ * style — components read these tokens, never hardcode a value of their
+ * own for anything defined below.
+ */
+
+:root {
+  /* ---- Color: surfaces & text -------------------------------------- */
+  --pios-color-background: #f8fafc;
+  --pios-color-surface: #ffffff;
+  /* Elevation is expressed via --pios-shadow-raised (below), not a
+     distinct surface color, per PIOS_DESIGN_SYSTEM.md Section 3 (Color →
+     surface-elevated: "elevation via shadow, not a separate color"). */
+  --pios-color-text-primary: #0f172a;
+  --pios-color-text-secondary: #64748b;
+  --pios-color-text-muted: #94a3b8;
+  --pios-color-border: #e2e8f0;
+  --pios-color-border-strong: #cbd5e1;
+
+  /* ---- Color: accent -------------------------------------------------
+     DECISION (this task): kept as the existing de facto value (#2563eb),
+     not replaced. docs/PIOS_DESIGN_SYSTEM.md flagged this exact hue as
+     needing a deliberate decision, since it is the generic Tailwind/SaaS
+     blue the design brief's anti-pattern list (Section 11) warns about in
+     its "gradient"/"glassmorphism" form. On inspection here, the existing
+     usage is a single, flat, solid color, used sparingly for exactly one
+     primary action per screen, with no gradient and no glass effect —
+     which is what brief Section 4 ("a single accent used sparingly... no
+     gradient") actually asks for. The anti-pattern is the *treatment*
+     (gradient/glass/AI-startup purple), not this specific blue hue used
+     flatly. Kept for now as the lower-risk choice (no invented brand
+     color without Product Owner sign-off); the final brand-accent
+     decision remains open, exactly as PIOS_DESIGN_SYSTEM.md Section 16
+     already states — see docs/PIOS_DESIGN_IMPLEMENTATION_LOG.md. ------- */
+  --pios-color-accent: #2563eb;
+  --pios-color-accent-hover: #1d4ed8;
+  --pios-color-accent-pressed: #1d4ed8;
+  --pios-color-focus-ring: #2563eb;
+
+  /* ---- Color: semantic status ---------------------------------------- */
+  --pios-color-success: #16a34a;
+  --pios-color-success-surface: #f0fdf4;
+  --pios-color-warning: #ca8a04;
+  --pios-color-warning-surface: #fefce8;
+  --pios-color-error: #dc2626;
+  --pios-color-error-surface: #fef2f2;
+  /* --pios-color-information: not distinctly used anywhere in the current
+     codebase (PIOS_DESIGN_SYSTEM.md Section 3 notes this). Derived from
+     the accent at reduced strength, per that document's own
+     recommendation ("deriving from --pios-color-accent... rather than
+     introducing a new hue"), so "waiting/informational" reads as a
+     close relative of the one accent already on the page, not a new
+     competing hue. */
+  --pios-color-information: #2563eb;
+  --pios-color-information-surface: #eff6ff;
+
+  /* ---- Color: trust / recognized-relationship -------------------------
+     DECISION (this task): new token, no prior de facto value existed.
+     Deliberately NOT --pios-color-success's green (a ride succeeding and
+     "this is someone you know" must never be visually conflated — brief
+     Section 4, design-system Section 3) and deliberately not a saturated
+     hue at all — a warm, muted neutral so it reads as *recognition*,
+     not as another status alert. Used only by trust/recognition context
+     (e.g. a returning-passenger or Circle-of-Trust indicator), never
+     borrowed by any other component. ------------------------------------ */
+  --pios-color-trust: #92400e;
+  --pios-color-trust-surface: #fef3e2;
+
+  /* ---- Typography ----------------------------------------------------- */
+  --pios-font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  --pios-font-size-display: 1.625rem;
+  --pios-font-weight-display: 700;
+  --pios-line-height-display: 1.25;
+
+  --pios-font-size-heading: 1.1875rem;
+  --pios-font-weight-heading: 600;
+  --pios-line-height-heading: 1.3;
+
+  --pios-font-size-body: 0.9375rem;
+  --pios-font-weight-body: 400;
+  --pios-font-weight-body-strong: 600;
+  --pios-line-height-body: 1.5;
+
+  --pios-font-size-label: 0.8125rem;
+  --pios-font-weight-label: 600;
+  --pios-letter-spacing-label: 0.03em;
+
+  --pios-font-size-caption: 0.75rem;
+  --pios-font-weight-caption: 500;
+
+  --pios-font-size-numeric: 0.9375rem;
+  --pios-font-weight-numeric: 600;
+  /* font-variant-numeric applied by the Text component itself, not a
+     standalone token (there is no CSS custom-property form of it). */
+
+  --pios-font-size-button: 0.9375rem;
+  --pios-font-weight-button: 600;
+
+  /* ---- Spacing ---------------------------------------------------------
+     4px base scale — divides evenly into every spacing value already
+     observed in the existing CSS (docs/PIOS_DESIGN_SYSTEM.md Section 3). */
+  --pios-space-1: 0.25rem;  /* 4px */
+  --pios-space-2: 0.5rem;   /* 8px */
+  --pios-space-3: 0.75rem;  /* 12px */
+  --pios-space-4: 1rem;     /* 16px */
+  --pios-space-5: 1.25rem;  /* 20px — matches existing card padding exactly */
+  --pios-space-6: 1.5rem;   /* 24px */
+  --pios-space-8: 2rem;     /* 32px */
+
+  /* ---- Radius ------------------------------------------------------- */
+  --pios-radius-sm: 8px;
+  --pios-radius-md: 16px;
+  --pios-radius-full: 999px;
+
+  /* ---- Elevation -------------------------------------------------------
+     Two levels only, per docs/PIOS_DESIGN_SYSTEM.md Section 3 — a
+     restrained ceiling, deliberately not a multi-layer shadow scale. */
+  --pios-shadow-none: none;
+  --pios-shadow-raised: 0 4px 16px rgba(15, 23, 42, 0.12);
+
+  /* ---- Motion --------------------------------------------------------- */
+  --pios-motion-fast: 100ms;
+  --pios-motion-base: 200ms;
+  --pios-motion-slow: 350ms;
+  --pios-motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --pios-motion-ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+
+  /* ---- Touch target ------------------------------------------------- */
+  --pios-touch-target-min: 44px;
+}

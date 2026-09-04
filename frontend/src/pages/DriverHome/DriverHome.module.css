@@ -124,32 +124,9 @@
   text-align: center;
 }
 
-.availabilityCard {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-  padding: 0.875rem 1rem;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-}
-
-.availabilityTitle {
-  margin: 0;
-  font-size: 1.0625rem;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.availabilityHint {
-  margin: 0;
-  font-size: 0.875rem;
-  color: #64748b;
-}
-
-/* H6 ("Driver Growth Snapshot") -- same card shape as .availabilityCard
-   just above it, so this reads as one more fact about today, not a
-   separate widget bolted on. */
+/* H6 ("Driver Growth Snapshot") -- same card shape `AvailabilityStatus`
+   (a design-system `Card`) already uses just above it, so this reads as
+   one more fact about today, not a separate widget bolted on. */
 .growthCard {
   display: flex;
   flex-direction: column;
@@ -221,62 +198,6 @@
   font-size: 1.125rem;
   font-weight: 700;
   color: #0f172a;
-}
-
-.proposalRow {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.875rem 1rem;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-}
-
-.proposalDetails {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.proposalOrderId {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #0f172a;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-.proposalStatus {
-  flex-shrink: 0;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  padding: 0.125rem 0.5rem;
-  border-radius: 999px;
-}
-
-.proposalOpen {
-  color: #1d4ed8;
-  background: #eff6ff;
-}
-
-.proposalAccepted {
-  color: #15803d;
-  background: #f0fdf4;
-}
-
-.proposalResolved {
-  color: #64748b;
-  background: #f1f5f9;
-}
-
-.proposalActions {
-  display: flex;
-  gap: 0.5rem;
 }
 
 .error {

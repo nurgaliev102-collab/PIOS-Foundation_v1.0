@@ -5,6 +5,14 @@ import { QRCard } from '../../components/QRCard'
 import { ActionButton } from '../../components/ActionButton'
 import { Spinner } from '../../components/Spinner'
 import { PasswordInput } from '../../components/PasswordInput'
+import { AvailabilityStatus } from '../../components/AvailabilityStatus'
+import { RequestCard } from '../../components/RequestCard'
+import { ActiveRidePanel } from '../../components/ActiveRidePanel'
+import { RideStatus, type RideLifecycleStatus } from '../../components/RideStatus'
+import { Card } from '../../components/Card'
+import { Text } from '../../components/Text'
+import { Input, Select } from '../../components/Input'
+import { StatusMessage } from '../../components/StatusMessage'
 import { ApiError, request } from '../../api/apiClient'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
 import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
@@ -24,6 +32,13 @@ const identityProvider = new BackendIdentityProvider()
 const invitationProvider = new LocalInvitationProvider()
 
 const FEEDBACK_DURATION_MS = 2000
+
+// UX audit (docs/PIOS_DRIVER_HOME_UX_AUDIT.md Section 5/9, "COMPLETE"):
+// slightly longer than FEEDBACK_DURATION_MS -- a completed ride is a more
+// significant moment than a copy/share toast, worth a beat longer on
+// screen, still brief (brief Section 6: "no interstitial platform
+// messaging").
+const RIDE_COMPLETED_FEEDBACK_DURATION_MS = 3000
 
 // First-pilot feedback: a driver had to remember to tap "Обновить" to see a
 // new order — on a real shift that meant missed orders. Polling replaces
@@ -209,6 +224,55 @@ function formatRequestedPickupAt(requestedPickupAt: string | null): string | nul
 }
 
 /**
+ * The detail lines every proposal card shows, regardless of which of the
+ * three presentational shells (`RequestCard`/`ActiveRidePanel`/plain
+ * `Card`) renders it — extracted so all three stay pixel-consistent
+ * without hand-repeating the same conditions three times. Pure
+ * presentation: every condition here is copied unchanged from the JSX
+ * this replaces, not a new rule.
+ */
+function ProposalDetails({
+  proposal,
+  order,
+  time,
+}: {
+  proposal: ProposalListItem
+  order: OrderListItem | undefined
+  time: string | null
+}) {
+  return (
+    <>
+      {/* ADR-058 (Scheduled Pickup Time): shown whenever this order
+          carries a passenger-requested pickup instant, regardless of
+          proposal status -- a driver deciding whether to accept needs to
+          know it is a pre-booking, not only a driver who already has. */}
+      {order?.requestedPickupAt && (
+        <Text role="body">📅 Предварительный заказ: {formatRequestedPickupAt(order.requestedPickupAt)}</Text>
+      )}
+      {order?.passengerName && <Text role="body">Пассажир: {order.passengerName}</Text>}
+      {order?.pickupAddress && <Text role="body">Откуда: {order.pickupAddress}</Text>}
+      {order?.destination && <Text role="body">Куда: {order.destination}</Text>}
+      {time && (
+        <Text role="caption" tone="secondary">
+          Заказ создан: {time}
+        </Text>
+      )}
+      {/* ADR-042 (Stated Ride Price Minimal Model): read-back of the
+          amount this driver themselves stated on acceptance -- from the
+          accept response and/or the same 3s poll that already refreshes
+          every other field on this card, so it survives a reload
+          (R7.2). Nothing is shown if none was entered. */}
+      {proposal.status === 'ACCEPTED' && proposal.statedPrice && <Text role="body">Стоимость: {proposal.statedPrice}</Text>}
+      {/* ADR-057 (Driver Stated Time to Pickup): same read-back pattern
+          as statedPrice immediately above. */}
+      {proposal.status === 'ACCEPTED' && typeof proposal.statedEtaMinutes === 'number' && (
+        <Text role="body">Будет примерно через: {proposal.statedEtaMinutes} мин</Text>
+      )}
+    </>
+  )
+}
+
+/**
  * Sprint "My Business + Circle of Trust", journey item 8 ("Просмотр своих
  * пассажиров"): best-effort passengerReference -> passengerName lookup,
  * built entirely from this driver's own already-fetched orders (no new
@@ -364,6 +428,13 @@ export function DriverHome() {
   // has none yet, so never appears here.
   const [assignments, setAssignments] = useState<Record<string, AssignmentInfo>>({})
   const [assignmentActions, setAssignmentActions] = useState<Record<string, AssignmentActionStatus>>({})
+  // UX audit (docs/PIOS_DRIVER_HOME_UX_AUDIT.md Section 5/9, "COMPLETE"):
+  // a dedicated, transient acknowledgment for ride completion -- its own
+  // state, separate from [feedback] (copy/share), so a completion message
+  // can never be silently overwritten by an unrelated toast, or vice
+  // versa. Same shape as [feedback]/[feedbackTimeout] below on purpose.
+  const [completionFeedback, setCompletionFeedback] = useState<string | null>(null)
+  const completionFeedbackTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // PIOS Onboarding v1 (Product Owner exception, PIOS_PRODUCT_EVIDENCE.md
   // gate): shown once, automatically, the first time this driver's real
@@ -623,6 +694,14 @@ export function DriverHome() {
       })
       setAssignments((current) => ({ ...current, [updated.orderId]: updated }))
       setAssignmentActions((current) => ({ ...current, [assignmentId]: 'idle' }))
+      // UX audit Section 5/9 ("COMPLETE"): the underlying filter that
+      // removes a COMPLETED ride from `visibleProposals` is unchanged
+      // (ADR-040's own "экран освобождается") -- this only adds a brief,
+      // honest acknowledgment before that happens, since a driver
+      // otherwise saw the card vanish with no confirmation at all.
+      if (action === 'complete') {
+        showCompletionFeedback('Поездка завершена')
+      }
     } catch {
       setAssignmentActions((current) => ({ ...current, [assignmentId]: 'error' }))
     }
@@ -847,6 +926,13 @@ export function DriverHome() {
     feedbackTimeout.current = setTimeout(() => setFeedback(null), FEEDBACK_DURATION_MS)
   }
 
+  /** UX audit Section 5/9 ("COMPLETE") — see [completionFeedback]'s own KDoc. */
+  function showCompletionFeedback(message: string) {
+    setCompletionFeedback(message)
+    clearTimeout(completionFeedbackTimeout.current)
+    completionFeedbackTimeout.current = setTimeout(() => setCompletionFeedback(null), RIDE_COMPLETED_FEEDBACK_DURATION_MS)
+  }
+
   async function handleCopy() {
     if (!driver) {
       return
@@ -1064,34 +1150,171 @@ export function DriverHome() {
               Как это работает
             </button>
 
-            <section className={styles.availabilityCard}>
-              <p className={styles.availabilityTitle}>
-                {driver.availability === 'AVAILABLE' ? '🟢 Я на линии' : '🔴 Сегодня не работаю'}
-              </p>
-              <p className={styles.availabilityHint}>
-                {driver.availability === 'AVAILABLE'
-                  ? 'Вы можете получать заказы'
-                  : 'Вы не получаете новые заказы'}
-              </p>
-              <ActionButton
-                label={
-                  availabilityAction === 'submitting'
-                    ? 'Обновляем…'
-                    : driver.availability === 'AVAILABLE'
-                      ? 'Уйти с линии'
-                      : 'Выйти на линию'
-                }
-                variant="primary"
-                onClick={() => void toggleAvailability()}
-                disabled={availabilityAction === 'submitting'}
-              />
-              {availabilityAction === 'error' && (
-                <p className={styles.error} role="alert">
-                  Не удалось обновить. Попробуйте ещё раз.
-                </p>
-              )}
-            </section>
+            <AvailabilityStatus
+              availability={driver.availability}
+              onToggle={() => void toggleAvailability()}
+              loading={availabilityAction === 'submitting'}
+              error={availabilityAction === 'error'}
+            />
+          </>
+        )}
 
+        {/* Information architecture fix
+            (docs/PIOS_DRIVER_HOME_UX_AUDIT.md Sections 4/9/11): "Ваши
+            заказы" -- open requests and the active ride -- now renders
+            directly under AvailabilityStatus, ahead of growth/QR/install/
+            passengers, so the one thing this screen answers ("what do I
+            do right now") is visible without scrolling past business
+            content first. This block's own conditions (independent of
+            `status`/`driver`, gated only by its own `proposalsStatus`,
+            exactly as before) are unchanged -- only its position moved,
+            per that audit's own explicit "reorder only" scope. */}
+        <div className={styles.sectionHeader}>
+          <h2 className={styles.sectionTitle}>Ваши заказы</h2>
+        </div>
+        <p className={styles.hint}>
+          Здесь появляются заявки от ваших клиентов. Проверьте, откуда забрать пассажира и куда его отвезти, и
+          нажмите «Принять», если готовы выполнить поездку.
+        </p>
+
+        {/* UX audit Section 5/9 ("COMPLETE"): a ride used to simply vanish
+            from `visibleProposals` (still does, unchanged -- see that
+            filter's own KDoc, ADR-040's "экран освобождается") with no
+            acknowledgment at all. Minimal fix: the same transient-
+            feedback pattern this file already uses for copy/share
+            (`showFeedback`/`feedbackTimeout`), a dedicated state so it
+            can never be overwritten by an unrelated copy/share toast,
+            rendered with the already-existing `StatusMessage` (no new
+            component, no modal). Clears itself; does not delay or alter
+            the existing filter in any way. */}
+        {completionFeedback && <StatusMessage tone="success">{completionFeedback}</StatusMessage>}
+
+        {proposalsStatus === 'loading' && <Spinner label="Загружаем заказы…" />}
+        {proposalsStatus === 'error' && (
+          <div className={styles.errorBlock}>
+            <p className={styles.error} role="alert">
+              Не удалось загрузить заказы. Проверьте связь с интернетом.
+            </p>
+            <ActionButton
+              label="Попробовать снова"
+              variant="secondary"
+              onClick={() => loadProposals(true, identity.driverId!, identity.token)}
+            />
+          </div>
+        )}
+        {proposalsStatus === 'ready' && visibleProposals.length === 0 && (
+          <p className={styles.status}>Пока нет заказов. Как только клиент оформит поездку, она появится здесь.</p>
+        )}
+
+        {proposalsStatus === 'ready' &&
+          visibleProposals.map((proposal) => {
+            const order = orderDetails[proposal.orderId]
+            const time = formatOrderTime(order?.createdAt ?? null)
+            const assignment = assignments[proposal.orderId]
+            const orderCode = shortOrderCode(proposal.orderId)
+            const details = <ProposalDetails proposal={proposal} order={order} time={time} />
+
+            // OPEN: this is the one state that needs the driver to decide
+            // something right now -- RequestCard's own elevated, accent-
+            // ruled treatment is the audit's own fix for a proposal that
+            // used to render identically to every other status
+            // (docs/PIOS_DESIGN_CONTINUATION_AUDIT.md Section 4).
+            if (proposal.status === 'OPEN') {
+              return (
+                <RequestCard
+                  key={proposal.proposalId}
+                  orderCode={orderCode}
+                  status="OPEN"
+                  statusLabel={PROPOSAL_STATUS_LABEL.OPEN}
+                  details={details}
+                  onAccept={() => respondToProposal(proposal.proposalId, 'accept')}
+                  onDecline={() => respondToProposal(proposal.proposalId, 'decline')}
+                  submitting={proposalActions[proposal.proposalId] === 'submitting'}
+                  error={proposalActions[proposal.proposalId] === 'error'}
+                >
+                  <Input
+                    type="text"
+                    value={priceInputs[proposal.proposalId] ?? ''}
+                    placeholder="Стоимость (необязательно)"
+                    aria-label="Стоимость поездки"
+                    onChange={(event) =>
+                      setPriceInputs((current) => ({ ...current, [proposal.proposalId]: event.target.value }))
+                    }
+                  />
+                  <Text role="label" as="label" htmlFor={`eta-${proposal.proposalId}`} tone="secondary">
+                    Когда сможете приехать?
+                  </Text>
+                  <Select
+                    id={`eta-${proposal.proposalId}`}
+                    value={etaInputs[proposal.proposalId] ?? ''}
+                    aria-label="Через сколько вы приедете"
+                    onChange={(event) =>
+                      setEtaInputs((current) => ({
+                        ...current,
+                        [proposal.proposalId]: event.target.value ? Number(event.target.value) : null,
+                      }))
+                    }
+                  >
+                    <option value="">Не указано</option>
+                    {ETA_OPTIONS_MINUTES.map((minutes) => (
+                      <option key={minutes} value={minutes}>
+                        {minutes} мин
+                      </option>
+                    ))}
+                  </Select>
+                </RequestCard>
+              )
+            }
+
+            // ACCEPTED: this driver's own current ride -- ActiveRidePanel's
+            // own separate visual priority (Section 4 of the same audit)
+            // is exactly what distinguished it from a still-pending
+            // decision. Preserves the pre-existing `assignment && (...)`
+            // gating exactly: no primary action at all until the
+            // Assignment itself has loaded (see ActiveRidePanel's own
+            // `primaryAction?` KDoc).
+            if (proposal.status === 'ACCEPTED') {
+              const primaryAction =
+                assignment && (assignment.status === 'CREATED' || assignment.status === 'ACCEPTED')
+                  ? { label: 'Прибыл', onClick: () => respondToAssignment(assignment.assignmentId, 'arrive') }
+                  : assignment?.status === 'ARRIVED'
+                    ? { label: 'Начать поездку', onClick: () => respondToAssignment(assignment.assignmentId, 'start') }
+                    : assignment?.status === 'IN_PROGRESS'
+                      ? {
+                          label: 'Завершить поездку',
+                          onClick: () => respondToAssignment(assignment.assignmentId, 'complete'),
+                        }
+                      : undefined
+              return (
+                <ActiveRidePanel
+                  key={proposal.proposalId}
+                  orderCode={orderCode}
+                  status={(assignment?.status as RideLifecycleStatus | undefined) ?? 'ACCEPTED'}
+                  statusLabel={PROPOSAL_STATUS_LABEL.ACCEPTED}
+                  details={details}
+                  primaryAction={primaryAction}
+                  submitting={Boolean(assignment && assignmentActions[assignment.assignmentId] === 'submitting')}
+                  error={Boolean(assignment && assignmentActions[assignment.assignmentId] === 'error')}
+                />
+              )
+            }
+
+            // DECLINED / LAPSED / WITHDRAWN: resolved, no action remains --
+            // a plain Card, same detail fields, no elevated/accent
+            // treatment (nothing here needs the driver's attention).
+            return (
+              <Card key={proposal.proposalId}>
+                <Text role="label" tone="secondary">
+                  Заказ №{orderCode}
+                </Text>
+                <RideStatus status={proposal.status} label={PROPOSAL_STATUS_LABEL[proposal.status]} />
+                {details}
+              </Card>
+            )
+          })}
+
+        {status === 'ready' && driver && (
+          <>
             {/* H6 ("Driver Growth Snapshot"): one honest number, deliberately --
                 see PIOS_PRODUCT_HYPOTHESES.md's own note on what this Sprint
                 does not do (no congratulatory wording, no hiding a zero).
@@ -1160,188 +1383,6 @@ export function DriverHome() {
             )}
           </>
         )}
-
-        <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}>Ваши заказы</h2>
-        </div>
-        <p className={styles.hint}>
-          Здесь появляются заявки от ваших клиентов. Проверьте, откуда забрать пассажира и куда его отвезти, и
-          нажмите «Принять», если готовы выполнить поездку.
-        </p>
-
-        {proposalsStatus === 'loading' && <Spinner label="Загружаем заказы…" />}
-        {proposalsStatus === 'error' && (
-          <div className={styles.errorBlock}>
-            <p className={styles.error} role="alert">
-              Не удалось загрузить заказы. Проверьте связь с интернетом.
-            </p>
-            <ActionButton
-              label="Попробовать снова"
-              variant="secondary"
-              onClick={() => loadProposals(true, identity.driverId!, identity.token)}
-            />
-          </div>
-        )}
-        {proposalsStatus === 'ready' && visibleProposals.length === 0 && (
-          <p className={styles.status}>Пока нет заказов. Как только клиент оформит поездку, она появится здесь.</p>
-        )}
-
-        {proposalsStatus === 'ready' &&
-          visibleProposals.map((proposal) => {
-            const order = orderDetails[proposal.orderId]
-            const time = formatOrderTime(order?.createdAt ?? null)
-            const assignment = assignments[proposal.orderId]
-            return (
-            <section key={proposal.proposalId} className={styles.proposalRow}>
-              <div className={styles.proposalDetails}>
-                <span className={styles.proposalOrderId}>Заказ №{shortOrderCode(proposal.orderId)}</span>
-                <span
-                  className={`${styles.proposalStatus} ${
-                    proposal.status === 'OPEN'
-                      ? styles.proposalOpen
-                      : proposal.status === 'ACCEPTED'
-                        ? styles.proposalAccepted
-                        : styles.proposalResolved
-                  }`}
-                >
-                  {PROPOSAL_STATUS_LABEL[proposal.status]}
-                </span>
-              </div>
-
-              {/* ADR-058 (Scheduled Pickup Time): shown whenever this order
-                  carries a passenger-requested pickup instant, regardless of
-                  proposal status -- a driver deciding whether to accept
-                  needs to know it is a pre-booking, not only a driver who
-                  already has. */}
-              {order?.requestedPickupAt && (
-                <p className={styles.status}>
-                  📅 Предварительный заказ: {formatRequestedPickupAt(order.requestedPickupAt)}
-                </p>
-              )}
-              {order?.passengerName && <p className={styles.status}>Пассажир: {order.passengerName}</p>}
-              {order?.pickupAddress && <p className={styles.status}>Откуда: {order.pickupAddress}</p>}
-              {order?.destination && <p className={styles.status}>Куда: {order.destination}</p>}
-              {time && <p className={styles.status}>Заказ создан: {time}</p>}
-              {/* ADR-042 (Stated Ride Price Minimal Model): read-back of
-                  the amount this driver themselves stated on acceptance --
-                  from the accept response and/or the same 3s poll that
-                  already refreshes every other field on this card, so it
-                  survives a reload (R7.2). Nothing is shown if none was
-                  entered. */}
-              {proposal.status === 'ACCEPTED' && proposal.statedPrice && (
-                <p className={styles.status}>Стоимость: {proposal.statedPrice}</p>
-              )}
-              {/* ADR-057 (Driver Stated Time to Pickup): same read-back
-                  pattern as statedPrice immediately above. */}
-              {proposal.status === 'ACCEPTED' && typeof proposal.statedEtaMinutes === 'number' && (
-                <p className={styles.status}>Будет примерно через: {proposal.statedEtaMinutes} мин</p>
-              )}
-
-              {proposal.status === 'OPEN' && (
-                <input
-                  className={styles.driverCodeInput}
-                  type="text"
-                  value={priceInputs[proposal.proposalId] ?? ''}
-                  placeholder="Стоимость (необязательно)"
-                  aria-label="Стоимость поездки"
-                  onChange={(event) =>
-                    setPriceInputs((current) => ({ ...current, [proposal.proposalId]: event.target.value }))
-                  }
-                />
-              )}
-
-              {proposal.status === 'OPEN' && (
-                <>
-                  <label className={styles.status} htmlFor={`eta-${proposal.proposalId}`}>
-                    Когда сможете приехать?
-                  </label>
-                  <select
-                    id={`eta-${proposal.proposalId}`}
-                    className={styles.driverCodeInput}
-                    value={etaInputs[proposal.proposalId] ?? ''}
-                    aria-label="Через сколько вы приедете"
-                    onChange={(event) =>
-                      setEtaInputs((current) => ({
-                        ...current,
-                        [proposal.proposalId]: event.target.value ? Number(event.target.value) : null,
-                      }))
-                    }
-                  >
-                    <option value="">Не указано</option>
-                    {ETA_OPTIONS_MINUTES.map((minutes) => (
-                      <option key={minutes} value={minutes}>
-                        {minutes} мин
-                      </option>
-                    ))}
-                  </select>
-                </>
-              )}
-
-              {proposal.status === 'OPEN' && (
-                <div className={styles.proposalActions}>
-                  <ActionButton
-                    label={proposalActions[proposal.proposalId] === 'submitting' ? 'Принимаем…' : 'Принять'}
-                    variant="primary"
-                    onClick={() => respondToProposal(proposal.proposalId, 'accept')}
-                    disabled={proposalActions[proposal.proposalId] === 'submitting'}
-                  />
-                  <ActionButton
-                    label={proposalActions[proposal.proposalId] === 'submitting' ? 'Отклоняем…' : 'Отклонить'}
-                    variant="secondary"
-                    onClick={() => respondToProposal(proposal.proposalId, 'decline')}
-                    disabled={proposalActions[proposal.proposalId] === 'submitting'}
-                  />
-                </div>
-              )}
-
-              {proposalActions[proposal.proposalId] === 'error' && (
-                <p className={styles.error} role="alert">
-                  Не удалось обновить заказ. Попробуйте ещё раз.
-                </p>
-              )}
-
-              {/* ADR-040 (Assignment Ride Lifecycle): one button at a time,
-                  matching the assignment's own current status — CREATED and
-                  ACCEPTED both offer "Прибыл" (see Assignment.arrive's own
-                  KDoc for why CREATED is a valid precondition here). */}
-              {assignment && (assignment.status === 'CREATED' || assignment.status === 'ACCEPTED') && (
-                <div className={styles.proposalActions}>
-                  <ActionButton
-                    label={assignmentActions[assignment.assignmentId] === 'submitting' ? 'Отмечаем…' : 'Прибыл'}
-                    variant="primary"
-                    onClick={() => respondToAssignment(assignment.assignmentId, 'arrive')}
-                    disabled={assignmentActions[assignment.assignmentId] === 'submitting'}
-                  />
-                </div>
-              )}
-              {assignment?.status === 'ARRIVED' && (
-                <div className={styles.proposalActions}>
-                  <ActionButton
-                    label={assignmentActions[assignment.assignmentId] === 'submitting' ? 'Начинаем…' : 'Начать поездку'}
-                    variant="primary"
-                    onClick={() => respondToAssignment(assignment.assignmentId, 'start')}
-                    disabled={assignmentActions[assignment.assignmentId] === 'submitting'}
-                  />
-                </div>
-              )}
-              {assignment?.status === 'IN_PROGRESS' && (
-                <div className={styles.proposalActions}>
-                  <ActionButton
-                    label={assignmentActions[assignment.assignmentId] === 'submitting' ? 'Завершаем…' : 'Завершить поездку'}
-                    variant="primary"
-                    onClick={() => respondToAssignment(assignment.assignmentId, 'complete')}
-                    disabled={assignmentActions[assignment.assignmentId] === 'submitting'}
-                  />
-                </div>
-              )}
-              {assignment && assignmentActions[assignment.assignmentId] === 'error' && (
-                <p className={styles.error} role="alert">
-                  Не удалось обновить статус поездки. Попробуйте ещё раз.
-                </p>
-              )}
-            </section>
-            )
-          })}
 
         <button type="button" className={styles.linkAction} onClick={handleLogout}>
           Выйти

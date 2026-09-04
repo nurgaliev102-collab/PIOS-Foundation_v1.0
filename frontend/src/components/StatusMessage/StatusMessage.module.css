@@ -1,0 +1,35 @@
+.message {
+  width: 100%;
+  padding: var(--pios-space-3) var(--pios-space-4);
+  border-radius: var(--pios-radius-sm);
+  border-left: 3px solid transparent;
+  font-size: var(--pios-font-size-body);
+  line-height: var(--pios-line-height-body);
+  text-align: left;
+  box-sizing: border-box;
+}
+
+.information {
+  background: var(--pios-color-information-surface);
+  border-left-color: var(--pios-color-information);
+  color: var(--pios-color-text-primary);
+}
+
+.success {
+  background: var(--pios-color-success-surface);
+  border-left-color: var(--pios-color-success);
+  color: var(--pios-color-text-primary);
+}
+
+.warning {
+  background: var(--pios-color-warning-surface);
+  border-left-color: var(--pios-color-warning);
+  color: var(--pios-color-text-primary);
+}
+
+.error {
+  background: var(--pios-color-error-surface);
+  border-left-color: var(--pios-color-error);
+  color: var(--pios-color-error);
+  font-weight: var(--pios-font-weight-body-strong);
+}

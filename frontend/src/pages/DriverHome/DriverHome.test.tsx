@@ -211,6 +211,36 @@ describe('DriverHome', () => {
     expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TEST_IDENTITY.token}`)
   })
 
+  // --- Ride completion confirmation (UX audit, docs/PIOS_DRIVER_HOME_UX_AUDIT.md Section 5/9) ---
+
+  it('shows a brief, honest confirmation when a ride is completed, before the card disappears', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p4', orderId: 'o4', driverId: 'driver-1', status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: null },
+    ])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
+    mockedRequest.mockResolvedValueOnce([
+      { assignmentId: 'a4', orderId: 'o4', driverId: 'driver-1', status: 'IN_PROGRESS', statusChangedAt: null },
+    ]) // GET /v1/assignments?orderId=o4
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o4
+
+    renderDriverHome()
+
+    await screen.findByRole('button', { name: 'Завершить поездку' })
+
+    mockedRequest.mockResolvedValueOnce({
+      assignmentId: 'a4',
+      orderId: 'o4',
+      driverId: 'driver-1',
+      status: 'COMPLETED',
+      statusChangedAt: '2026-08-16T09:30:00Z',
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Завершить поездку' }))
+
+    expect(await screen.findByText('Поездка завершена')).toBeInTheDocument()
+  })
+
   it('shows the driver\'s own stated ETA once a proposal is accepted', async () => {
     mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
     mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })

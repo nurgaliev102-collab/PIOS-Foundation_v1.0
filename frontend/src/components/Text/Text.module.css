@@ -1,0 +1,54 @@
+.body {
+  margin: 0;
+  font-size: var(--pios-font-size-body);
+  font-weight: var(--pios-font-weight-body);
+  line-height: var(--pios-line-height-body);
+}
+
+.label {
+  display: block;
+  font-size: var(--pios-font-size-label);
+  font-weight: var(--pios-font-weight-label);
+  letter-spacing: var(--pios-letter-spacing-label);
+}
+
+.caption {
+  margin: 0;
+  font-size: var(--pios-font-size-caption);
+  font-weight: var(--pios-font-weight-caption);
+}
+
+.numeric {
+  margin: 0;
+  font-size: var(--pios-font-size-numeric);
+  font-weight: var(--pios-font-weight-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
+.strong {
+  font-weight: var(--pios-font-weight-body-strong);
+}
+
+.tonePrimary {
+  color: var(--pios-color-text-primary);
+}
+
+.toneSecondary {
+  color: var(--pios-color-text-secondary);
+}
+
+.toneMuted {
+  color: var(--pios-color-text-muted);
+}
+
+.toneError {
+  color: var(--pios-color-error);
+}
+
+.toneSuccess {
+  color: var(--pios-color-success);
+}
+
+.toneWarning {
+  color: var(--pios-color-warning);
+}

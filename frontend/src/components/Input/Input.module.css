@@ -1,0 +1,36 @@
+.control {
+  width: 100%;
+  min-height: var(--pios-touch-target-min);
+  padding: 0.625rem 0.875rem;
+  font-family: var(--pios-font-family);
+  font-size: 1rem;
+  color: var(--pios-color-text-primary);
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border-strong);
+  border-radius: var(--pios-radius-sm);
+  box-sizing: border-box;
+  transition: border-color var(--pios-motion-fast) var(--pios-motion-ease-out);
+}
+
+.control:focus-visible {
+  outline: 2px solid var(--pios-color-focus-ring);
+  outline-offset: 1px;
+  border-color: var(--pios-color-accent);
+}
+
+/* Fallback for browsers/engines that don't apply :focus-visible on
+   form controls consistently — keeps the accent border on plain :focus
+   too, matching the pre-existing behavior this component replaces. */
+.control:focus {
+  border-color: var(--pios-color-accent);
+}
+
+.invalid {
+  border-color: var(--pios-color-error);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .control {
+    transition: none;
+  }
+}
