@@ -6,6 +6,7 @@ import com.pios.dispatch.application.FirstRefusalApplicationService
 import com.pios.dispatch.application.PrimaryDriverRecord
 import com.pios.dispatch.application.PrimaryDriverRepository
 import com.pios.dispatch.application.ProposalApplicationService
+import com.pios.dispatch.application.ProposeDriverCommand
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import com.pios.dispatch.domain.PassengerReference
@@ -129,6 +130,51 @@ class OrderSubmittedFirstRefusalConsumerIntegrationTest {
         awaitUntilNotNull { proposalRepository.findByOrder(OrderReference(canaryOrderId)).firstOrNull() }
 
         assertEquals(emptyList(), proposalRepository.findByOrder(OrderReference(orderId)))
+    }
+
+    @Test
+    fun `Task 17 Test 3 -- explicit choice of a different driver suppresses First Refusal for the primary driver, and the explicit proposal itself still succeeds`() {
+        // Mirrors the real production shape exactly: a passenger reaches
+        // this driver through a personal invitation link (driverB) while a
+        // *different* driver (driverA) is separately their own Primary
+        // Driver (Circle of Trust, ADR-062) -- the real scenario
+        // `RideRequest.tsx`'s own KDoc (Task 17) describes.
+        val orderId = "order-${UUID.randomUUID()}"
+        val passengerReference = "passenger-${UUID.randomUUID()}"
+        val primaryDriverA = DriverReference("driver-a-${UUID.randomUUID()}")
+        val explicitlyChosenDriverB = DriverReference("driver-b-${UUID.randomUUID()}")
+        primaryDriverRepository.upsert(PrimaryDriverRecord(PassengerReference(passengerReference), primaryDriverA))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriverA, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(explicitlyChosenDriverB, available = true))
+
+        // Step 1 -- the real Order Management -> Dispatch path: OrderSubmitted
+        // with explicitDriverIntent = true (what RideRequest.tsx's own
+        // POST /v1/orders now sends, per Task 17).
+        publisher.publish(orderId = orderId, passengerReference = passengerReference, explicitDriverIntent = true)
+
+        // Step 2 -- the real RideRequest.tsx -> Dispatch path: its own
+        // separate POST /v1/proposals call, proposing the exact driver
+        // (driverB) whose link the passenger arrived through --
+        // `attemptProposal` in RideRequest.tsx, called directly here since
+        // this test exercises Dispatch's own application layer, not the
+        // frontend or its HTTP transport.
+        val explicitProposal = proposalApplicationService.handle(
+            ProposeDriverCommand(order = OrderReference(orderId), driver = explicitlyChosenDriverB)
+        )
+
+        // Give the (real, asynchronous) OrderSubmitted delivery ample time
+        // to have reached the listener before asserting no proposal for
+        // the primary driver was ever created -- same "prove the negative"
+        // discipline as Test B/Test C above, but timed rather than
+        // canary-based since the explicit proposal above already gives a
+        // real, independent signal that the queue is not stuck.
+        Thread.sleep(2000L)
+
+        val proposalsForOrder = proposalRepository.findByOrder(OrderReference(orderId))
+        assertEquals(1, proposalsForOrder.size, "exactly one proposal must exist for this order -- the explicit one, never a competing First Refusal proposal")
+        assertEquals(explicitlyChosenDriverB, proposalsForOrder.single().driver)
+        assertEquals(explicitProposal.proposal.id, proposalsForOrder.single().id)
+        assertEquals(ProposalStatus.OPEN, proposalsForOrder.single().status)
     }
 
     @Test
