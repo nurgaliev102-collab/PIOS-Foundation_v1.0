@@ -34,12 +34,26 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * End-to-end verification of the first MVP vertical slice
- * (INITIAL_IMPLEMENTATION_PLAN.md Section 6): a passenger submits an
- * order, a driver declares availability, Dispatch assigns and the driver
- * accepts, and Order Management completes the order. This is a
- * verification scenario only (ADR-027) — it creates no production
- * orchestration, and no class it exercises is changed by it.
+ * **Not an end-to-end/integration test** (correction, 2026-09-05 —
+ * `docs/ARCHITECTURE_VERIFICATION_REPORT.md`, itself citing this class's
+ * own pre-existing KDoc below): despite this class's name and its home in
+ * a package called `verification`, it makes **zero HTTP calls**, uses
+ * **no outbox** (every service here is constructed with the default
+ * `NoOpOutboxRepository`/`NoOpTransactionRunner`), and touches **no
+ * RabbitMQ** — "publishing" an event here is just an in-memory DTO
+ * conversion, handed directly to another module's handler in the same
+ * method call. If a future change needs an actual guarantee that
+ * REST → outbox → relay → RabbitMQ → consumer works end-to-end, this test
+ * does not provide it and a new one is needed.
+ *
+ * What it actually verifies (accurate, kept from the original KDoc):
+ * application-service-level contract boundaries for the first MVP
+ * vertical slice (INITIAL_IMPLEMENTATION_PLAN.md Section 6) — a passenger
+ * submits an order, a driver declares availability, Dispatch assigns and
+ * the driver accepts, and Order Management completes the order, calling
+ * each module's application-layer class directly. This is a verification
+ * scenario only (ADR-027) — it creates no production orchestration, and
+ * no class it exercises is changed by it.
  *
  * Hosted in Order Management because this module participates in the
  * most steps of the six (Create Order, Complete Order) and already holds
