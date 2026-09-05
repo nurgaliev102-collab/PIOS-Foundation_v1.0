@@ -1,0 +1,123 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--pios-space-1);
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Opt-in avatar layout (docs/DRIVER_IDENTITY_DESIGN_DECISION.md,
+   PASSENGER_INVITATION_DESIGN_DECISION.md) — the outer wrap becomes a
+   row (avatar beside identity) instead of a column; `.identity` below
+   carries the exact column/gap layout `.wrap` used alone before, so
+   every non-avatar caller (RideRequest, Task 4/5) renders unchanged. */
+.withAvatar {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--pios-space-4);
+}
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--pios-space-1);
+  min-width: 0;
+}
+
+/* Matches the initial-letter treatment `PassengerLanding.tsx`'s own
+   `.heroAvatar` already used — consolidated here rather than duplicated
+   page-side. Background uses the shared text-primary token, resolving a
+   pre-existing near-duplicate color this task's own inspection found
+   (`.heroAvatar` hardcoded `#111827`, one hex off from
+   `--pios-color-text-primary`'s `#0f172a` — see
+   docs/PIOS_DESIGN_IMPLEMENTATION_LOG.md). */
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: var(--pios-color-text-primary);
+  color: var(--pios-color-surface);
+  font-size: 2rem;
+  font-weight: var(--pios-font-weight-display);
+}
+
+/* Compact — a list row alongside others (e.g. Circle of Trust's "other
+   drivers" list). Long names wrap onto a second line rather than
+   overflowing the card (docs/DRIVER_IDENTITY_DESIGN_DECISION.md's own
+   states requirement covers this explicitly). */
+.nameCompact {
+  font-size: var(--pios-font-size-body);
+  font-weight: var(--pios-font-weight-body-strong);
+  line-height: var(--pios-line-height-body);
+  color: var(--pios-color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* Prominent — the one identity element that should lead a screen
+   (docs/PIOS_TAXI_DESIGN_BRIEF.md Section 2, Principle 1). Uses the
+   display type scale, the only place PIOS_DESIGN_SYSTEM.md's own
+   Typography section reserves that weight for. */
+.nameProminent {
+  font-size: var(--pios-font-size-display);
+  font-weight: var(--pios-font-weight-display);
+  line-height: var(--pios-line-height-display);
+  color: var(--pios-color-text-primary);
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+.metaRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--pios-space-3);
+}
+
+/* A single, non-numeric marker (docs/PRODUCT_DECISION_CIRCLE_OF_TRUST.md
+   Rule 1) — deliberately not --pios-color-accent or --pios-color-success
+   (neither is "recognition"), and deliberately not a rank/count. Uses the
+   dedicated trust token, reserved for exactly this. */
+.primaryBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem var(--pios-space-2);
+  border-radius: var(--pios-radius-full);
+  font-size: var(--pios-font-size-caption);
+  font-weight: var(--pios-font-weight-label);
+  letter-spacing: var(--pios-letter-spacing-label);
+  color: var(--pios-color-trust);
+  background: var(--pios-color-trust-surface);
+}
+
+.availability {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pios-space-1);
+  font-size: var(--pios-font-size-caption);
+  color: var(--pios-color-text-secondary);
+}
+
+/* Color is never the sole carrier of meaning (docs/PIOS_DESIGN_SYSTEM.md
+   Section 13) — the dot is paired with a text label ("Доступен"/
+   "Недоступен") in the component itself, never rendered alone. */
+.dotAvailable,
+.dotUnavailable {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dotAvailable {
+  background: var(--pios-color-success);
+}
+
+.dotUnavailable {
+  background: var(--pios-color-text-muted);
+}

@@ -1,8 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { Header } from '../../components/Header'
-import { ActionButton } from '../../components/ActionButton'
-import { Spinner } from '../../components/Spinner'
+import { Button } from '../../components/Button'
+import { LoadingState } from '../../components/LoadingState'
+import { ErrorState } from '../../components/ErrorState'
+import { StatusMessage } from '../../components/StatusMessage'
+import { Heading } from '../../components/Heading'
+import { Text } from '../../components/Text'
+import { Card } from '../../components/Card'
+import { FormField } from '../../components/FormField'
+import { Input, Select } from '../../components/Input'
+import { Divider } from '../../components/Divider'
+import { DriverTrustIndicator } from '../../components/DriverTrustIndicator'
+import { RideStatus } from '../../components/RideStatus'
 import { getInvitationByDriverCode } from '../PassengerLanding/invitationSource'
 import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
@@ -133,7 +143,16 @@ const STATUS_POLL_INTERVAL_MS = 3000
  * lapsed. No new status is invented here: this only stops discarding two
  * real ones the backend already sends.
  */
-type RideStatus = 'OPEN' | 'DECLINED' | 'LAPSED' | 'WITHDRAWN' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED'
+// Renamed from this file's own former local `RideStatus` type -- the
+// name is now taken by the imported `RideStatus` component (design
+// system, Task 8's own continuation audit -- not a committed file, see
+// that task's own report). Kept as
+// its own, narrower alias (not the shared `RideLifecycleStatus` directly)
+// since this screen never produces `CREATED` -- the exhaustive switches
+// below (`rideStatusLabel`) stay exactly as narrow as before; this type
+// is still assignable everywhere `RideLifecycleStatus` is expected
+// (the `<RideStatus status={rideStatus} .../>` call site below).
+type PassengerRideStatus = 'OPEN' | 'DECLINED' | 'LAPSED' | 'WITHDRAWN' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED'
 
 /**
  * ADR-058 Decision item 5: PIOS itself asserts nothing about a past
@@ -159,16 +178,41 @@ function formatRequestedPickupAt(requestedPickupAt: string | null): string | nul
   return parsed.toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
 }
 
-const RIDE_STATUS_LABEL: Record<RideStatus, string> = {
-  OPEN: '⏳ Ждём ответа водителя. Мы сообщим, как только он подтвердит заказ.',
-  DECLINED: '❌ Водитель отклонил ваш заказ.',
-  LAPSED: '⌛ Заказ больше не активен — водитель не ответил вовремя.',
-  WITHDRAWN: '🚫 Вы отменили этот заказ.',
-  ACCEPTED: '✅ Водитель принял ваш заказ и скоро свяжется с вами.',
-  ARRIVED: '🚗 Водитель прибыл на место.',
-  IN_PROGRESS: '🚕 Поездка началась.',
-  COMPLETED: '🏁 Поездка завершена. Спасибо, что выбрали PIOS!',
+/**
+ * Design foundation cleanup (Task 7, docs/PIOS_DESIGN_IMPLEMENTATION_LOG.md):
+ * this used to also name the driver inline (e.g. "{name} принял ваш
+ * заказ") — that duplicated `DriverTrustIndicator`, which already renders
+ * the driver's name prominently above this status on the confirmed-ride
+ * screen (Task 5's own placement). This sentence now names only the
+ * ride/order state, same real `RideStatus` values, same tone mapping —
+ * no status text removed, only the repeated name.
+ */
+function rideStatusLabel(status: PassengerRideStatus): string {
+  switch (status) {
+    case 'OPEN':
+      return '⏳ Ждём ответа водителя. Мы сообщим, как только он подтвердит заказ.'
+    case 'DECLINED':
+      return '❌ Водитель отклонил ваш заказ.'
+    case 'LAPSED':
+      return '⌛ Заказ больше не активен — водитель не ответил вовремя.'
+    case 'WITHDRAWN':
+      return '🚫 Вы отменили этот заказ.'
+    case 'ACCEPTED':
+      return '✅ Водитель принял ваш заказ и скоро свяжется с вами.'
+    case 'ARRIVED':
+      return '🚗 Водитель прибыл на место.'
+    case 'IN_PROGRESS':
+      return '🚕 Поездка началась.'
+    case 'COMPLETED':
+      return '🏁 Поездка завершена. Спасибо, что выбрали PIOS!'
+  }
 }
+
+// The status→tone mapping this function used to own now lives in exactly
+// one place, the shared `RideStatus` component itself (imported above) —
+// removed here rather than left as unused dead code now that the one
+// call site below (Section "Design foundation cleanup") passes `status`
+// to that component directly instead of calling this function.
 
 /**
  * Ride Request — Sprint 4: the first passenger action after onboarding,
@@ -234,6 +278,19 @@ const RIDE_STATUS_LABEL: Record<RideStatus, string> = {
  * `'ACCEPTED'`, `'ARRIVED'`, `'IN_PROGRESS'` are unchanged — a ride still
  * pending or under way must not offer a second, concurrent order with the
  * same driver.
+ *
+ * Task 17 (First Refusal Explicit Driver Intent Integration): [handleSubmit]
+ * now sends `explicitDriverIntent: true` on every `POST /v1/orders` this
+ * screen makes — not a new concept, `Order Management`'s own
+ * `SubmitOrderRequest.explicitDriverIntent` (Task 15C) already existed and
+ * already threaded end-to-end to `OrderSubmitted`, simply unused by any
+ * real caller until now. Correct unconditionally here: this screen only
+ * ever exists reached through one specific driver's own `driverCode` (the
+ * URL parameter), and always proposes the resulting order to exactly that
+ * driver a moment later ([attemptProposal]) — there is no order this
+ * screen ever creates without an already-known, specific driver. Setting
+ * this stops Dispatch's automatic First Refusal (Task 16) from racing that
+ * already-explicit choice for orders created here.
  */
 export function RideRequest() {
   const { driverCode } = useParams<{ driverCode: string }>()
@@ -241,6 +298,11 @@ export function RideRequest() {
   const [identity, setIdentity] = useState<StoredIdentity | null>(null)
   const [identityChecked, setIdentityChecked] = useState(false)
   const [step, setStep] = useState<Step>('loading')
+  // UX audit (Language Policy): the invited driver's own display name,
+  // already fetched by [loadInvitation] below — kept here so the confirmed
+  // screen's [DriverTrustIndicator] can show it (Task 7: no longer also
+  // repeated inside [rideStatusLabel]'s status sentence).
+  const [driverName, setDriverName] = useState<string | null>(null)
   const [circle, setCircle] = useState<EnrichedCircleMember[]>([])
   const [circleError, setCircleError] = useState(false)
   const [primaryChangeTarget, setPrimaryChangeTarget] = useState<string | null>(null)
@@ -255,7 +317,7 @@ export function RideRequest() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [orderId, setOrderId] = useState<string | null>(null)
   const [proposalStatus, setProposalStatus] = useState<ProposalStatus | null>(null)
-  const [rideStatus, setRideStatus] = useState<RideStatus>('OPEN')
+  const [rideStatus, setRideStatus] = useState<PassengerRideStatus>('OPEN')
   // ADR-042 R9: the amount the driver stated on accepting this order, read
   // from the same poll [rideStatus] already uses -- null until a proposal
   // is actually ACCEPTED, and whenever the driver accepted with no amount
@@ -297,6 +359,7 @@ export function RideRequest() {
         setStep('error')
         return
       }
+      setDriverName(result.invitation.driverName)
       // First-pilot feedback: a passenger who reloads this page must land
       // back on their current order, not a blank form — same driver, same
       // browser, an order already placed through `localCurrentOrder.ts`.
@@ -441,7 +504,7 @@ export function RideRequest() {
                 return
               }
               const status = assignments[0]?.status
-              setRideStatus(status && status !== 'CREATED' ? (status as RideStatus) : 'ACCEPTED')
+              setRideStatus(status && status !== 'CREATED' ? (status as PassengerRideStatus) : 'ACCEPTED')
             })
             .catch(() => {
               if (active) {
@@ -496,7 +559,7 @@ export function RideRequest() {
       <div className={styles.screen}>
         <Header />
         <main className={styles.content}>
-          <Spinner label="Загрузка…" />
+          <LoadingState label="Загрузка…" />
         </main>
       </div>
     )
@@ -569,6 +632,21 @@ export function RideRequest() {
           destination: trimmedDestination,
           passengerName,
           ...(requestedPickupAt ? { requestedPickupAt } : {}),
+          // Task 17 (First Refusal Explicit Driver Intent Integration):
+          // every order this screen ever creates is already tied to one
+          // specific, already-known driver -- `driverCode`, taken verbatim
+          // from the URL this page is reached through (see this
+          // component's own KDoc and `handleChooseCircleMember`: picking
+          // any other circle member navigates to *that* driver's own
+          // `/i/:driverCode/request` rather than leaving the choice open).
+          // `attemptProposal`, right below, proposes this exact order to
+          // that exact driver a moment later. `explicitDriverIntent` (Order
+          // Management's own field, `SubmitOrderRequest.kt`, unused by any
+          // real caller until now) records that already-true fact
+          // atomically with submission, so Dispatch's automatic First
+          // Refusal (Task 16) never races this screen's own explicit
+          // choice for an order created here.
+          explicitDriverIntent: true,
         }),
         baseUrl: ORDER_MANAGEMENT_BASE_URL,
       })
@@ -641,6 +719,16 @@ export function RideRequest() {
    * observes) happens moments later, asynchronously, via the outbox relay
    * (ADR-053). The next poll tick then confirms the same fact from the
    * server, so a failed optimistic update self-corrects within one tick.
+   *
+   * Task 25 (Orders Cancellation & Driver Availability Security
+   * Remediation): now sends this passenger's own Bearer token --
+   * `OrderCancellationController` verifies it names the exact passenger
+   * `Order.origin` belongs to before permitting cancellation (see
+   * docs/PIOS_TAXI_TASK_24_REMAINING_MUTATION_API_SECURITY_AUDIT.md and
+   * docs/PIOS_TAXI_TASK_25_SECURITY_REMEDIATION_REPORT.md). `identity` is
+   * guaranteed non-null here for the same reason already established for
+   * `attemptProposal` (Task 17/21): this whole screen returns early,
+   * before any JSX, when identity is null.
    */
   async function handleCancelOrder() {
     if (!orderId || cancelStatus === 'submitting') {
@@ -776,65 +864,74 @@ export function RideRequest() {
     <div className={styles.screen}>
       <Header />
       <main className={styles.content}>
-        {step === 'loading' && <Spinner label="Загрузка…" />}
+        {step === 'loading' && <LoadingState label="Загрузка…" />}
 
         {step === 'not-found' && (
-          <p className={styles.status}>
+          <StatusMessage tone="warning">
             Ссылка недействительна или водитель ещё не зарегистрирован. Уточните ссылку у водителя, который вас
             пригласил.
-          </p>
+          </StatusMessage>
         )}
 
         {step === 'error' && (
-          <div className={styles.errorBlock}>
-            <p className={styles.error} role="alert">
-              Не удалось загрузить приглашение. Проверьте связь с интернетом.
-            </p>
-            <ActionButton
-              label="Попробовать снова"
-              variant="secondary"
-              onClick={() => loadInvitation(true, driverCode ?? '', identity)}
-            />
-          </div>
+          <ErrorState
+            message="Не удалось загрузить приглашение. Проверьте связь с интернетом."
+            onRetry={() => loadInvitation(true, driverCode ?? '', identity)}
+          />
         )}
 
         {step === 'circle' && (
           <>
-            <h1 className={styles.title}>Кому доверить эту поездку?</h1>
-            {circleError && <p className={styles.hint}>Не удалось загрузить часть данных о ваших предпринимателях.</p>}
+            <Heading level={1}>Кому доверить эту поездку?</Heading>
+            {circleError && (
+              <Text role="caption" tone="muted">
+                Не удалось загрузить часть данных о ваших водителях.
+              </Text>
+            )}
 
+            {/* This screen's own "known driver" moment (docs/PIOS_DESIGN_SYSTEM.md
+                Section 10): the passenger's own recognized/primary driver is
+                named, shown first, with a single clear "Вызвать" action —
+                never a count, never a rank among the rest of the circle. */}
             {circle
               .filter((member) => member.isPrimary)
               .map((primary) => (
-                <section key={primary.connectionId} className={styles.circleCard}>
-                  <p className={styles.circleSectionLabel}>Основной предприниматель</p>
-                  <p className={styles.circleName}>
-                    {primary.displayName} {primary.availability === 'AVAILABLE' ? '🟢' : '🔴'}
-                  </p>
-                  <ActionButton
-                    label="Вызвать"
-                    variant="primary"
-                    onClick={() => handleChooseCircleMember(primary.driverId)}
-                    disabled={primary.availability !== 'AVAILABLE'}
+                <Card key={primary.connectionId}>
+                  <DriverTrustIndicator
+                    name={primary.displayName}
+                    availability={primary.availability}
+                    isPrimary
+                    emphasis="prominent"
                   />
+                  <div className={styles.actionRow}>
+                    <Button
+                      label="Вызвать"
+                      variant="primary"
+                      onClick={() => handleChooseCircleMember(primary.driverId)}
+                      disabled={primary.availability !== 'AVAILABLE'}
+                    />
+                  </div>
                   {primary.availability !== 'AVAILABLE' && (
-                    <p className={styles.hint}>Сейчас недоступен. Вот кому ещё вы доверяете:</p>
+                    <Text role="caption" tone="muted">
+                      Сейчас недоступен. Вот кому ещё вы доверяете:
+                    </Text>
                   )}
-                </section>
+                </Card>
               ))}
 
             {circle.filter((member) => !member.isPrimary).length > 0 && (
-              <section className={styles.circleCard}>
-                <p className={styles.circleSectionLabel}>Другие доверенные предприниматели</p>
+              <Card>
+                <Text role="label" tone="muted">
+                  Другие ваши водители
+                </Text>
                 {circle
                   .filter((member) => !member.isPrimary)
-                  .map((member) => (
+                  .map((member, index) => (
                     <div key={member.connectionId} className={styles.circleMemberRow}>
-                      <span className={styles.circleName}>
-                        {member.displayName} {member.availability === 'AVAILABLE' ? '🟢' : '🔴'}
-                      </span>
+                      {index > 0 && <Divider />}
+                      <DriverTrustIndicator name={member.displayName} availability={member.availability} emphasis="compact" />
                       <div className={styles.circleMemberActions}>
-                        <ActionButton
+                        <Button
                           label="Выбрать"
                           variant="secondary"
                           onClick={() => handleChooseCircleMember(member.driverId)}
@@ -857,162 +954,149 @@ export function RideRequest() {
                       </div>
                     </div>
                   ))}
-              </section>
+              </Card>
             )}
 
             {primaryChangeTarget && (
-              <div className={styles.confirmBox}>
-                <p className={styles.status}>
+              <Card align="center">
+                <Text role="body" tone="secondary">
                   Сделать {circle.find((member) => member.connectionId === primaryChangeTarget)?.displayName}{' '}
-                  основным предпринимателем?
-                </p>
+                  основным водителем?
+                </Text>
                 <div className={styles.actionRow}>
-                  <ActionButton
-                    label={primaryChangeStatus === 'submitting' ? 'Сохраняем…' : 'Да, сделать основным'}
+                  <Button
+                    label="Да, сделать основным"
                     variant="primary"
+                    loading={primaryChangeStatus === 'submitting'}
                     onClick={() => void handleConfirmMakePrimary()}
-                    disabled={primaryChangeStatus === 'submitting'}
                   />
-                  <ActionButton label="Отмена" variant="secondary" onClick={handleCancelMakePrimary} />
+                  <Button label="Отмена" variant="secondary" onClick={handleCancelMakePrimary} />
                 </div>
                 {primaryChangeStatus === 'error' && (
-                  <p className={styles.error} role="alert">
-                    Не удалось изменить основного предпринимателя. Попробуйте ещё раз.
-                  </p>
+                  <StatusMessage tone="error">Не удалось изменить основного предпринимателя. Попробуйте ещё раз.</StatusMessage>
                 )}
-              </div>
+              </Card>
             )}
 
             {removeTarget && (
-              <div className={styles.confirmBox}>
-                <p className={styles.status}>
-                  Удалить {circle.find((member) => member.connectionId === removeTarget)?.displayName} из круга
-                  доверия?
-                </p>
+              <Card align="center">
+                <Text role="body" tone="secondary">
+                  Удалить {circle.find((member) => member.connectionId === removeTarget)?.displayName} из списка
+                  водителей?
+                </Text>
                 <div className={styles.actionRow}>
-                  <ActionButton
-                    label={removeStatus === 'submitting' ? 'Удаляем…' : 'Да, удалить'}
-                    variant="primary"
+                  <Button
+                    label="Да, удалить"
+                    variant="destructive"
+                    loading={removeStatus === 'submitting'}
                     onClick={() => void handleConfirmRemove()}
-                    disabled={removeStatus === 'submitting'}
                   />
-                  <ActionButton label="Отмена" variant="secondary" onClick={handleCancelRemove} />
+                  <Button label="Отмена" variant="secondary" onClick={handleCancelRemove} />
                 </div>
-                {removeStatus === 'error' && (
-                  <p className={styles.error} role="alert">
-                    Не удалось удалить. Попробуйте ещё раз.
-                  </p>
-                )}
-              </div>
+                {removeStatus === 'error' && <StatusMessage tone="error">Не удалось удалить. Попробуйте ещё раз.</StatusMessage>}
+              </Card>
             )}
           </>
         )}
 
         {step === 'form' && (
-          <>
-            <h1 className={styles.title}>Заказать поездку</h1>
+          <div className={styles.formStack}>
+            <Heading level={1}>Заказать поездку</Heading>
 
-            <label className={styles.label} htmlFor="pickupAddress">
-              Откуда
-            </label>
-            <input
-              id="pickupAddress"
-              className={styles.input}
-              type="text"
-              value={pickupAddress}
-              placeholder="Укажите адрес"
-              onChange={(event) => handlePickupAddressChange(event.target.value)}
-            />
-            {pickupAddressError && (
-              <p className={styles.error} role="alert">
-                {pickupAddressError}
-              </p>
-            )}
+            <FormField label="Откуда" htmlFor="pickupAddress" error={pickupAddressError}>
+              <Input
+                id="pickupAddress"
+                type="text"
+                value={pickupAddress}
+                placeholder="Укажите адрес"
+                invalid={Boolean(pickupAddressError)}
+                aria-describedby={pickupAddressError ? 'pickupAddress-error' : undefined}
+                onChange={(event) => handlePickupAddressChange(event.target.value)}
+              />
+            </FormField>
 
-            <label className={styles.label} htmlFor="destination">
-              Куда
-            </label>
-            <input
-              id="destination"
-              className={styles.input}
-              type="text"
-              value={destination}
-              placeholder="Укажите адрес"
-              onChange={(event) => handleDestinationChange(event.target.value)}
-            />
-            {destinationError && (
-              <p className={styles.error} role="alert">
-                {destinationError}
-              </p>
-            )}
+            <FormField label="Куда" htmlFor="destination" error={destinationError}>
+              <Input
+                id="destination"
+                type="text"
+                value={destination}
+                placeholder="Укажите адрес"
+                invalid={Boolean(destinationError)}
+                aria-describedby={destinationError ? 'destination-error' : undefined}
+                onChange={(event) => handleDestinationChange(event.target.value)}
+              />
+            </FormField>
 
-            <label className={styles.label} htmlFor="whenScheduled">
-              Когда
-            </label>
-            <select
-              id="whenScheduled"
-              className={styles.input}
-              value={isScheduled ? 'later' : 'now'}
-              onChange={(event) => setIsScheduled(event.target.value === 'later')}
-            >
-              <option value="now">Сейчас</option>
-              <option value="later">Заранее</option>
-            </select>
+            <FormField label="Когда" htmlFor="whenScheduled">
+              <Select
+                id="whenScheduled"
+                value={isScheduled ? 'later' : 'now'}
+                onChange={(event) => setIsScheduled(event.target.value === 'later')}
+              >
+                <option value="now">Сейчас</option>
+                <option value="later">Заранее</option>
+              </Select>
+            </FormField>
             {isScheduled && (
-              <>
-                <input
-                  className={styles.input}
+              <FormField label="Дата и время подачи" htmlFor="scheduledAt" error={scheduledAtError}>
+                <Input
+                  id="scheduledAt"
                   type="datetime-local"
                   value={scheduledAt}
                   min={currentDatetimeLocalValue()}
-                  aria-label="Дата и время подачи"
+                  invalid={Boolean(scheduledAtError)}
+                  aria-describedby={scheduledAtError ? 'scheduledAt-error' : undefined}
                   onChange={(event) => handleScheduledAtChange(event.target.value)}
                 />
-                {scheduledAtError && (
-                  <p className={styles.error} role="alert">
-                    {scheduledAtError}
-                  </p>
-                )}
-              </>
+              </FormField>
             )}
 
-            {submitError && (
-              <p className={styles.error} role="alert">
-                {submitError}
-              </p>
-            )}
+            {submitError && <StatusMessage tone="error">{submitError}</StatusMessage>}
 
+            {/* One clear primary action per screen (docs/PIOS_TAXI_DESIGN_BRIEF.md
+                Section 2, Principle 8) — "Заказать поездку" is the only
+                primary-weighted control on this step; "Выйти" stays a
+                quiet text action below it. */}
             <div className={styles.actionRow}>
-              <ActionButton
-                label={isSubmitting ? 'Отправляем…' : 'Заказать поездку'}
-                variant="primary"
-                onClick={handleSubmit}
-                disabled={isSubmitting}
-              />
+              <Button label="Заказать поездку" variant="primary" loading={isSubmitting} onClick={handleSubmit} />
             </div>
             <button type="button" className={styles.textAction} onClick={handleLogout}>
               Выйти
             </button>
-          </>
+          </div>
         )}
 
         {step === 'confirmed' && orderId && (
-          <>
-            <p className={styles.confirmed}>✅ Заказ оформлен.</p>
+          <div className={styles.formStack}>
+            {/* DRIVER-AS-FACE (docs/PIOS_TAXI_DESIGN_BRIEF.md Section 2,
+                Principle 1): the driver's name is the first, most
+                prominent thing on this screen. Task 7 (final design
+                foundation cleanup): the status sentence below no longer
+                repeats the name a second time — [rideStatusLabel] now
+                names only the ride/order state, since this indicator is
+                already the one place that names the driver. No
+                availability/isPrimary is passed here: this step never
+                loads either fact (docs/DRIVER_IDENTITY_DESIGN_DECISION.md
+                Section 9), so the component is not asked to assert what
+                the code hasn't actually checked. */}
+            {driverName && <DriverTrustIndicator name={driverName} emphasis="prominent" />}
+            <StatusMessage tone="success">✅ Заказ оформлен.</StatusMessage>
+            <Text role="caption" tone="muted">
+              Здесь вы увидите, что происходит с вашим заказом — от отправки до завершения поездки.
+            </Text>
             {requestedPickupAt && (
-              <p className={styles.status}>📅 Заказ на: {formatRequestedPickupAt(requestedPickupAt)}</p>
+              <Text role="body" tone="secondary">
+                📅 Заказ на: {formatRequestedPickupAt(requestedPickupAt)}
+              </Text>
             )}
 
-            {proposalStatus === 'proposing' && <Spinner label="Сообщаем водителю…" />}
+            {proposalStatus === 'proposing' && <LoadingState label="Сообщаем водителю…" />}
             {proposalStatus === 'error' && (
-              <>
-                <p className={styles.error} role="alert">
-                  Не удалось передать заказ водителю. Заказ сохранён — можно попробовать ещё раз.
-                </p>
-                <div className={styles.actionRow}>
-                  <ActionButton label="Повторить" variant="secondary" onClick={handleRetryProposal} />
-                </div>
-              </>
+              <ErrorState
+                message="Не удалось передать заказ водителю. Заказ сохранён — можно попробовать ещё раз."
+                retryLabel="Повторить"
+                onRetry={handleRetryProposal}
+              />
             )}
 
             {/* First-pilot feedback (ADR-040, ride lifecycle): this
@@ -1021,21 +1105,28 @@ export function RideRequest() {
                 a reload (proposalStatus never set at all). */}
             {(proposalStatus === 'proposed' || proposalStatus === null) && (
               <>
-                <p className={styles.status}>{RIDE_STATUS_LABEL[rideStatus]}</p>
+                <RideStatus status={rideStatus} label={rideStatusLabel(rideStatus)} />
                 {/* ADR-042 R9: shown from ACCEPTED onward (never for OPEN/
                     DECLINED/LAPSED, where no acceptance -- and so no stated
                     amount -- exists yet); absent entirely if the driver
                     accepted without typing one, same as DriverHome.tsx's
-                    own identical rendering of this field. */}
+                    own identical rendering of this field. Rendered with
+                    role="numeric" (docs/PIOS_DESIGN_SYSTEM.md Section 3):
+                    this is genuinely numeric fare/ETA data, unlike the
+                    other status text on this screen. */}
                 {statedPrice && rideStatus !== 'OPEN' && rideStatus !== 'DECLINED' && rideStatus !== 'LAPSED' && (
-                  <p className={styles.status}>Стоимость: {statedPrice}</p>
+                  <Text role="numeric" tone="primary">
+                    Стоимость: {statedPrice}
+                  </Text>
                 )}
                 {/* ADR-057: same placement and gating as statedPrice immediately above. */}
                 {typeof statedEtaMinutes === 'number' &&
                   rideStatus !== 'OPEN' &&
                   rideStatus !== 'DECLINED' &&
                   rideStatus !== 'LAPSED' && (
-                    <p className={styles.status}>Будет примерно через: {statedEtaMinutes} мин</p>
+                    <Text role="numeric" tone="primary">
+                      Будет примерно через: {statedEtaMinutes} мин
+                    </Text>
                   )}
                 {/* P0-2 Tier 1: only while still OPEN -- a driver who has
                     already accepted has committed, and cancelling then is
@@ -1043,19 +1134,15 @@ export function RideRequest() {
                     KDoc). */}
                 {rideStatus === 'OPEN' && (
                   <div className={styles.actionRow}>
-                    <ActionButton
-                      label={cancelStatus === 'submitting' ? 'Отменяем…' : 'Отменить заказ'}
-                      variant="secondary"
+                    <Button
+                      label="Отменить заказ"
+                      variant="destructive"
+                      loading={cancelStatus === 'submitting'}
                       onClick={() => void handleCancelOrder()}
-                      disabled={cancelStatus === 'submitting'}
                     />
                   </div>
                 )}
-                {cancelStatus === 'error' && (
-                  <p className={styles.error} role="alert">
-                    Не удалось отменить заказ. Попробуйте ещё раз.
-                  </p>
-                )}
+                {cancelStatus === 'error' && <StatusMessage tone="error">Не удалось отменить заказ. Попробуйте ещё раз.</StatusMessage>}
                 {/* P0-1: a terminal ride state ('DECLINED', 'LAPSED',
                     'WITHDRAWN', 'COMPLETED') is exactly where this driver's
                     link otherwise dead-ended forever -- 'OPEN', 'ACCEPTED',
@@ -1068,12 +1155,12 @@ export function RideRequest() {
                   rideStatus === 'WITHDRAWN' ||
                   rideStatus === 'COMPLETED') && (
                   <div className={styles.actionRow}>
-                    <ActionButton label="Заказать ещё раз" variant="primary" onClick={handleOrderAgain} />
+                    <Button label="Заказать ещё раз" variant="primary" onClick={handleOrderAgain} />
                   </div>
                 )}
               </>
             )}
-          </>
+          </div>
         )}
       </main>
     </div>

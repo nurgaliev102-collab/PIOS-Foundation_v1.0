@@ -68,7 +68,7 @@ describe('PassengerLanding', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Попробовать снова' }))
 
-    expect(await screen.findByText(/Вас пригласил Иван/)).toBeInTheDocument()
+    expect(await screen.findByText(/Заказ получает Иван/)).toBeInTheDocument()
   })
 
   // --- Registration and login (ADR-055, "Final Pre-Pilot Sprint") ---
@@ -133,6 +133,28 @@ describe('PassengerLanding', () => {
     expect(await screen.findByText('Неверный номер телефона или пароль.')).toBeInTheDocument()
   })
 
+  // E-001 (docs/PIOS_PRODUCT_EVIDENCE.md): a real iPhone registration
+  // failed with a misleading "проверьте связь с интернетом" message that
+  // was actually a silent backend 400 on an invalid phone format. This
+  // guards the fix: an invalid format is now caught before any request is
+  // made, with an accurate message.
+  it('rejects an invalid phone format before ever calling the backend, with an accurate message', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderAt('driver-1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Начать' }))
+
+    await userEvent.type(screen.getByLabelText('Ваше имя'), 'Аня')
+    await userEvent.type(screen.getByLabelText('Номер телефона'), '89991234567')
+    await userEvent.type(screen.getByLabelText('Пароль'), 'password123')
+
+    mockedRequest.mockClear()
+    await userEvent.click(screen.getByRole('button', { name: 'Создать аккаунт' }))
+
+    expect(await screen.findByText(/международном формате/)).toBeInTheDocument()
+    expect(mockedRequest).not.toHaveBeenCalled()
+  })
+
   it('asks a returning account to confirm before adding a driver whose link is new to them', async () => {
     mockedRequest.mockResolvedValueOnce({ id: 'driver-2', availability: 'AVAILABLE', displayName: 'Ахмад' })
 
@@ -153,7 +175,7 @@ describe('PassengerLanding', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Войти' }))
 
-    expect(await screen.findByText('Добавить Ахмад в круг доверия?')).toBeInTheDocument()
+    expect(await screen.findByText('Добавить Ахмад в ваш список водителей?')).toBeInTheDocument()
   })
 
   // --- Connection reliability (Section 16, "Final Pre-Pilot Sprint") ---
@@ -175,7 +197,7 @@ describe('PassengerLanding', () => {
     })
     mockedRequest.mockResolvedValueOnce([])
     await userEvent.click(screen.getByRole('button', { name: 'Войти' }))
-    await screen.findByText('Добавить Ахмад в круг доверия?')
+    await screen.findByText('Добавить Ахмад в ваш список водителей?')
 
     mockedRequest.mockRejectedValueOnce(new Error('network down'))
     await userEvent.click(screen.getByRole('button', { name: 'Добавить' }))
@@ -184,7 +206,7 @@ describe('PassengerLanding', () => {
       await screen.findByText('Не удалось добавить. Проверьте связь с интернетом и попробуйте ещё раз.')
     ).toBeInTheDocument()
     // Still on the confirmation screen -- never silently treated as success.
-    expect(screen.getByText('Добавить Ахмад в круг доверия?')).toBeInTheDocument()
+    expect(screen.getByText('Добавить Ахмад в ваш список водителей?')).toBeInTheDocument()
   })
 
   // --- PIOS Install v1 (Product Owner exception) ---
@@ -195,7 +217,7 @@ describe('PassengerLanding', () => {
 
     renderAt('driver-1')
 
-    await screen.findByText('👋 Вас пригласил Иван')
+    await screen.findByText('Заказ получает Иван')
     expect(screen.getAllByText('Установить PIOS').length).toBeGreaterThan(0)
     // The primary registration action is still present and unobstructed.
     expect(screen.getByRole('button', { name: 'Начать' })).toBeInTheDocument()
@@ -206,14 +228,14 @@ describe('PassengerLanding', () => {
     mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
 
     renderAt('driver-1')
-    await screen.findByText('👋 Вас пригласил Иван')
+    await screen.findByText('Заказ получает Иван')
 
     await userEvent.click(screen.getAllByRole('button', { name: 'Установить PIOS' })[0])
     expect(await screen.findByRole('button', { name: 'Позже' })).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: 'Позже' }))
     expect(screen.queryByRole('button', { name: 'Позже' })).not.toBeInTheDocument()
-    expect(screen.getByText('👋 Вас пригласил Иван')).toBeInTheDocument()
+    expect(screen.getByText('Заказ получает Иван')).toBeInTheDocument()
     // No account-related request was ever made for this.
     expect(mockedRequest.mock.calls.length).toBe(1)
   })

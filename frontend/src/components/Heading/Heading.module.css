@@ -1,0 +1,17 @@
+.display {
+  margin: 0;
+  font-size: var(--pios-font-size-display);
+  font-weight: var(--pios-font-weight-display);
+  line-height: var(--pios-line-height-display);
+  color: var(--pios-color-text-primary);
+  text-wrap: balance;
+}
+
+.heading {
+  margin: 0;
+  font-size: var(--pios-font-size-heading);
+  font-weight: var(--pios-font-weight-heading);
+  line-height: var(--pios-line-height-heading);
+  color: var(--pios-color-text-primary);
+  text-wrap: balance;
+}

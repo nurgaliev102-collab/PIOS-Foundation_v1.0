@@ -1,0 +1,15 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--pios-space-1);
+  width: 100%;
+  text-align: left;
+}
+
+.error {
+  margin: 0;
+  font-size: var(--pios-font-size-caption);
+  font-weight: var(--pios-font-weight-label);
+  color: var(--pios-color-error);
+}

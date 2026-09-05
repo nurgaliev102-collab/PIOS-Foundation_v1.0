@@ -135,6 +135,34 @@ describe('RideRequest', () => {
     expect(mockedRequest).toHaveBeenCalledTimes(3)
   })
 
+  // --- Explicit driver intent (Task 17: First Refusal Explicit Driver Intent Integration) ---
+
+  it('sends explicitDriverIntent: true on POST /v1/orders, since this screen always already knows the driver', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    // Circle of trust, empty -- skips straight to the form (see the existing convention above).
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-explicit' }) // POST /v1/orders
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
+    mockedRequest.mockResolvedValue([{ status: 'OPEN' }]) // status poll, from here on
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
+
+    const submitCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/orders')
+    expect(submitCall).toBeDefined()
+    const body = JSON.parse((submitCall?.[1] as RequestInit).body as string)
+    expect(body.explicitDriverIntent).toBe(true)
+  })
+
   // --- Proposal API security (Task 21: Proposal API Security Remediation) ---
 
   it('sends this passenger\'s own Bearer token on POST /v1/proposals, since that endpoint now requires authentication', async () => {
@@ -483,8 +511,13 @@ describe('RideRequest', () => {
     renderAt('driver-1')
 
     expect(await screen.findByRole('heading', { name: 'Кому доверить эту поездку?' })).toBeInTheDocument()
-    expect(screen.getByText('Основной предприниматель')).toBeInTheDocument()
-    expect(screen.getByText('Другие доверенные предприниматели')).toBeInTheDocument()
+    // Task 5 (DriverTrustIndicator): the primary driver's own "Основной"
+    // marker now comes from that component itself, replacing the former
+    // separate "Основной водитель" section label — same underlying fact
+    // (Circle of Trust's own `isPrimary`), rendered by the new shared
+    // component instead of page-local markup.
+    expect(screen.getByText('Основной')).toBeInTheDocument()
+    expect(screen.getByText('Другие ваши водители')).toBeInTheDocument()
     expect(screen.getByText(/Иван/)).toBeInTheDocument()
     expect(screen.getByText(/Ахмад/)).toBeInTheDocument()
   })
@@ -538,7 +571,7 @@ describe('RideRequest', () => {
     // Navigated to Ahmad's own route -- Ivan's own circle screen is gone,
     // and no "make primary" confirmation was ever shown for this action.
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Кому доверить эту поездку?' })).not.toBeInTheDocument())
-    expect(screen.queryByText(/основным предпринимателем\?/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/основным водителем\?/)).not.toBeInTheDocument()
   })
 
   it('lets the passenger make a different trusted driver primary, only after explicit confirmation', async () => {
@@ -556,13 +589,13 @@ describe('RideRequest', () => {
 
     // Clicking "Сделать основным" only asks -- it does not change anything by itself.
     await userEvent.click(screen.getByRole('button', { name: 'Сделать основным' }))
-    expect(screen.getByText('Сделать Ахмад основным предпринимателем?')).toBeInTheDocument()
+    expect(screen.getByText('Сделать Ахмад основным водителем?')).toBeInTheDocument()
 
     mockedRequest.mockResolvedValueOnce({ connectionId: 'c2', driverId: 'driver-2', createdAt: '2026-08-02T00:00:00Z', isPrimary: true })
     await userEvent.click(screen.getByRole('button', { name: 'Да, сделать основным' }))
 
     await waitFor(() =>
-      expect(screen.queryByText('Сделать Ахмад основным предпринимателем?')).not.toBeInTheDocument()
+      expect(screen.queryByText('Сделать Ахмад основным водителем?')).not.toBeInTheDocument()
     )
   })
 
@@ -580,12 +613,12 @@ describe('RideRequest', () => {
     await screen.findByRole('heading', { name: 'Кому доверить эту поездку?' })
 
     await userEvent.click(screen.getByRole('button', { name: 'Удалить' }))
-    expect(screen.getByText('Удалить Ахмад из круга доверия?')).toBeInTheDocument()
+    expect(screen.getByText('Удалить Ахмад из списка водителей?')).toBeInTheDocument()
 
     mockedRequest.mockResolvedValueOnce(undefined)
     await userEvent.click(screen.getByRole('button', { name: 'Да, удалить' }))
 
-    await waitFor(() => expect(screen.queryByText('Другие доверенные предприниматели')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText('Другие ваши водители')).not.toBeInTheDocument())
   })
 
   it('shows a clear alternative when the primary driver is unavailable (Rule 11)', async () => {

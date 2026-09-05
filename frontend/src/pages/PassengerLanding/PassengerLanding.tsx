@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Header } from '../../components/Header'
-import { ActionButton } from '../../components/ActionButton'
-import { Spinner } from '../../components/Spinner'
+import { Button } from '../../components/Button'
+import { LoadingState } from '../../components/LoadingState'
+import { ErrorState } from '../../components/ErrorState'
+import { StatusMessage } from '../../components/StatusMessage'
 import { PasswordInput } from '../../components/PasswordInput'
+import { DriverTrustIndicator } from '../../components/DriverTrustIndicator'
+import { Heading } from '../../components/Heading'
 import { getInvitationByDriverCode } from './invitationSource'
 import type { InvitationInfo } from './invitationSource'
 import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
+import { normalizePhone, isValidPhone, PHONE_FORMAT_HINT } from '../../identity/phoneFormat'
 import { saveDisplayName } from '../../persistence/localDisplayName'
 import { ApiError, request } from '../../api/apiClient'
 import { PassengerOnboarding } from './PassengerOnboarding'
@@ -263,9 +268,15 @@ export function PassengerLanding() {
       setAuthError(`Имя должно быть короче ${MAX_NAME_LENGTH} символов.`)
       return
     }
-    const trimmedPhone = phone.trim()
+    const trimmedPhone = normalizePhone(phone.trim())
     if (!trimmedPhone) {
       setAuthError('Пожалуйста, укажите номер телефона.')
+      return
+    }
+    // E-001 fix (docs/PIOS_PRODUCT_EVIDENCE.md) -- see DriverHome.tsx's own
+    // identical guard and phoneFormat.ts's own KDoc for the full incident.
+    if (!isValidPhone(trimmedPhone)) {
+      setAuthError(PHONE_FORMAT_HINT)
       return
     }
     if (password.length < MIN_PASSWORD_LENGTH) {
@@ -299,7 +310,9 @@ export function PassengerLanding() {
       setAuthError(
         error instanceof ApiError && error.status === 409
           ? 'Этот номер телефона уже зарегистрирован. Попробуйте войти.'
-          : 'Не удалось создать аккаунт. Проверьте связь с интернетом и попробуйте ещё раз.'
+          : error instanceof ApiError
+            ? 'Не удалось создать аккаунт. Проверьте введённые данные и попробуйте ещё раз.'
+            : 'Не удалось создать аккаунт. Проверьте связь с интернетом и попробуйте ещё раз.'
       )
     } finally {
       setIsSubmittingAuth(false)
@@ -307,9 +320,13 @@ export function PassengerLanding() {
   }
 
   async function handleLoginSubmit() {
-    const trimmedPhone = phone.trim()
+    const trimmedPhone = normalizePhone(phone.trim())
     if (!trimmedPhone) {
       setAuthError('Пожалуйста, укажите номер телефона.')
+      return
+    }
+    if (!isValidPhone(trimmedPhone)) {
+      setAuthError(PHONE_FORMAT_HINT)
       return
     }
     if (!password) {
@@ -341,39 +358,56 @@ export function PassengerLanding() {
     <div className={styles.screen}>
       <Header />
       <main className={styles.content}>
-        {step === 'loading' && <Spinner label="Загрузка…" />}
+        {step === 'loading' && <LoadingState label="Загрузка…" />}
 
         {step === 'not-found' && (
-          <p className={styles.status}>Ссылка недействительна или водитель ещё не зарегистрирован.</p>
+          <StatusMessage tone="warning">Ссылка недействительна или водитель ещё не зарегистрирован.</StatusMessage>
         )}
 
         {step === 'error' && (
-          <div className={styles.errorBlock}>
-            <p className={styles.error} role="alert">
-              Не удалось загрузить приглашение. Проверьте связь с интернетом.
-            </p>
-            <ActionButton
-              label="Попробовать снова"
-              variant="secondary"
-              onClick={() => loadInvitation(true, driverCode ?? '')}
-            />
-          </div>
+          <ErrorState
+            message="Не удалось загрузить приглашение. Проверьте связь с интернетом."
+            onRetry={() => loadInvitation(true, driverCode ?? '')}
+          />
         )}
 
         {step === 'invited' && invitation && (
           <>
-            <div className={styles.heroAvatar} aria-hidden="true">
-              {invitation.driverName.trim().charAt(0).toUpperCase()}
-            </div>
-            <p className={styles.heroCaption}>Ваш водитель — {invitation.driverName}</p>
-
-            <h1 className={styles.title}>👋 Вас пригласил {invitation.driverName}</h1>
-            <p className={styles.subtitle}>
-              Теперь вы можете быстро заказывать поездки через личный профиль {invitation.driverName}.
-            </p>
+            {/* DRIVER-AS-FACE, PIOS-AS-FRAME
+                (docs/PASSENGER_INVITATION_DESIGN_DECISION.md): one
+                identity element, not four separate name treatments
+                (the former .heroAvatar + .heroCaption + emoji heading
+                repeated the same fact three times before this task).
+                The <h1> below carries the same, unmodified sentence the
+                page always showed — now sized as a supporting line under
+                the driver's own name, not competing with it, and kept as
+                a real <h1> for document structure/accessibility even
+                though DriverTrustIndicator is the larger visual element. */}
+            {/* The name is established once, here — DriverTrustIndicator's
+                own name is the introduction. The heading and subtitle
+                below deliberately no longer repeat it
+                (docs/PASSENGER_INVITATION_DESIGN_DECISION.md Section 2:
+                "rendered once, unambiguously, at the top") — this trims
+                what was 4 separate name mentions on this step down to 2
+                (this one, and the steps card's own distinct "the order
+                goes specifically to them" fact below, which explains a
+                different thing and stays). */}
+            <DriverTrustIndicator name={invitation.driverName} emphasis="prominent" showAvatar />
+            <Heading level={1} visual="heading">
+              Вас пригласили лично
+            </Heading>
+            <p className={styles.subtitle}>Теперь вы можете быстро заказывать поездки через личный профиль.</p>
             <button type="button" className={styles.linkAction} onClick={() => setShowOnboarding(true)}>
               Как это работает
             </button>
+
+            {/* Primary action moved up, directly under the identity and
+                its one-line explanation — docs/PASSENGER_INVITATION_DESIGN_DECISION.md
+                Section 5: reachable without scrolling past two full
+                explanatory sections first, unchanged action/handler. */}
+            <div className={styles.actionRow}>
+              <Button label="Начать" variant="primary" onClick={handleContinue} />
+            </div>
 
             <section className={styles.stepsCard}>
               <h2 className={styles.stepsTitle}>Как работает PIOS</h2>
@@ -397,23 +431,7 @@ export function PassengerLanding() {
                   <p className={styles.stepDescription}>Заказ приходит напрямую ему — и больше никому.</p>
                 </div>
               </div>
-
-              <div className={styles.stepRow}>
-                <span className={styles.stepEmoji} aria-hidden="true">
-                  📵
-                </span>
-                <div>
-                  <p className={styles.stepTitle}>Если {invitation.driverName} не отвечает</p>
-                  <p className={styles.stepDescription}>
-                    Свяжитесь с ним напрямую — заказ не передаётся другому водителю.
-                  </p>
-                </div>
-              </div>
             </section>
-
-            <div className={styles.actionRow}>
-              <ActionButton label="Начать" variant="primary" onClick={handleContinue} />
-            </div>
 
             {/* PIOS Install v1 (Product Owner exception): additive, placed
                 after the primary "Начать" action so it never competes with
@@ -425,7 +443,7 @@ export function PassengerLanding() {
                 <p className={styles.installCardText}>
                   Добавьте PIOS на экран телефона, чтобы в следующий раз быстро заказать поездку.
                 </p>
-                <ActionButton label="Установить PIOS" variant="secondary" onClick={() => setShowInstall(true)} />
+                <Button label="Установить PIOS" variant="secondary" onClick={() => setShowInstall(true)} />
               </section>
             )}
 
@@ -442,24 +460,25 @@ export function PassengerLanding() {
 
         {step === 'confirm-add' && invitation && (
           <>
-            <h1 className={styles.title}>Добавить {invitation.driverName} в круг доверия?</h1>
+            <DriverTrustIndicator name={invitation.driverName} emphasis="prominent" showAvatar />
+            <Heading level={1} visual="heading">
+              Добавить {invitation.driverName} в ваш список водителей?
+            </Heading>
             <p className={styles.subtitle}>
-              Вы сможете заказывать поездки у {invitation.driverName} — он останется в списке ваших доверенных
-              предпринимателей, и вы сможете выбрать его снова в любой момент.
+              Вы сможете заказывать поездки у {invitation.driverName} и в следующий раз — он останется в списке ваших
+              водителей.
             </p>
             <div className={styles.actionRow}>
-              <ActionButton
-                label={addStatus === 'submitting' ? 'Добавляем…' : 'Добавить'}
+              <Button
+                label="Добавить"
                 variant="primary"
+                loading={addStatus === 'submitting'}
                 onClick={() => void handleAddToCircle()}
-                disabled={addStatus === 'submitting'}
               />
-              <ActionButton label="Не сейчас" variant="secondary" onClick={handleSkipAdd} />
+              <Button label="Не сейчас" variant="secondary" onClick={handleSkipAdd} />
             </div>
             {addStatus === 'error' && (
-              <p className={styles.error} role="alert">
-                Не удалось добавить. Проверьте связь с интернетом и попробуйте ещё раз.
-              </p>
+              <StatusMessage tone="error">Не удалось добавить. Проверьте связь с интернетом и попробуйте ещё раз.</StatusMessage>
             )}
           </>
         )}
@@ -501,25 +520,13 @@ export function PassengerLanding() {
                 }
               }}
             />
-            {authError && (
-              <p className={styles.error} role="alert">
-                {authError}
-              </p>
-            )}
+            {authError && <StatusMessage tone="error">{authError}</StatusMessage>}
             <div className={styles.actionRow}>
-              <ActionButton
-                label={
-                  isSubmittingAuth
-                    ? authMode === 'register'
-                      ? 'Создаём…'
-                      : 'Входим…'
-                    : authMode === 'register'
-                      ? 'Создать аккаунт'
-                      : 'Войти'
-                }
+              <Button
+                label={authMode === 'register' ? 'Создать аккаунт' : 'Войти'}
                 variant="primary"
+                loading={isSubmittingAuth}
                 onClick={() => void (authMode === 'register' ? handleRegisterSubmit() : handleLoginSubmit())}
-                disabled={isSubmittingAuth}
               />
             </div>
             <button type="button" className={styles.linkAction} onClick={toggleAuthMode}>
@@ -541,7 +548,7 @@ export function PassengerLanding() {
             </section>
 
             <div className={styles.actionRow}>
-              <ActionButton label="Создать первый заказ" variant="primary" onClick={handleCreateFirstOrder} />
+              <Button label="Создать первый заказ" variant="primary" onClick={handleCreateFirstOrder} />
             </div>
           </>
         )}

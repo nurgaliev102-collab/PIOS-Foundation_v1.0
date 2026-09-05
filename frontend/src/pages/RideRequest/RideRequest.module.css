@@ -1,8 +1,20 @@
+/**
+ * PIOS design system — first screen migration (docs/PIOS_DESIGN_SYSTEM.md
+ * Section 15). Every value below is a `var(--pios-*)` token, consumed
+ * from `src/styles/tokens.css`; nothing in this file hardcodes a color,
+ * radius, or spacing value of its own. The primitive element styles this
+ * file used to own (input, label, error text, title, card, confirm-box)
+ * now live in the shared foundation components
+ * (`src/components/{Button,Input,FormField,Card,StatusMessage,Text,
+ * Heading,Divider,LoadingState,ErrorState}`) — this file keeps only what
+ * is genuinely specific to this screen's own layout.
+ */
+
 .screen {
   display: flex;
   flex-direction: column;
   min-height: 100svh;
-  background: #f8fafc;
+  background: var(--pios-color-background);
 }
 
 .content {
@@ -10,188 +22,79 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
+  /* Top-anchored, not vertically centered (docs/PIOS_DESIGN_SYSTEM.md
+     Section 4/8: "top-anchored identity/status where the eye naturally
+     lands first"). Centering worked for a single short status line, but
+     floats a multi-field form (or a multi-line confirmed-ride status
+     stack) awkwardly in the middle of the viewport with a large empty
+     gap above it -- caught during this task's own browser visual
+     verification (docs/PIOS_DESIGN_IMPLEMENTATION_LOG.md), not assumed. */
+  justify-content: flex-start;
+  gap: var(--pios-space-2);
   width: 100%;
   max-width: 480px;
   margin: 0 auto;
-  padding: 1.25rem 1rem 2rem;
+  padding: var(--pios-space-6) var(--pios-space-4) var(--pios-space-8);
   box-sizing: border-box;
   text-align: center;
 }
 
-.status {
-  font-size: 0.9375rem;
-  color: #64748b;
-}
-
-.title {
-  margin: 0 0 0.5rem;
-  font-size: 1.375rem;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.label {
-  align-self: flex-start;
-  margin-top: 0.5rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: #64748b;
-}
-
-.input,
-.textarea {
-  width: 100%;
-  padding: 0.625rem 0.875rem;
-  font-size: 1rem;
-  font-family: inherit;
-  color: #0f172a;
-  background: #ffffff;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  box-sizing: border-box;
-}
-
-.input {
-  min-height: 44px;
-}
-
-.textarea {
-  min-height: 88px;
-  resize: vertical;
-}
-
-.input:focus,
-.textarea:focus {
-  outline: none;
-  border-color: #2563eb;
-}
-
-.error {
-  margin: 0;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: #dc2626;
-  text-align: left;
-  width: 100%;
-}
-
-.errorBlock {
+/* The booking form and the confirmed-order status are read top-to-bottom,
+   left-aligned — the centered, single-message default `.content` uses
+   for loading/not-found/error states doesn't fit a form or a stack of
+   status lines (docs/PIOS_DESIGN_SYSTEM.md Section 4, "Vertical rhythm"). */
+.formStack {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 0.625rem;
-  padding: 0.5rem 0;
-}
-
-.errorBlock .error {
-  text-align: center;
-}
-
-.hint {
-  margin: 0;
-  font-size: 0.8125rem;
-  color: #94a3b8;
-  text-align: left;
+  align-items: stretch;
+  gap: var(--pios-space-4);
   width: 100%;
+  text-align: left;
 }
 
 .actionRow {
   display: flex;
   width: 100%;
-  margin-top: 0.75rem;
-}
-
-.confirmed {
-  margin: 0;
-  font-size: 1.0625rem;
-  font-weight: 600;
-  color: #0f172a;
-}
-
-/* Sprint "My Business + Circle of Trust" (ADR-054): the circle-of-trust
-   step needs left-aligned rows, unlike this screen's own centered default
-   (.content above) -- each card stretches to the full content width. */
-.circleCard {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.875rem 1rem;
-  margin-top: 0.5rem;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  box-sizing: border-box;
-  text-align: left;
-}
-
-.circleSectionLabel {
-  margin: 0;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: #94a3b8;
-}
-
-.circleName {
-  margin: 0;
-  font-size: 1.0625rem;
-  font-weight: 600;
-  color: #0f172a;
+  margin-top: var(--pios-space-1);
 }
 
 .circleMemberRow {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--pios-space-2);
   width: 100%;
-  padding: 0.5rem 0;
-  border-top: 1px solid #f1f5f9;
-}
-
-.circleMemberRow:first-of-type {
-  border-top: none;
-  padding-top: 0;
+  padding: var(--pios-space-2) 0;
 }
 
 .circleMemberActions {
   display: flex;
   align-items: center;
-  gap: 0.625rem;
+  flex-wrap: wrap;
+  gap: var(--pios-space-3);
 }
 
 .textAction {
+  display: inline-flex;
+  align-items: center;
   padding: 0;
-  font-size: 0.8125rem;
-  color: #64748b;
+  min-height: var(--pios-touch-target-min);
+  font-family: var(--pios-font-family);
+  font-size: var(--pios-font-size-caption);
+  color: var(--pios-color-text-secondary);
   background: none;
   border: none;
   cursor: pointer;
   text-decoration: underline;
 }
 
-.confirmBox {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.875rem 1rem;
-  margin-top: 0.5rem;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  box-sizing: border-box;
+.textAction:focus-visible {
+  outline: 2px solid var(--pios-color-focus-ring);
+  outline-offset: 2px;
 }
 
 @media (min-width: 640px) {
   .content {
-    gap: 0.625rem;
+    gap: var(--pios-space-3);
   }
 }
