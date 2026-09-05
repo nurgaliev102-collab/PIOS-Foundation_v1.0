@@ -17,6 +17,7 @@ import { ApiError, request } from '../../api/apiClient'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
 import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
 import { LocalInvitationProvider } from '../../identity/InvitationProvider'
+import { normalizePhone, isValidPhone, PHONE_FORMAT_HINT } from '../../identity/phoneFormat'
 import { DriverOnboarding } from './DriverOnboarding'
 import { hasSeenDriverOnboarding, markDriverOnboardingSeen } from '../../persistence/localOnboardingSeen'
 import { InstallPIOS, isStandalone } from '../../features/install'
@@ -726,9 +727,19 @@ export function DriverHome() {
   }
 
   async function handleRegisterSubmit() {
-    const trimmedPhone = phone.trim()
+    const trimmedPhone = normalizePhone(phone.trim())
     if (!trimmedPhone) {
       setAuthError('Пожалуйста, укажите номер телефона.')
+      return
+    }
+    // E-001 fix (docs/PIOS_PRODUCT_EVIDENCE.md): reject an invalid phone
+    // format here, before ever calling the backend -- the backend's own
+    // `Phone` value class already enforces this exact shape, silently, with
+    // no way for this screen to distinguish that from a real network
+    // failure once the request is sent (see this file's own catch block
+    // below, and `phoneFormat.ts`'s own KDoc for the full incident).
+    if (!isValidPhone(trimmedPhone)) {
+      setAuthError(PHONE_FORMAT_HINT)
       return
     }
     if (password.length < MIN_PASSWORD_LENGTH) {
@@ -744,7 +755,9 @@ export function DriverHome() {
       setAuthError(
         error instanceof ApiError && error.status === 409
           ? 'Этот номер телефона уже зарегистрирован. Попробуйте войти.'
-          : 'Не удалось создать аккаунт. Проверьте связь с интернетом и попробуйте ещё раз.'
+          : error instanceof ApiError
+            ? 'Не удалось создать аккаунт. Проверьте введённые данные и попробуйте ещё раз.'
+            : 'Не удалось создать аккаунт. Проверьте связь с интернетом и попробуйте ещё раз.'
       )
     } finally {
       setIsSubmittingAuth(false)
@@ -752,9 +765,13 @@ export function DriverHome() {
   }
 
   async function handleLoginSubmit() {
-    const trimmedPhone = phone.trim()
+    const trimmedPhone = normalizePhone(phone.trim())
     if (!trimmedPhone) {
       setAuthError('Пожалуйста, укажите номер телефона.')
+      return
+    }
+    if (!isValidPhone(trimmedPhone)) {
+      setAuthError(PHONE_FORMAT_HINT)
       return
     }
     if (!password) {

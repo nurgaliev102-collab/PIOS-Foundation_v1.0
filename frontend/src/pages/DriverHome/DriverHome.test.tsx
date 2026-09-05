@@ -51,6 +51,27 @@ describe('DriverHome', () => {
     vi.restoreAllMocks()
   })
 
+  // E-001 (docs/PIOS_PRODUCT_EVIDENCE.md): a real iPhone registration
+  // failed with a misleading "проверьте связь с интернетом" message that
+  // was actually a silent backend 400 on an invalid phone format. This
+  // guards the fix: an invalid format is now caught before any request is
+  // made, with an accurate message.
+  it('rejects an invalid phone format before ever calling the backend, with an accurate message', async () => {
+    localStorage.clear() // no seeded identity -- this test needs the real welcome/auth screen
+    mockedRequest.mockReset()
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Начать' }))
+    await userEvent.type(screen.getByLabelText('Номер телефона'), '89991234567')
+    await userEvent.type(screen.getByLabelText('Пароль'), 'password123')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Создать аккаунт' }))
+
+    expect(await screen.findByText(/международном формате/)).toBeInTheDocument()
+    expect(mockedRequest).not.toHaveBeenCalled()
+  })
+
   // --- Driver availability security (Task 25: Orders Cancellation & Driver Availability Security Remediation) ---
 
   it('sends this driver\'s own Bearer token on POST /v1/drivers/:id/availability', async () => {
