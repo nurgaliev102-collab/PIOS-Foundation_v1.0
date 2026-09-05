@@ -105,3 +105,30 @@ describe('BackendIdentityProvider.attachDriver', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
+
+describe('BackendIdentityProvider.network path selection', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    localStorage.clear()
+  })
+
+  it('uses same-origin path for browser requests (no localhost:8086 in emitted URL)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ identityId: 'identity-1', driverId: null, token: 't', expiresAt: new Date().toISOString() }),
+        { status: 200 }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    // Ensure we run in a browser-like environment for this test (vitest jsdom does this by default).
+    const provider = new (await import('./BackendIdentityProvider')).BackendIdentityProvider()
+    await provider.login('+70000000000', 'password')
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/v1/identities/login')
+    // headers include Content-Type and body was provided
+    const headers = (init.headers ?? {}) as Record<string, string>
+    expect(headers['Content-Type']).toBe('application/json')
+  })
+})

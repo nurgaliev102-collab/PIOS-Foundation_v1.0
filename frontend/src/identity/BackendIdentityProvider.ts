@@ -1,10 +1,16 @@
 import { ApiError, request } from '../api/apiClient'
 import type { IdentityProvider, StoredIdentity } from './IdentityProvider'
 
-// Identity's own local port (INTERFACE_CONTRACTS.md-style convention, ADR-038) —
-// distinct from apiClientConfig's default (Driver Management's port), same
-// pattern every other page already uses for a module beyond the first.
-const IDENTITY_BASE_URL = import.meta.env.VITE_IDENTITY_BASE_URL ?? 'http://localhost:8086'
+// Identity's own local port (INTERFACE_CONTRACTS.md-style convention, ADR-038).
+// In a browser context we must issue same-origin requests so the preview
+// server (vite preview) can proxy `/v1/identities` to the real backend.
+// When running in a non-browser environment (tests, server-side tooling)
+// fall back to the configured absolute URL so those environments keep
+// working unchanged.
+const IDENTITY_BASE_URL =
+  typeof window !== 'undefined' && typeof (window as any).location !== 'undefined'
+    ? ''
+    : import.meta.env.VITE_IDENTITY_BASE_URL ?? 'http://localhost:8086'
 
 const STORAGE_KEY = 'pios.identity'
 
