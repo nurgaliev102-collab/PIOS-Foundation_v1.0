@@ -130,6 +130,30 @@ class ProposalAssignmentOrchestrationService(
 
         ProposalAcceptanceOutcome(proposal, assignmentCreated)
     }
+
+    /**
+     * Confirms the price already stated on the Proposal identified by
+     * [command] (the passenger's own agreeing act, Product Owner
+     * instruction 2026-09-05), then creates the Assignment it precedes,
+     * inside one shared transaction -- identical in every respect to
+     * [acceptProposal] except which Proposal-aggregate transition it
+     * calls, since [com.pios.dispatch.domain.Proposal.confirmPrice] and
+     * [com.pios.dispatch.domain.Proposal.accept] both resolve to the same
+     * [com.pios.dispatch.domain.ProposalAccepted] outcome this
+     * orchestration reacts to.
+     */
+    fun confirmPrice(command: ConfirmPriceCommand): ProposalAcceptanceOutcome = transactionRunner.run {
+        val proposal = proposalRepository.findById(command.proposalId)
+            ?: throw ProposalNotFoundException(command.proposalId)
+
+        proposalApplicationService.confirmPriceWithinCallerTransaction(proposal, command)
+
+        val assignmentCreated = dispatchAssignmentApplicationService.handleWithinCallerTransaction(
+            AssignOrderCommand(proposal.order, proposal.driver, isTest = proposal.isTest)
+        )
+
+        ProposalAcceptanceOutcome(proposal, assignmentCreated)
+    }
 }
 
 /**

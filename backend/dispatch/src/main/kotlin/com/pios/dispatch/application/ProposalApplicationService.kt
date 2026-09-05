@@ -5,6 +5,7 @@ import com.pios.dispatch.domain.ProposalAccepted
 import com.pios.dispatch.domain.ProposalCreated
 import com.pios.dispatch.domain.ProposalDeclined
 import com.pios.dispatch.domain.ProposalLapsed
+import com.pios.dispatch.domain.ProposalPriceProposed
 import com.pios.dispatch.domain.ProposalWithdrawn
 import org.springframework.stereotype.Service
 
@@ -180,6 +181,98 @@ class ProposalApplicationService(
         val proposal = proposalRepository.findById(command.proposalId)
             ?: throw ProposalNotFoundException(command.proposalId)
         acceptProposal(proposal, command)
+    }
+
+    /**
+     * States a price for the given [proposal], per the Propose Price
+     * command (Product Owner instruction, 2026-09-05). [proposal] must be
+     * the one referenced by [command] — the caller is responsible for
+     * finding it, mirroring [acceptProposal]'s own instance-supplied
+     * overload.
+     */
+    fun proposePrice(proposal: Proposal, command: ProposePriceCommand): ProposalPriceProposed = transactionRunner.run {
+        proposePriceWithinCallerTransaction(proposal, command)
+    }
+
+    /**
+     * Identical to [proposePrice] (the instance-supplied overload) except
+     * that it does not open its own [transactionRunner] boundary -- for
+     * symmetry with [acceptProposalWithinCallerTransaction], even though
+     * today's only caller ([ProposalController.proposePrice]) does not
+     * need a shared transaction (no Assignment is created at this step).
+     */
+    fun proposePriceWithinCallerTransaction(proposal: Proposal, command: ProposePriceCommand): ProposalPriceProposed {
+        require(proposal.id == command.proposalId) {
+            "Proposal ${proposal.id.value} does not match command target ${command.proposalId.value}"
+        }
+        val event = proposal.proposePrice(command.statedPrice, command.statedEtaMinutes)
+        proposalRepository.save(proposal)
+        return event
+    }
+
+    /**
+     * States a price for the proposal referenced by [command] by first
+     * restoring it through [proposalRepository]. Throws
+     * [ProposalNotFoundException] if no Proposal identified by
+     * [ProposePriceCommand.proposalId] has been saved.
+     */
+    fun proposePrice(command: ProposePriceCommand): ProposalPriceProposed = transactionRunner.run {
+        val proposal = proposalRepository.findById(command.proposalId)
+            ?: throw ProposalNotFoundException(command.proposalId)
+        proposePriceWithinCallerTransaction(proposal, command)
+    }
+
+    /**
+     * Confirms the price already stated on the given [proposal], per the
+     * Confirm Price command -- the passenger's own agreeing act. [proposal]
+     * must be the one referenced by [command].
+     */
+    fun confirmPrice(proposal: Proposal, command: ConfirmPriceCommand): ProposalAccepted = transactionRunner.run {
+        confirmPriceWithinCallerTransaction(proposal, command)
+    }
+
+    /**
+     * Identical to [confirmPrice] (the instance-supplied overload) except
+     * that it does not open its own [transactionRunner] boundary -- for
+     * [ProposalAssignmentOrchestrationService] to call from inside the one
+     * shared transaction it owns for Confirm Price, mirroring
+     * [acceptProposalWithinCallerTransaction]'s own reasoning exactly: this
+     * write and the Assignment's own write must commit or roll back
+     * together.
+     */
+    fun confirmPriceWithinCallerTransaction(proposal: Proposal, command: ConfirmPriceCommand): ProposalAccepted {
+        require(proposal.id == command.proposalId) {
+            "Proposal ${proposal.id.value} does not match command target ${command.proposalId.value}"
+        }
+        val event = proposal.confirmPrice()
+        proposalRepository.save(proposal)
+        return event
+    }
+
+    /**
+     * Declines the price already stated on the given [proposal], per the
+     * Decline Price command -- the passenger's own refusing act.
+     * [proposal] must be the one referenced by [command].
+     */
+    fun declinePriceProposal(proposal: Proposal, command: DeclinePriceCommand): ProposalDeclined = transactionRunner.run {
+        require(proposal.id == command.proposalId) {
+            "Proposal ${proposal.id.value} does not match command target ${command.proposalId.value}"
+        }
+        val event = proposal.declinePriceProposal()
+        proposalRepository.save(proposal)
+        event
+    }
+
+    /**
+     * Declines the price on the proposal referenced by [command] by first
+     * restoring it through [proposalRepository]. Throws
+     * [ProposalNotFoundException] if no Proposal identified by
+     * [DeclinePriceCommand.proposalId] has been saved.
+     */
+    fun declinePriceProposal(command: DeclinePriceCommand): ProposalDeclined = transactionRunner.run {
+        val proposal = proposalRepository.findById(command.proposalId)
+            ?: throw ProposalNotFoundException(command.proposalId)
+        declinePriceProposal(proposal, command)
     }
 
     /**

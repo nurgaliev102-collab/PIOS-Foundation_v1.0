@@ -96,7 +96,7 @@ interface ProposalListItem {
   proposalId: string
   orderId: string
   driverId: string
-  status: 'OPEN' | 'ACCEPTED' | 'DECLINED' | 'LAPSED' | 'WITHDRAWN'
+  status: 'OPEN' | 'PRICE_PROPOSED' | 'ACCEPTED' | 'DECLINED' | 'LAPSED' | 'WITHDRAWN'
   // ADR-042 (Stated Ride Price Minimal Model): the amount this driver
   // stated when accepting, if any. Always `null` for a proposal that is
   // not yet ACCEPTED or was accepted with no price entered — PIOS never
@@ -121,6 +121,9 @@ const ETA_OPTIONS_MINUTES = [2, 5, 7, 10, 15] as const
 // principle for it.
 const PROPOSAL_STATUS_LABEL: Record<ProposalListItem['status'], string> = {
   OPEN: 'Ожидает вашего решения',
+  // Product Owner instruction, 2026-09-05: the driver has named a price;
+  // the ride is not yet confirmed until the passenger agrees to it.
+  PRICE_PROPOSED: 'Ожидает решения клиента',
   ACCEPTED: 'Вы приняли',
   DECLINED: 'Отклонено',
   LAPSED: 'Больше не активно',
@@ -259,14 +262,19 @@ function ProposalDetails({
         </Text>
       )}
       {/* ADR-042 (Stated Ride Price Minimal Model): read-back of the
-          amount this driver themselves stated on acceptance -- from the
-          accept response and/or the same 3s poll that already refreshes
-          every other field on this card, so it survives a reload
-          (R7.2). Nothing is shown if none was entered. */}
-      {proposal.status === 'ACCEPTED' && proposal.statedPrice && <Text role="body">Стоимость: {proposal.statedPrice}</Text>}
+          amount this driver themselves stated -- from the propose-price
+          response and/or the same 3s poll that already refreshes every
+          other field on this card, so it survives a reload (R7.2).
+          Checked by presence, not by a specific status: since 2026-09-05
+          a price is stated at PRICE_PROPOSED and carries through
+          unchanged to ACCEPTED (and even a passenger's own price decline,
+          which keeps it for the historical record) -- gating on ACCEPTED
+          alone would hide it during the very state it most needs to be
+          visible in. */}
+      {proposal.statedPrice && <Text role="body">Стоимость: {proposal.statedPrice}</Text>}
       {/* ADR-057 (Driver Stated Time to Pickup): same read-back pattern
           as statedPrice immediately above. */}
-      {proposal.status === 'ACCEPTED' && typeof proposal.statedEtaMinutes === 'number' && (
+      {typeof proposal.statedEtaMinutes === 'number' && (
         <Text role="body">Будет примерно через: {proposal.statedEtaMinutes} мин</Text>
       )}
     </>
@@ -846,21 +854,20 @@ export function DriverHome() {
     }
   }
 
-  // ADR-042 (Stated Ride Price Minimal Model): the accept request body,
-  // included only when the driver actually typed something. An empty
-  // input sends no body at all -- identical to this call before this ADR,
-  // and to what `respondToProposal('decline', ...)` still always sends
-  // (Open Question 6: a price may never accompany a decline).
-  function acceptRequestInit(proposalId: string): RequestInit {
+  // Product Owner instruction, 2026-09-05: a driver must state a price
+  // before a ride proceeds -- `statedPrice` is now mandatory, unlike this
+  // request's own pre-existing, still-supported optional shape on the
+  // legacy `/accept` endpoint (ADR-042 Decision Revised R2/R5). The
+  // caller (`respondToProposal`) already refuses to call this at all when
+  // the input is blank -- see [RequestCard]'s own `acceptDisabled` wiring
+  // below -- so `statedPrice` here is trusted to already be non-blank.
+  function proposePriceRequestInit(proposalId: string): RequestInit {
     const statedPrice = (priceInputs[proposalId] ?? '').trim()
     const statedEtaMinutes = etaInputs[proposalId] ?? null
-    if (!statedPrice && statedEtaMinutes === null) {
-      return {}
-    }
     return {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        ...(statedPrice ? { statedPrice } : {}),
+        statedPrice,
         ...(statedEtaMinutes !== null ? { statedEtaMinutes } : {}),
       }),
     }
@@ -876,14 +883,23 @@ export function DriverHome() {
   // a click), when identity is null -- same guarantee `identity.token`
   // already relies on elsewhere in this component (e.g. loadProposals's
   // own call sites).
+  //
+  // Product Owner instruction, 2026-09-05: 'accept' now means "propose a
+  // price" (`POST .../propose-price`), not the old direct `/accept` --
+  // the ride is not confirmed until the passenger separately agrees to
+  // that price (see the PRICE_PROPOSED render branch below).
   async function respondToProposal(proposalId: string, action: 'accept' | 'decline') {
     if (proposalActions[proposalId] === 'submitting' || !identity) {
       return
     }
+    if (action === 'accept' && !(priceInputs[proposalId] ?? '').trim()) {
+      return
+    }
     setProposalActions((current) => ({ ...current, [proposalId]: 'submitting' }))
     try {
-      const extra = action === 'accept' ? acceptRequestInit(proposalId) : {}
-      const updated = await request<ProposalListItem>(`/v1/proposals/${proposalId}/${action}`, {
+      const endpoint = action === 'accept' ? 'propose-price' : 'decline'
+      const extra = action === 'accept' ? proposePriceRequestInit(proposalId) : {}
+      const updated = await request<ProposalListItem>(`/v1/proposals/${proposalId}/${endpoint}`, {
         method: 'POST',
         baseUrl: DISPATCH_BASE_URL,
         ...extra,
@@ -1248,11 +1264,16 @@ export function DriverHome() {
                   onDecline={() => respondToProposal(proposal.proposalId, 'decline')}
                   submitting={proposalActions[proposal.proposalId] === 'submitting'}
                   error={proposalActions[proposal.proposalId] === 'error'}
+                  // Product Owner instruction, 2026-09-05: a driver must
+                  // name a price before a ride proceeds -- disabled, not
+                  // hidden, so the requirement itself is visible rather
+                  // than a click that silently does nothing.
+                  acceptDisabled={!(priceInputs[proposal.proposalId] ?? '').trim()}
                 >
                   <Input
                     type="text"
                     value={priceInputs[proposal.proposalId] ?? ''}
-                    placeholder="Стоимость (необязательно)"
+                    placeholder="Стоимость поездки"
                     aria-label="Стоимость поездки"
                     onChange={(event) =>
                       setPriceInputs((current) => ({ ...current, [proposal.proposalId]: event.target.value }))
@@ -1280,6 +1301,23 @@ export function DriverHome() {
                     ))}
                   </Select>
                 </RequestCard>
+              )
+            }
+
+            // PRICE_PROPOSED (Product Owner instruction, 2026-09-05): the
+            // driver has named a price; nothing is settled yet -- no
+            // Assignment exists -- until the passenger separately confirms
+            // or declines it. A plain Card, like the resolved statuses
+            // below: no action remains for the driver here, only waiting.
+            if (proposal.status === 'PRICE_PROPOSED') {
+              return (
+                <Card key={proposal.proposalId}>
+                  <Text role="label" tone="secondary">
+                    Заказ №{orderCode}
+                  </Text>
+                  <RideStatus status="PRICE_PROPOSED" label={PROPOSAL_STATUS_LABEL.PRICE_PROPOSED} />
+                  {details}
+                </Card>
               )
             }
 

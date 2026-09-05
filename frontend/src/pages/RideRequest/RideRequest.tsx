@@ -86,7 +86,8 @@ interface EnrichedCircleMember extends CircleMember {
 }
 
 interface ProposalStatusItem {
-  status: 'OPEN' | 'ACCEPTED' | 'DECLINED' | 'LAPSED' | 'WITHDRAWN'
+  proposalId: string
+  status: 'OPEN' | 'PRICE_PROPOSED' | 'ACCEPTED' | 'DECLINED' | 'LAPSED' | 'WITHDRAWN'
   // ADR-042 (Stated Ride Price Minimal Model), Amendment 2026-08-01 (R9):
   // the Product Owner ruled the passenger does see the amount the driver
   // stated on acceptance -- `GET /v1/proposals?orderId=...` (this screen's
@@ -152,7 +153,16 @@ const STATUS_POLL_INTERVAL_MS = 3000
 // below (`rideStatusLabel`) stay exactly as narrow as before; this type
 // is still assignable everywhere `RideLifecycleStatus` is expected
 // (the `<RideStatus status={rideStatus} .../>` call site below).
-type PassengerRideStatus = 'OPEN' | 'DECLINED' | 'LAPSED' | 'WITHDRAWN' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED'
+type PassengerRideStatus =
+  | 'OPEN'
+  | 'PRICE_PROPOSED'
+  | 'DECLINED'
+  | 'LAPSED'
+  | 'WITHDRAWN'
+  | 'ACCEPTED'
+  | 'ARRIVED'
+  | 'IN_PROGRESS'
+  | 'COMPLETED'
 
 /**
  * ADR-058 Decision item 5: PIOS itself asserts nothing about a past
@@ -191,6 +201,8 @@ function rideStatusLabel(status: PassengerRideStatus): string {
   switch (status) {
     case 'OPEN':
       return '⏳ Ждём ответа водителя. Мы сообщим, как только он подтвердит заказ.'
+    case 'PRICE_PROPOSED':
+      return '💰 Водитель назвал цену — подтвердите или откажитесь ниже.'
     case 'DECLINED':
       return '❌ Водитель отклонил ваш заказ.'
     case 'LAPSED':
@@ -318,6 +330,12 @@ export function RideRequest() {
   const [orderId, setOrderId] = useState<string | null>(null)
   const [proposalStatus, setProposalStatus] = useState<ProposalStatus | null>(null)
   const [rideStatus, setRideStatus] = useState<PassengerRideStatus>('OPEN')
+  // Product Owner instruction, 2026-09-05: needed to call confirm-price/
+  // decline-price on the exact proposal the driver named a price on --
+  // read from the same poll every other proposal-derived field already
+  // comes from.
+  const [proposalId, setProposalId] = useState<string | null>(null)
+  const [priceDecisionStatus, setPriceDecisionStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
   // ADR-042 R9: the amount the driver stated on accepting this order, read
   // from the same poll [rideStatus] already uses -- null until a proposal
   // is actually ACCEPTED, and whenever the driver accepted with no amount
@@ -457,6 +475,19 @@ export function RideRequest() {
           }
           const acceptedItem = items.find((item) => item.status === 'ACCEPTED')
           if (!acceptedItem) {
+            // Product Owner instruction, 2026-09-05: a driver-named price
+            // awaiting this passenger's own decision -- checked before the
+            // OPEN/DECLINED/LAPSED/WITHDRAWN priority group below, since
+            // it is itself a real, distinct, non-terminal fact, not one of
+            // those four.
+            const priceProposedItem = items.find((item) => item.status === 'PRICE_PROPOSED')
+            if (priceProposedItem) {
+              setRideStatus('PRICE_PROPOSED')
+              setProposalId(priceProposedItem.proposalId)
+              setStatedPrice(priceProposedItem.statedPrice)
+              setStatedEtaMinutes(priceProposedItem.statedEtaMinutes)
+              return
+            }
             // Sprint H5 (Truthful Status Rendering): reflect whichever real
             // proposal status this order actually has -- OPEN, DECLINED, or
             // LAPSED are three different facts and must not all render as
@@ -745,6 +776,61 @@ export function RideRequest() {
       setCancelStatus('idle')
     } catch {
       setCancelStatus('error')
+    }
+  }
+
+  /**
+   * Product Owner instruction, 2026-09-05: the passenger's own agreement
+   * to the price the driver named -- calls Dispatch's own
+   * `POST /v1/proposals/{id}/confirm-price`, which also creates the
+   * Assignment behind the scenes (mirrors the old direct-accept flow's own
+   * effect). Optimistic: sets `rideStatus` to `'ACCEPTED'` immediately
+   * rather than waiting for the next poll tick, matching
+   * [handleCancelOrder]'s own optimistic-update precedent -- a failure
+   * self-corrects on the next poll, since the server-side state never
+   * actually changed.
+   */
+  async function handleConfirmPrice() {
+    if (!proposalId || priceDecisionStatus === 'submitting' || !identity) {
+      return
+    }
+    setPriceDecisionStatus('submitting')
+    try {
+      await request(`/v1/proposals/${proposalId}/confirm-price`, {
+        method: 'POST',
+        baseUrl: DISPATCH_BASE_URL,
+        headers: { Authorization: `Bearer ${identity.token}` },
+      })
+      setRideStatus('ACCEPTED')
+      setPriceDecisionStatus('idle')
+    } catch {
+      setPriceDecisionStatus('error')
+    }
+  }
+
+  /**
+   * Product Owner instruction, 2026-09-05: the passenger's own refusal of
+   * the price the driver named -- calls Dispatch's own
+   * `POST /v1/proposals/{id}/decline-price`. Per that same instruction,
+   * this simply closes the request: no renegotiation, no automatic
+   * reroute to another driver -- the passenger decides what to do next,
+   * exactly like an ordinary decline.
+   */
+  async function handleDeclinePrice() {
+    if (!proposalId || priceDecisionStatus === 'submitting' || !identity) {
+      return
+    }
+    setPriceDecisionStatus('submitting')
+    try {
+      await request(`/v1/proposals/${proposalId}/decline-price`, {
+        method: 'POST',
+        baseUrl: DISPATCH_BASE_URL,
+        headers: { Authorization: `Bearer ${identity.token}` },
+      })
+      setRideStatus('DECLINED')
+      setPriceDecisionStatus('idle')
+    } catch {
+      setPriceDecisionStatus('error')
     }
   }
 
@@ -1114,20 +1200,64 @@ export function RideRequest() {
                     role="numeric" (docs/PIOS_DESIGN_SYSTEM.md Section 3):
                     this is genuinely numeric fare/ETA data, unlike the
                     other status text on this screen. */}
-                {statedPrice && rideStatus !== 'OPEN' && rideStatus !== 'DECLINED' && rideStatus !== 'LAPSED' && (
-                  <Text role="numeric" tone="primary">
-                    Стоимость: {statedPrice}
-                  </Text>
-                )}
+                {/* Product Owner instruction, 2026-09-05: excluded here
+                    during PRICE_PROPOSED too -- the dedicated confirm/
+                    decline block immediately below already shows the same
+                    price as part of that decision, so this generic line
+                    stays reserved for ACCEPTED-onward, exactly as before. */}
+                {statedPrice &&
+                  rideStatus !== 'OPEN' &&
+                  rideStatus !== 'PRICE_PROPOSED' &&
+                  rideStatus !== 'DECLINED' &&
+                  rideStatus !== 'LAPSED' && (
+                    <Text role="numeric" tone="primary">
+                      Стоимость: {statedPrice}
+                    </Text>
+                  )}
                 {/* ADR-057: same placement and gating as statedPrice immediately above. */}
                 {typeof statedEtaMinutes === 'number' &&
                   rideStatus !== 'OPEN' &&
+                  rideStatus !== 'PRICE_PROPOSED' &&
                   rideStatus !== 'DECLINED' &&
                   rideStatus !== 'LAPSED' && (
                     <Text role="numeric" tone="primary">
                       Будет примерно через: {statedEtaMinutes} мин
                     </Text>
                   )}
+                {/* Product Owner instruction, 2026-09-05: the driver named
+                    a price -- the passenger must confirm or decline it
+                    before a ride is settled. No renegotiation offered
+                    here: a decline simply closes the request, matching
+                    that instruction exactly ("заявка просто закрывается"). */}
+                {rideStatus === 'PRICE_PROPOSED' && (
+                  <>
+                    <Text role="numeric" tone="primary" strong>
+                      Водитель предлагает: {statedPrice}
+                    </Text>
+                    {typeof statedEtaMinutes === 'number' && (
+                      <Text role="body" tone="secondary">
+                        Будет примерно через: {statedEtaMinutes} мин
+                      </Text>
+                    )}
+                    <div className={styles.actionRow}>
+                      <Button
+                        label="Подтвердить поездку"
+                        variant="primary"
+                        loading={priceDecisionStatus === 'submitting'}
+                        onClick={() => void handleConfirmPrice()}
+                      />
+                      <Button
+                        label="Отказаться"
+                        variant="destructive"
+                        loading={priceDecisionStatus === 'submitting'}
+                        onClick={() => void handleDeclinePrice()}
+                      />
+                    </div>
+                    {priceDecisionStatus === 'error' && (
+                      <StatusMessage tone="error">Не удалось отправить решение. Попробуйте ещё раз.</StatusMessage>
+                    )}
+                  </>
+                )}
                 {/* P0-2 Tier 1: only while still OPEN -- a driver who has
                     already accepted has committed, and cancelling then is
                     out of this Tier's scope (handleCancelOrder's own

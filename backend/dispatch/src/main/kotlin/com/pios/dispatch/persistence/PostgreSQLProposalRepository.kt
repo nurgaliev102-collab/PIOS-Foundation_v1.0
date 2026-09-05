@@ -162,7 +162,31 @@ class PostgreSQLProposalRepository(
         val respondedAt: Instant = rs.getTimestamp("responded_at")?.toInstant() ?: Instant.now()
         when (status) {
             ProposalStatus.ACCEPTED -> proposal.accept(statedPrice, statedEtaMinutes, respondedAt)
-            ProposalStatus.DECLINED -> proposal.decline(respondedAt)
+            // PRICE_PROPOSED (2026-09-05, mandatory driver-stated price):
+            // the private constructor above always starts the reconstructed
+            // object at OPEN, so it must be moved forward to PRICE_PROPOSED
+            // the same way the ACCEPTED branch already moves it to ACCEPTED
+            // -- statedPrice is non-null by the time a row can reach this
+            // status (Proposal.proposePrice's own require), but a blank
+            // fallback keeps this read path from throwing on a
+            // pathological row rather than a domain violation.
+            ProposalStatus.PRICE_PROPOSED -> proposal.proposePrice(statedPrice ?: "", statedEtaMinutes, respondedAt)
+            // DECLINED: a row can reach this status via two different real
+            // paths -- an outright driver decline (Proposal.decline, which
+            // never sets a price) or a passenger's refusal of an already-
+            // stated price (Proposal.declinePriceProposal, which leaves the
+            // price as recorded). Distinguished here by whether stated_price
+            // was actually persisted: replaying the two-hop
+            // proposePrice-then-declinePriceProposal path when it was is
+            // what correctly restores that price in memory -- a single
+            // proposal.decline(respondedAt) call would silently drop it,
+            // since that method never touches statedPrice by design.
+            ProposalStatus.DECLINED -> if (statedPrice != null) {
+                proposal.proposePrice(statedPrice, statedEtaMinutes, respondedAt)
+                proposal.declinePriceProposal(respondedAt)
+            } else {
+                proposal.decline(respondedAt)
+            }
             ProposalStatus.LAPSED -> proposal.lapse(respondedAt)
             ProposalStatus.WITHDRAWN -> proposal.withdraw(respondedAt)
             ProposalStatus.OPEN -> Unit

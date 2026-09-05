@@ -17,7 +17,14 @@ export interface RequestCardProps {
   onDecline: () => void
   submitting: boolean
   error: boolean
-  /** The price/ETA inputs a driver may fill in before accepting (ADR-042/ADR-057) — presentation-only slot, all state/logic stays with the caller. */
+  /**
+   * Product Owner instruction, 2026-09-05: a driver must state a price
+   * before a ride proceeds -- the caller sets this whenever its own price
+   * input is blank, so the primary action stays visibly unavailable until
+   * one is entered, rather than silently doing nothing on click.
+   */
+  acceptDisabled?: boolean
+  /** The price/ETA inputs a driver fills in before proposing a price (ADR-042/ADR-057) — presentation-only slot, all state/logic stays with the caller. */
   children?: ReactNode
 }
 
@@ -45,6 +52,7 @@ export function RequestCard({
   onDecline,
   submitting,
   error,
+  acceptDisabled = false,
   children,
 }: RequestCardProps) {
   return (
@@ -62,7 +70,13 @@ export function RequestCard({
         {children}
 
         <div className={styles.actions}>
-          <Button label="Принять" variant="primary" loading={submitting} onClick={onAccept} />
+          <Button
+            label="Предложить цену"
+            variant="primary"
+            loading={submitting}
+            disabled={acceptDisabled}
+            onClick={onAccept}
+          />
           <Button label="Отклонить" variant="secondary" loading={submitting} onClick={onDecline} />
         </div>
 

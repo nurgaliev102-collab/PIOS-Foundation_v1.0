@@ -5,8 +5,14 @@ package com.pios.dispatch.domain
  * Pre-Commitment Aggregate, Step 5).
  *
  * [OPEN] — proposed, awaiting the driver's own resolution.
- * [ACCEPTED] — the driver confirmed; the precondition for Assignment's
- * own creation (ADR-035).
+ * [PRICE_PROPOSED] — the driver has stated a price for this ride and is
+ * awaiting the passenger's own decision on it (Product Owner instruction,
+ * 2026-09-05: a driver must name a price before a ride is confirmed, and
+ * the passenger must agree to it). Distinct from [ACCEPTED]: nothing is
+ * yet settled — no Assignment exists — until the passenger confirms.
+ * [ACCEPTED] — both the driver's price and the passenger's agreement to
+ * it are settled; the precondition for Assignment's own creation
+ * (ADR-035).
  * [DECLINED] — the driver actively refused, before any obligation existed
  * (PRODUCT_DECISION_OPPORTUNITY_ACCEPTANCE_COMMITMENT.md Section 3).
  * [LAPSED] — no response arrived while waiting remained appropriate;
@@ -25,6 +31,7 @@ package com.pios.dispatch.domain
  */
 enum class ProposalStatus {
     OPEN,
+    PRICE_PROPOSED,
     ACCEPTED,
     DECLINED,
     LAPSED,

@@ -157,6 +157,95 @@ class Proposal private constructor(
     }
 
     /**
+     * States a price for this ride, per the driver's own act (Product
+     * Owner instruction, 2026-09-05: a driver must name a price before a
+     * ride is confirmed, and the passenger must separately agree to it).
+     * Only an [ProposalStatus.OPEN] proposal may have a price proposed.
+     * Unlike [accept]'s own optional [statedPrice], [statedPrice] here is
+     * mandatory and must be non-blank — this method exists specifically
+     * because a price is now required before a ride can proceed, not
+     * merely offered.
+     *
+     * Does not create an Assignment and settles nothing by itself — only
+     * [confirmPrice], the passenger's own separate act, does that
+     * (mirroring why [Proposal] itself is not [Assignment]: ADR-035, "an
+     * already-settled outcome, created only once this fact has resolved
+     * positively — never a pending one").
+     *
+     * [at] defaults to the current time; overridable for reconstruction
+     * replay, mirroring [accept]'s own `at` parameter (ADR-043).
+     */
+    fun proposePrice(
+        statedPrice: String,
+        statedEtaMinutes: Int? = null,
+        at: Instant = Instant.now()
+    ): ProposalPriceProposed {
+        check(status == ProposalStatus.OPEN) {
+            "Proposal ${id.value} cannot have a price proposed from status $status"
+        }
+        require(statedPrice.isNotBlank()) { "statedPrice must not be blank" }
+        status = ProposalStatus.PRICE_PROPOSED
+        this.statedPrice = statedPrice
+        this.statedEtaMinutes = statedEtaMinutes
+        this.respondedAt = at
+        return ProposalPriceProposed(orderId = order, driverId = driver)
+    }
+
+    /**
+     * Confirms the price already stated by [proposePrice], per the
+     * passenger's own agreeing act — the precondition for Assignment's own
+     * creation (ADR-035), replacing [accept]'s own role in the real
+     * product flow now that a price must be agreed first. Only a
+     * [ProposalStatus.PRICE_PROPOSED] proposal may be confirmed. Does not
+     * itself touch [statedPrice]/[statedEtaMinutes] — both are already set
+     * by [proposePrice] and are not renegotiated here.
+     *
+     * Returns [ProposalAccepted] rather than a distinct type: from this
+     * point on the proposal is settled exactly as an [accept]ed one always
+     * was, and [ProposalAssignmentOrchestrationService] reacts to the two
+     * identically.
+     *
+     * [at] defaults to the current time; overridable for reconstruction
+     * replay, mirroring [accept]'s own `at` parameter (ADR-043).
+     */
+    fun confirmPrice(at: Instant = Instant.now()): ProposalAccepted {
+        check(status == ProposalStatus.PRICE_PROPOSED) {
+            "Proposal ${id.value} cannot have its price confirmed from status $status"
+        }
+        status = ProposalStatus.ACCEPTED
+        this.respondedAt = at
+        return ProposalAccepted(orderId = order, driverId = driver)
+    }
+
+    /**
+     * Refuses the price already stated by [proposePrice], per the
+     * passenger's own refusing act (Product Owner instruction, 2026-09-05:
+     * the request simply closes — no renegotiation, no automatic reroute
+     * to another driver, matching this product's own "PIOS does not
+     * substitute a random driver for the one a client came to" principle).
+     * Only a [ProposalStatus.PRICE_PROPOSED] proposal may decline its
+     * price.
+     *
+     * Returns [ProposalDeclined] rather than a distinct type: from the
+     * passenger's and driver's own point of view this ride simply did not
+     * happen, exactly like an outright [decline] — [statedPrice]/
+     * [statedEtaMinutes] are left as already recorded (the historical fact
+     * "this was quoted, then refused" is worth keeping, unlike [decline]'s
+     * own case where no price was ever named at all).
+     *
+     * [at] defaults to the current time; overridable for reconstruction
+     * replay, mirroring [accept]'s own `at` parameter (ADR-043).
+     */
+    fun declinePriceProposal(at: Instant = Instant.now()): ProposalDeclined {
+        check(status == ProposalStatus.PRICE_PROPOSED) {
+            "Proposal ${id.value} cannot decline a price from status $status"
+        }
+        status = ProposalStatus.DECLINED
+        this.respondedAt = at
+        return ProposalDeclined(orderId = order, driverId = driver)
+    }
+
+    /**
      * Declines this proposal, per the driver's own refusing act. Only an
      * [ProposalStatus.OPEN] proposal may be declined; no obligation exists
      * before acceptance, so a decline violates nothing

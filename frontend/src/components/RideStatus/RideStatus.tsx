@@ -12,6 +12,7 @@ import { StatusMessage, type StatusTone } from '../StatusMessage'
  */
 export type RideLifecycleStatus =
   | 'OPEN'
+  | 'PRICE_PROPOSED'
   | 'DECLINED'
   | 'LAPSED'
   | 'WITHDRAWN'
@@ -38,6 +39,10 @@ export interface RideStatusProps {
 
 const toneForStatus: Record<RideLifecycleStatus, StatusTone> = {
   OPEN: 'information',
+  // A price was named and now needs a decision -- not yet a success
+  // (nothing is settled) and not a problem, so it gets its own distinct
+  // "needs attention" tone rather than borrowing OPEN's or ACCEPTED's own.
+  PRICE_PROPOSED: 'warning',
   DECLINED: 'error',
   LAPSED: 'warning',
   WITHDRAWN: 'warning',

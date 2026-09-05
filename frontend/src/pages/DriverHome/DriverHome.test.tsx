@@ -132,7 +132,7 @@ describe('DriverHome', () => {
 
   // --- Stated time to pickup (ADR-057) ---
 
-  it('offers the fixed ETA choices for an open proposal, and sending "Принять" includes the chosen value', async () => {
+  it('offers the fixed ETA choices for an open proposal, and sending "Предложить цену" includes the chosen value', async () => {
     mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' }) // GET /v1/identities/me
     mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' }) // GET /v1/drivers/driver-1
     mockedRequest.mockResolvedValueOnce([
@@ -148,24 +148,58 @@ describe('DriverHome', () => {
 
     await userEvent.selectOptions(select, '5')
 
+    // Product Owner instruction, 2026-09-05: a price is now mandatory --
+    // the button stays disabled (and clicking it does nothing) without one.
+    const proposeButton = screen.getByRole('button', { name: 'Предложить цену' })
+    expect(proposeButton).toBeDisabled()
+    await userEvent.type(screen.getByLabelText('Стоимость поездки'), '350')
+    expect(proposeButton).toBeEnabled()
+
     mockedRequest.mockResolvedValueOnce({
       proposalId: 'p1',
       orderId: 'o1',
       driverId: 'driver-1',
-      status: 'ACCEPTED',
-      statedPrice: null,
+      status: 'PRICE_PROPOSED',
+      statedPrice: '350',
       statedEtaMinutes: 5,
     })
-    await userEvent.click(screen.getByRole('button', { name: 'Принять' }))
+    await userEvent.click(proposeButton)
 
-    const acceptCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/proposals/p1/accept')
-    expect(acceptCall).toBeDefined()
-    const init = acceptCall?.[1] as RequestInit
-    expect(JSON.parse(init.body as string)).toEqual({ statedEtaMinutes: 5 })
-    // Task 21 (Proposal API Security Remediation): accept now requires
-    // this driver's own Bearer token, verified server-side against the
+    const proposeCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/proposals/p1/propose-price')
+    expect(proposeCall).toBeDefined()
+    const init = proposeCall?.[1] as RequestInit
+    expect(JSON.parse(init.body as string)).toEqual({ statedPrice: '350', statedEtaMinutes: 5 })
+    // Task 21 (Proposal API Security Remediation): still requires this
+    // driver's own Bearer token, verified server-side against the
     // proposal's own named driver.
     expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TEST_IDENTITY.token}`)
+  })
+
+  // Product Owner instruction, 2026-09-05: once a price is proposed, the
+  // driver has nothing left to do until the passenger decides -- no
+  // Accept/Decline pair, just the waiting state and the stated price.
+  it('shows a PRICE_PROPOSED request as waiting on the client, with no driver action available', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      {
+        proposalId: 'p1',
+        orderId: 'o1',
+        driverId: 'driver-1',
+        status: 'PRICE_PROPOSED',
+        statedPrice: '350',
+        statedEtaMinutes: null,
+      },
+    ])
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderDriverHome()
+
+    expect(await screen.findByText('Ожидает решения клиента')).toBeInTheDocument()
+    expect(screen.getByText('Стоимость: 350')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Предложить цену' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Отклонить' })).not.toBeInTheDocument()
   })
 
   // --- Proposal API security (Task 21: Proposal API Security Remediation) ---
@@ -291,7 +325,7 @@ describe('DriverHome', () => {
     renderDriverHome()
 
     expect(await screen.findByText('Отменено пассажиром')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Принять' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Предложить цену' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Отклонить' })).not.toBeInTheDocument()
   })
 

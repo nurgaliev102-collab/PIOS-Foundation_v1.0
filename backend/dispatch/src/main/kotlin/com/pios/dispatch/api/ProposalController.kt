@@ -1,6 +1,8 @@
 package com.pios.dispatch.api
 
 import com.pios.dispatch.application.AcceptProposalCommand
+import com.pios.dispatch.application.ConfirmPriceCommand
+import com.pios.dispatch.application.DeclinePriceCommand
 import com.pios.dispatch.application.DeclineProposalCommand
 import com.pios.dispatch.application.LapseProposalCommand
 import com.pios.dispatch.application.ProposalApplicationService
@@ -8,6 +10,7 @@ import com.pios.dispatch.application.ProposalAssignmentOrchestrationService
 import com.pios.dispatch.application.ProposalNotFoundException
 import com.pios.dispatch.application.ProposalRepository
 import com.pios.dispatch.application.ProposeDriverCommand
+import com.pios.dispatch.application.ProposePriceCommand
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import com.pios.dispatch.domain.Proposal
@@ -193,6 +196,126 @@ class ProposalController(
                 AcceptProposalCommand(id, request?.statedPrice, request?.statedEtaMinutes)
             )
             ResponseEntity.ok(outcome.proposal.toResponse())
+        } catch (ex: ProposalNotFoundException) {
+            ResponseEntity.notFound().build()
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        } catch (ex: IllegalStateException) {
+            ResponseEntity.status(HttpStatus.CONFLICT).build()
+        }
+    }
+
+    /**
+     * States a price for this proposal (Product Owner instruction,
+     * 2026-09-05: a driver must name a price before a ride is confirmed,
+     * and the passenger must separately agree to it) -- this is now the
+     * real product flow's own entry point for a driver taking on a ride;
+     * `DriverHome.tsx`'s own "Принять" action calls this, not
+     * [acceptProposal], which stays exactly as it was (Coordinator's own
+     * deprecated manual-override path). Identical identity check to
+     * [acceptProposal]'s own — see that method's own KDoc: 401 before any
+     * lookup, then 404, then 403 on a wrong-driver token.
+     *
+     * Does not create an Assignment -- only [confirmPrice], the
+     * passenger's own separate act, does that.
+     */
+    @PostMapping("/{proposalId}/propose-price")
+    fun proposePrice(
+        @PathVariable proposalId: String,
+        @RequestBody request: ProposePriceRequest,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<ProposalResponse> {
+        return try {
+            val id = ProposalId(proposalId)
+            val verified = sessionTokenVerifier.verify(authorization)
+                ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            val proposal = proposalRepository.findById(id)
+                ?: return ResponseEntity.notFound().build()
+            if (verified.drv != proposal.driver.driverId) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+            }
+            val event = proposalApplicationService.proposePrice(
+                proposal,
+                ProposePriceCommand(id, request.statedPrice, request.statedEtaMinutes)
+            )
+            ResponseEntity.ok(
+                ProposalResponse(
+                    id.value,
+                    event.orderId.orderId,
+                    event.driverId.driverId,
+                    ProposalStatus.PRICE_PROPOSED.name,
+                    proposal.statedPrice,
+                    proposal.createdAt?.toString(),
+                    proposal.respondedAt?.toString(),
+                    proposal.statedEtaMinutes,
+                    proposal.isTest
+                )
+            )
+        } catch (ex: ProposalNotFoundException) {
+            ResponseEntity.notFound().build()
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        } catch (ex: IllegalStateException) {
+            ResponseEntity.status(HttpStatus.CONFLICT).build()
+        }
+    }
+
+    /**
+     * Confirms the price already stated on this proposal ([proposePrice])
+     * -- the passenger's own agreeing act (Product Owner instruction,
+     * 2026-09-05) -- then creates the Assignment it precedes, via
+     * [ProposalAssignmentOrchestrationService.confirmPrice]. Same
+     * authorization bar as [createProposal]: any authenticated caller
+     * (a verified session token, `sub` alone, or the owner/coordinator
+     * credential) is sufficient -- deliberately does not verify the
+     * caller is the specific passenger who placed this order, the exact
+     * same named, out-of-scope residual gap [createProposal]'s own KDoc
+     * already discloses (`Proposal` carries no `passengerReference`).
+     */
+    @PostMapping("/{proposalId}/confirm-price")
+    fun confirmPrice(
+        @PathVariable proposalId: String,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<ProposalResponse> {
+        return try {
+            val id = ProposalId(proposalId)
+            val authorized = sessionTokenVerifier.verify(authorization) != null || ownerCredentialGate.verify(authorization)
+            if (!authorized) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            }
+            val outcome = proposalAssignmentOrchestrationService.confirmPrice(ConfirmPriceCommand(id))
+            ResponseEntity.ok(outcome.proposal.toResponse())
+        } catch (ex: ProposalNotFoundException) {
+            ResponseEntity.notFound().build()
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        } catch (ex: IllegalStateException) {
+            ResponseEntity.status(HttpStatus.CONFLICT).build()
+        }
+    }
+
+    /**
+     * Declines the price already stated on this proposal ([proposePrice])
+     * -- the passenger's own refusing act (Product Owner instruction,
+     * 2026-09-05: the request simply closes, no renegotiation, no
+     * automatic reroute to another driver). Same authorization bar as
+     * [confirmPrice]'s own — see that method's own KDoc.
+     */
+    @PostMapping("/{proposalId}/decline-price")
+    fun declinePrice(
+        @PathVariable proposalId: String,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<ProposalResponse> {
+        return try {
+            val id = ProposalId(proposalId)
+            val authorized = sessionTokenVerifier.verify(authorization) != null || ownerCredentialGate.verify(authorization)
+            if (!authorized) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            }
+            val event = proposalApplicationService.declinePriceProposal(DeclinePriceCommand(id))
+            ResponseEntity.ok(
+                ProposalResponse(id.value, event.orderId.orderId, event.driverId.driverId, ProposalStatus.DECLINED.name)
+            )
         } catch (ex: ProposalNotFoundException) {
             ResponseEntity.notFound().build()
         } catch (ex: IllegalArgumentException) {
