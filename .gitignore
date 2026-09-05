@@ -281,3 +281,12 @@ windows-services/cloudflared/*.token
 
 # Rolling log files (T-1, ADR-049 Decision 5) -- runtime output, not source.
 backend/logs/
+/logs/
+
+# graphify skill's own generated analysis cache -- regenerable from source
+# (`graphify update .`), not itself source; large and changes on every run.
+/graphify-out/
+
+# Stray backup file the graphify skill leaves behind on some runs -- never
+# intentional content.
+*.graphify-bak

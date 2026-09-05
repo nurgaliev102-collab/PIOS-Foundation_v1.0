@@ -124,3 +124,6 @@ Checks:
 A task is considered complete only after QA Reviewer reports it as passed or explicitly lists the remaining limitations. The Architect never modifies production code.
 
 The QA Reviewer never modifies production code.
+# graphify
+- **graphify** (`.claude/skills/graphify/SKILL.md`) - any input to knowledge graph. Trigger: `/graphify`
+When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.

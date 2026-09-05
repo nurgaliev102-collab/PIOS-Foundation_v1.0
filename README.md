@@ -71,9 +71,29 @@ CREATE DATABASE pios_passenger_experience;
 
 Each module's `src/main/resources/application.yml` expects to connect as `postgres` with no password, at `127.0.0.1:5432` — adjust the `spring.datasource` block in the relevant module if your local instance differs. No environment-variable override exists for these values today; they are only changeable by editing `application.yml` directly.
 
+**Before running any backend module's tests**, also create each module's own separate `_test` database — never run tests against the databases above directly. See [docs/TEST_DATABASE_ISOLATION.md](docs/TEST_DATABASE_ISOLATION.md) for the full convention and why it exists:
+
+```sql
+CREATE DATABASE pios_driver_management_test;
+CREATE DATABASE pios_order_management_test;
+CREATE DATABASE pios_dispatch_test;
+CREATE DATABASE pios_identity_test;
+CREATE DATABASE pios_passenger_experience_test;
+CREATE DATABASE pios_network_management_test;
+```
+
 ### 2. RabbitMQ
 
 Start a local RabbitMQ server on the default port (`5672`), with the default `guest`/`guest` credentials — three of the five pilot-flow backend modules (`driver-management`, `order-management`, `dispatch`) expect exactly this, with no override mechanism today; `identity` and `passenger-experience` have no RabbitMQ configuration at all. Spring Boot does not fail to start if RabbitMQ is unreachable (connections and topology declaration retry in the background per Spring AMQP's own default behavior) — but outbox events will never actually publish or be consumed until it is running.
+
+**Before running `driver-management`'s, `order-management`'s, or `dispatch`'s tests**, also provision a separate, isolated test vhost and user on that same broker — never run their RabbitMQ-touching tests against the default (`/`) vhost directly. See [docs/RABBITMQ_TEST_ISOLATION.md](docs/RABBITMQ_TEST_ISOLATION.md) for the full convention and why it exists:
+
+```powershell
+$rmq = "C:\Program Files\RabbitMQ Server\rabbitmq_server-<version>\sbin\rabbitmqctl.bat"
+& $rmq add_vhost pios-test
+& $rmq add_user pios_test "u2cZAscL4EP4dCwAFHSeDeP2elucyROf"
+& $rmq set_permissions -p pios-test pios_test ".*" ".*" ".*"
+```
 
 ### 3. Migrations
 
