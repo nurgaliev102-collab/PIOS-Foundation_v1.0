@@ -2,6 +2,7 @@ import type { RouteObject } from 'react-router-dom'
 import { DriverHome } from '../pages/DriverHome'
 import { PassengerLanding } from '../pages/PassengerLanding'
 import { RideRequest } from '../pages/RideRequest'
+import { MyDrivers } from '../pages/MyDrivers'
 import { Coordinator } from '../pages/Coordinator'
 import { NetworkTest } from '../pages/NetworkTest'
 import { OwnerControlCenter } from '../pages/OwnerControlCenter'
@@ -27,6 +28,15 @@ export const routes: RouteObject[] = [
   {
     path: '/i/:driverCode/request',
     element: <RideRequest />,
+  },
+  {
+    // docs/PIOS_PRODUCT_VISION.md §8 (product owner, 2026-09-05): a
+    // returning passenger's own way back to a driver they already have a
+    // relationship with, without needing that driver's own link again.
+    // Public route (same as every passenger-facing route above) -- the
+    // page itself has nothing to show a device with no stored identity.
+    path: '/me',
+    element: <MyDrivers />,
   },
   {
     path: '/coordinator',
