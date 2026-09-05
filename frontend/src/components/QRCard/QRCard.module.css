@@ -4,9 +4,9 @@
   align-items: center;
   gap: 0.75rem;
   padding: 1.5rem;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border);
+  border-radius: var(--pios-radius-md);
   text-align: center;
 }
 
@@ -15,9 +15,9 @@
   max-width: 60%;
   aspect-ratio: 1 / 1;
   padding: 12px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border);
+  border-radius: var(--pios-radius-sm);
 }
 
 .qrImage {
@@ -33,7 +33,7 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
 }
 
 .link {
@@ -43,10 +43,10 @@
   overflow-wrap: anywhere;
   font-size: 0.9375rem;
   font-weight: 500;
-  color: #0f172a;
-  background: #f8fafc;
+  color: var(--pios-color-text-primary);
+  background: var(--pios-color-background);
   padding: 0.5rem 0.75rem;
-  border-radius: 8px;
+  border-radius: var(--pios-radius-sm);
   text-decoration: none;
 }
 
@@ -61,5 +61,5 @@
   margin: 0;
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #16a34a;
+  color: var(--pios-color-success);
 }

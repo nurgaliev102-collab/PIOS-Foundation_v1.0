@@ -29,8 +29,8 @@
 }
 
 .primary {
-  background: #2563eb;
-  color: #ffffff;
+  background: var(--pios-color-accent);
+  color: var(--pios-color-surface);
 }
 
 .primary:hover {
@@ -38,13 +38,13 @@
 }
 
 .secondary {
-  background: #f1f5f9;
-  color: #0f172a;
-  border-color: #e2e8f0;
+  background: var(--pios-color-background);
+  color: var(--pios-color-text-primary);
+  border-color: var(--pios-color-border);
 }
 
 .secondary:hover {
-  background: #e2e8f0;
+  background: var(--pios-color-border);
 }
 
 .icon {

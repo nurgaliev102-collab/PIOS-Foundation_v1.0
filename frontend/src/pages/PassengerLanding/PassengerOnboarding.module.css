@@ -6,11 +6,11 @@
 
 .demoFieldLabel {
   font-size: 15px;
-  color: #0f172a;
-  border: 1px solid #e2e8f0;
+  color: var(--pios-color-text-primary);
+  border: 1px solid var(--pios-color-border);
   border-radius: 10px;
   padding: 12px 16px;
-  background: #f8fafc;
+  background: var(--pios-color-background);
 }
 
 .demoButton {
@@ -21,8 +21,8 @@
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: #2563eb;
-  color: #ffffff;
+  background: var(--pios-color-accent);
+  color: var(--pios-color-surface);
   font-weight: 600;
 }
 
@@ -36,13 +36,13 @@
 }
 
 .statusList li {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border);
   border-radius: 999px;
   min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #0f172a;
+  color: var(--pios-color-text-primary);
   font-weight: 500;
 }

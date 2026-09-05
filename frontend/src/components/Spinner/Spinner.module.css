@@ -10,14 +10,14 @@
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  border: 3px solid #e2e8f0;
-  border-top-color: #2563eb;
+  border: 3px solid var(--pios-color-border);
+  border-top-color: var(--pios-color-accent);
   animation: spin 0.7s linear infinite;
 }
 
 .label {
   font-size: 0.9375rem;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
 }
 
 @keyframes spin {

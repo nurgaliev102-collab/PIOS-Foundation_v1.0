@@ -3,9 +3,9 @@
   align-items: center;
   gap: 1rem;
   padding: 1.25rem;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border);
+  border-radius: var(--pios-radius-md);
 }
 
 .clickable {
@@ -13,8 +13,8 @@
 }
 
 .selected {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 1px #2563eb;
+  border-color: var(--pios-color-accent);
+  box-shadow: 0 0 0 1px var(--pios-color-accent);
 }
 
 .avatar {
@@ -25,8 +25,8 @@
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: #111827;
-  color: #ffffff;
+  background: var(--pios-color-text-primary);
+  color: var(--pios-color-surface);
   font-size: 1.25rem;
   font-weight: 700;
 }
@@ -39,10 +39,11 @@
 }
 
 .code {
+  font-family: var(--pios-font-family-display);
   font-size: 1.125rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: #0f172a;
+  color: var(--pios-color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -50,7 +51,7 @@
 
 .subcode {
   font-size: 0.75rem;
-  color: #94a3b8;
+  color: var(--pios-color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -66,11 +67,11 @@
 }
 
 .available {
-  color: #15803d;
-  background: #f0fdf4;
+  color: var(--pios-color-success);
+  background: var(--pios-color-success-surface);
 }
 
 .unavailable {
-  color: #64748b;
-  background: #f1f5f9;
+  color: var(--pios-color-text-secondary);
+  background: var(--pios-color-background);
 }

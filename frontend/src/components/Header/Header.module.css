@@ -3,15 +3,16 @@
   align-items: center;
   justify-content: center;
   height: 56px;
-  background: #111827;
-  color: #ffffff;
+  background: var(--pios-color-text-primary);
+  color: var(--pios-color-surface);
   position: sticky;
   top: 0;
   z-index: 10;
 }
 
 .brand {
-  font-size: 1.0625rem;
-  font-weight: 700;
+  font-family: var(--pios-font-family-display);
+  font-size: 1.125rem;
+  font-weight: 600;
   letter-spacing: 0.04em;
 }

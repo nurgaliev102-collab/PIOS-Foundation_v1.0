@@ -1,5 +1,6 @@
 .display {
   margin: 0;
+  font-family: var(--pios-font-family-display);
   font-size: var(--pios-font-size-display);
   font-weight: var(--pios-font-weight-display);
   line-height: var(--pios-line-height-display);
@@ -9,6 +10,7 @@
 
 .heading {
   margin: 0;
+  font-family: var(--pios-font-family-display);
   font-size: var(--pios-font-size-heading);
   font-weight: var(--pios-font-weight-heading);
   line-height: var(--pios-line-height-heading);

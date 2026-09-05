@@ -50,7 +50,12 @@ export function QRCard({ invitationLink, linkTo, onCopy, onShare, feedback, labe
 
   useEffect(() => {
     let active = true
-    QRCode.toDataURL(invitationLink, { margin: 1, width: 336, color: { dark: '#111827', light: '#ffffff' } })
+    // Dark/light kept as literal hex, not tokens: a QR code needs a fixed,
+    // maximum-contrast pair to stay scannable regardless of the viewer's
+    // light/dark theme -- unlike UI chrome, this must not follow the
+    // design system's own color tokens. Matches --pios-color-text-primary's
+    // near-black in spirit, not its exact value.
+    QRCode.toDataURL(invitationLink, { margin: 1, width: 336, color: { dark: '#211d16', light: '#ffffff' } })
       .then((url) => {
         if (active) {
           setQrDataUrl(url)

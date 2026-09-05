@@ -10,8 +10,8 @@
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border);
   border-radius: 16px;
   padding: 24px 20px;
 }
@@ -20,8 +20,8 @@
   width: 48px;
   height: 48px;
   border-radius: 999px;
-  background: #2563eb;
-  color: #ffffff;
+  background: var(--pios-color-accent);
+  color: var(--pios-color-surface);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -32,13 +32,13 @@
 .previewHeadline {
   font-size: 16px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--pios-color-text-primary);
   margin: 0;
 }
 
 .previewNote {
   font-size: 13px;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
   margin: 0;
 }
 
@@ -52,16 +52,16 @@
 
 .demoFieldLabel {
   font-size: 12px;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
 }
 
 .demoFieldValue {
   font-size: 15px;
-  color: #0f172a;
-  border: 1px solid #e2e8f0;
+  color: var(--pios-color-text-primary);
+  border: 1px solid var(--pios-color-border);
   border-radius: 10px;
   padding: 10px 12px;
-  background: #f8fafc;
+  background: var(--pios-color-background);
 }
 
 .demoButton {
@@ -72,14 +72,14 @@
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: #2563eb;
-  color: #ffffff;
+  background: var(--pios-color-accent);
+  color: var(--pios-color-surface);
   font-weight: 600;
 }
 
 .orderCardPreview {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border);
   border-radius: 16px;
   padding: 20px;
   text-align: left;
@@ -90,13 +90,13 @@
 
 .orderCardStatus {
   font-weight: 600;
-  color: #2563eb;
+  color: var(--pios-color-accent);
   margin: 0 0 6px;
 }
 
 .orderCardLine {
   margin: 0;
-  color: #0f172a;
+  color: var(--pios-color-text-primary);
   font-size: 14px;
 }
 
@@ -110,13 +110,13 @@
 }
 
 .lifecycleList li {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border);
   border-radius: 999px;
   min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #0f172a;
+  color: var(--pios-color-text-primary);
   font-weight: 500;
 }
