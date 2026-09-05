@@ -119,16 +119,59 @@ export interface PilotHealthMetrics {
   modulesTotal: number
 }
 
+/**
+ * One calendar day's own already-computed metrics — field-for-field the
+ * same shape `ai-advisor`'s own `DailySnapshot` (Kotlin) expects
+ * (`ai-advisor/src/main/kotlin/com/pios/aiadvisor/api/PilotAnalysisRequest.kt`),
+ * so the mapping stays mechanical, matching this file's own existing
+ * `PilotAnalyticsInput`/`PilotAnalysisRequest` convention.
+ *
+ * `activeDrivers` (renamed from `availableDrivers`, 2026-08-17, data-quality
+ * fix) is **not** a historical read of `DriverListItem.availability` — that
+ * field is live, mutable, current-only state with no timestamp of its own,
+ * so treating it as if it had a value "on 2026-08-16" would be inventing
+ * data that was never recorded (this task's own "не придумывай отсутствующие
+ * исторические данные" rule). It counts distinct drivers who actually had
+ * proposal activity that calendar day (`ProposalListItem.createdAt`) — the
+ * same real, dated signal `computeDriverMetrics`'s own `withActivity`
+ * already uses for the current snapshot, just bucketed per day instead of
+ * over the whole period. It must **never** be compared to
+ * `PilotDriverMetrics.available` (a live snapshot of "on the line right
+ * now") as if they were the same metric — see [computeCurrentDaySnapshot]'s
+ * own KDoc and `MockAIProvider.kt`'s own trend-finding logic for how this
+ * boundary is enforced downstream.
+ */
+export interface DailySnapshot {
+  date: string
+  orders: PilotOrderMetrics
+  proposals: PilotProposalMetrics
+  assignments: PilotAssignmentMetrics
+  activeDrivers: number
+}
+
 export interface PilotAnalyticsInput {
   generatedAt: string
   /** Honest description of what was actually read, not a fabricated date range — see this module's own KDoc. */
   periodLabel: string
+  /**
+   * ALL-PERIOD / cumulative — every field below (`orders`/`proposals`/
+   * `assignments`/`drivers`/`reactionTime`) is computed over the *entire*
+   * observation period (`periodLabel` above), not "today." It is **not**
+   * comparable to a single day of [history] or to [currentDay] without
+   * first picking [currentDay] or a [history] entry as the same-scale
+   * counterpart (data-quality fix, 2026-08-17 — see [computeCurrentDaySnapshot]).
+   */
   orders: PilotOrderMetrics
   proposals: PilotProposalMetrics
   assignments: PilotAssignmentMetrics
+  /** `available` here is LIVE — the driver's current `availability` status at the moment this snapshot was collected, not a per-day historical figure. Never the same metric as a [DailySnapshot.activeDrivers] entry. */
   drivers: PilotDriverMetrics
   reactionTime: PilotReactionTimeMetrics
   health: PilotHealthMetrics
+  /** CURRENT DAY — today's own real snapshot, or `null` if PIOS has no dated activity for today yet. See [computeCurrentDaySnapshot]. The only field here on the same scale as [history]'s own entries. */
+  currentDay: DailySnapshot | null
+  /** HISTORICAL DAILY — days strictly before today, most recent first. See [computeDailyHistory]. */
+  history: DailySnapshot[]
 }
 
 function median(values: number[]): number | null {
@@ -207,6 +250,150 @@ function computeHealthMetrics(healths: ModuleHealth[]): PilotHealthMetrics {
   }
 }
 
+/** PIOS Intelligence Trend Context v1 (2026-08-17): how many calendar days of history {@link computeDailyHistory} returns at most. */
+export const HISTORY_MAX_DAYS = 7
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+}
+
+function toDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+/** `null` for a missing or unparseable timestamp — mirrors `todayData.ts`'s own `isToday()` treating a missing timestamp as "not this day," never a guess. */
+function dateKeyFromIso(isoTimestamp: string | null): string | null {
+  if (!isoTimestamp) {
+    return null
+  }
+  const parsed = new Date(isoTimestamp)
+  return Number.isNaN(parsed.getTime()) ? null : toDateKey(parsed)
+}
+
+function groupByDateKey<T>(items: T[], dateOf: (item: T) => string | null): Map<string, T[]> {
+  const map = new Map<string, T[]>()
+  for (const item of items) {
+    const key = dateOf(item)
+    if (key === null) {
+      continue
+    }
+    const bucket = map.get(key)
+    if (bucket) {
+      bucket.push(item)
+    } else {
+      map.set(key, [item])
+    }
+  }
+  return map
+}
+
+/**
+ * Groups `orders`/`proposals`/`assignments` this module already loaded for
+ * the current snapshot into one [DailySnapshot] per calendar day, for the
+ * `days` calendar days immediately before today (today itself is the
+ * "current" snapshot already reported separately, never duplicated into
+ * history). No new HTTP request: every array here is the same one
+ * {@link collectPilotAnalyticsInput} already fetched.
+ *
+ * Reuses {@link computeOrderMetrics}/{@link computeProposalMetrics}/
+ * {@link computeAssignmentMetrics} unchanged, applied to each day's own
+ * subset — the same "bucket by `createdAt`, then reuse the existing
+ * counters" approach `todayData.ts`'s own `loadTodaySnapshot` already uses
+ * for "today". `AssignmentListItem` carries no `createdAt` of its own, so an
+ * assignment is bucketed by the first of `arrivedAt`/`startedAt`/`completedAt`
+ * it actually has.
+ *
+ * A day with genuinely nothing in it (no order, proposal, or assignment
+ * activity) is simply absent from the result, never a fabricated zero-filled
+ * entry — an empty array here means "no data for that day," not "AI should
+ * see a day of zero orders."
+ */
+export function computeDailyHistory(
+  orders: OrderListItem[],
+  proposals: ProposalListItem[],
+  assignments: AssignmentListItem[],
+  days: number = HISTORY_MAX_DAYS
+): DailySnapshot[] {
+  const today = startOfLocalDay(new Date())
+  const windowKeys: string[] = []
+  for (let offset = 1; offset <= days; offset++) {
+    const day = new Date(today)
+    day.setDate(day.getDate() - offset)
+    windowKeys.push(toDateKey(day))
+  }
+
+  const ordersByDate = groupByDateKey(orders, (order) => dateKeyFromIso(order.createdAt))
+  const proposalsByDate = groupByDateKey(proposals, (proposal) => dateKeyFromIso(proposal.createdAt))
+  const assignmentsByDate = groupByDateKey(
+    assignments,
+    (assignment) =>
+      dateKeyFromIso(assignment.arrivedAt) ?? dateKeyFromIso(assignment.startedAt) ?? dateKeyFromIso(assignment.completedAt)
+  )
+
+  const snapshots: DailySnapshot[] = []
+  for (const key of windowKeys) {
+    const dayOrders = ordersByDate.get(key)
+    const dayProposals = proposalsByDate.get(key)
+    const dayAssignments = assignmentsByDate.get(key)
+    if (!dayOrders && !dayProposals && !dayAssignments) {
+      continue
+    }
+    snapshots.push({
+      date: key,
+      orders: computeOrderMetrics(dayOrders ?? []),
+      proposals: computeProposalMetrics(dayProposals ?? []),
+      assignments: computeAssignmentMetrics(dayAssignments ?? []),
+      activeDrivers: new Set((dayProposals ?? []).map((p) => p.driverId)).size,
+    })
+  }
+
+  return snapshots.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+}
+
+/**
+ * Today's own real [DailySnapshot], on the same daily scale as
+ * {@link computeDailyHistory}'s own entries — data-quality fix (2026-08-17):
+ * before this function existed, the only "current" numbers available were
+ * [PilotAnalyticsInput]'s own ALL-PERIOD/cumulative fields, and comparing
+ * those against one day of history was comparing different scales (e.g. "18
+ * orders all-time" vs "12 orders yesterday" is not a real day-over-day
+ * trend). This reuses the exact same bucket-by-`createdAt`-then-reuse-
+ * `computeOrderMetrics`/etc. approach {@link computeDailyHistory} already
+ * uses, just for today's own calendar day instead of the days before it.
+ *
+ * Returns `null`, never a fabricated all-zero snapshot, when PIOS has no
+ * dated order/proposal/assignment activity for today yet (e.g. early in the
+ * day, or a quiet day) — the same "absent, not zero" rule
+ * {@link computeDailyHistory} already applies to a day with nothing in it.
+ */
+export function computeCurrentDaySnapshot(
+  orders: OrderListItem[],
+  proposals: ProposalListItem[],
+  assignments: AssignmentListItem[]
+): DailySnapshot | null {
+  const todayKey = toDateKey(startOfLocalDay(new Date()))
+
+  const dayOrders = orders.filter((order) => dateKeyFromIso(order.createdAt) === todayKey)
+  const dayProposals = proposals.filter((proposal) => dateKeyFromIso(proposal.createdAt) === todayKey)
+  const dayAssignments = assignments.filter(
+    (assignment) =>
+      (dateKeyFromIso(assignment.arrivedAt) ?? dateKeyFromIso(assignment.startedAt) ?? dateKeyFromIso(assignment.completedAt)) ===
+      todayKey
+  )
+
+  if (dayOrders.length === 0 && dayProposals.length === 0 && dayAssignments.length === 0) {
+    return null
+  }
+
+  return {
+    date: todayKey,
+    orders: computeOrderMetrics(dayOrders),
+    proposals: computeProposalMetrics(dayProposals),
+    assignments: computeAssignmentMetrics(dayAssignments),
+    activeDrivers: new Set(dayProposals.map((p) => p.driverId)).size,
+  }
+}
+
 /** Acceptance rate is computed only over *resolved* proposals (accepted/declined/lapsed) — a still-`OPEN` proposal has not decided anything yet, so including it would understate the rate without cause. `null` when nothing has resolved. */
 export function calculateAcceptanceRate(proposals: PilotProposalMetrics): number | null {
   const resolved = proposals.accepted + proposals.declined + proposals.lapsed
@@ -267,5 +454,7 @@ export async function collectPilotAnalyticsInput(
     drivers: computeDriverMetrics(drivers, proposals),
     reactionTime: computeReactionTime(proposals),
     health: computeHealthMetrics(healths),
+    currentDay: computeCurrentDaySnapshot(orders, proposals, assignments),
+    history: computeDailyHistory(orders, proposals, assignments),
   }
 }
