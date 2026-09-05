@@ -14,6 +14,7 @@ import com.pios.identity.application.RegisterIdentityOutcome
 import com.pios.identity.application.RetrieveIdentityHandler
 import com.pios.identity.domain.Identity
 import com.pios.identity.domain.IdentityId
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
@@ -71,7 +72,19 @@ class IdentityController(
     private val associateDriverApplicationService: AssociateDriverApplicationService,
     private val sessionTokenVerifier: SessionTokenVerifier
 ) {
+    private val logger = LoggerFactory.getLogger(IdentityController::class.java)
 
+    /**
+     * Observability fix (`docs/PIOS_PATH_TO_PUBLIC_LAUNCH.md` Part B6,
+     * `docs/PIOS_PRODUCT_EVIDENCE.md` E-001): both catch branches below
+     * previously logged nothing at all, so a real registration failure —
+     * exactly what happened on 2026-09-05 — left zero trace to diagnose
+     * from. Never logs the phone number itself: [PhoneAlreadyRegisteredException]'s
+     * own `message` embeds it (see that class's own constructor), so this
+     * logs a fixed line instead; [IllegalArgumentException]'s message here
+     * is always [com.pios.identity.domain.Phone]'s own fixed format-hint
+     * string, which carries no PII, so it is safe to log as-is.
+     */
     @PostMapping("/register")
     fun register(@RequestBody request: RegisterIdentityRequest): ResponseEntity<AuthResponse> =
         try {
@@ -80,8 +93,10 @@ class IdentityController(
             )
             ResponseEntity.status(HttpStatus.CREATED).body(outcome.toResponse())
         } catch (ex: PhoneAlreadyRegisteredException) {
+            logger.info("Registration rejected: phone already registered")
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         } catch (ex: IllegalArgumentException) {
+            logger.warn("Registration rejected: invalid input ({})", ex.message)
             ResponseEntity.badRequest().build()
         }
 
