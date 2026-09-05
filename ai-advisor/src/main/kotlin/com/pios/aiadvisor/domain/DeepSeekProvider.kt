@@ -2,6 +2,7 @@ package com.pios.aiadvisor.domain
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.pios.aiadvisor.api.DailySnapshot
 import com.pios.aiadvisor.api.PilotAnalysisMetricsDto
 import com.pios.aiadvisor.api.PilotAnalysisRequest
 import com.pios.aiadvisor.api.PilotAnalysisResultDto
@@ -174,16 +175,16 @@ class DeepSeekProvider(
             null
         }
 
-    private fun buildPrompt(input: PilotAnalysisRequest, metrics: PilotAnalysisMetricsDto): String =
-        """
+    private fun buildPrompt(input: PilotAnalysisRequest, metrics: PilotAnalysisMetricsDto): String {
+        val base = """
         Ты аналитик пилотного проекта такси-платформы PIOS. Проанализируй агрегированные показатели пилота ниже и верни ТОЛЬКО валидный JSON, без пояснений вне JSON, в точности такой структуры:
         {"status": "ok" | "attention" | "critical", "summary": "одно предложение", "keyFindings": ["..."], "risks": ["..."], "recommendations": ["..."]}
 
-        Данные пилота (${input.periodLabel}):
+        Данные пилота — ВЕСЬ ПЕРИОД НАБЛЮДЕНИЯ, кумулятивно с начала (${input.periodLabel}), это НЕ данные за один день:
         - Заказы: всего ${input.orders.total}, завершено ${input.orders.completed}, отменено ${input.orders.cancelled}, открыто ${input.orders.open}
         - Предложения: всего ${input.proposals.total}, принято ${input.proposals.accepted}, отклонено ${input.proposals.declined}, просрочено ${input.proposals.lapsed}, отозвано ${input.proposals.withdrawn}
         - Поездки (assignments): всего ${input.assignments.total}, завершено ${input.assignments.completed}, в процессе ${input.assignments.inProgress}
-        - Водители: всего ${input.drivers.total}, на линии сейчас ${input.drivers.available}, получили хотя бы одно предложение ${input.drivers.withActivity}
+        - Водители: всего ${input.drivers.total}, на линии СЕЙЧАС (LIVE, текущий момент, не дневная величина) ${input.drivers.available}, получили хотя бы одно предложение за весь период ${input.drivers.withActivity}
         - Время реакции водителя: среднее ${formatMinutesForPrompt(input.reactionTime.averageMinutes)}, медиана ${formatMinutesForPrompt(input.reactionTime.medianMinutes)}, на основе ${input.reactionTime.sampleSize} предложений
         - Здоровье платформы: ${input.health.modulesUp} из ${input.health.modulesTotal} модулей отвечают
         - Acceptance rate: ${formatPercentForPrompt(metrics.acceptanceRate)}
@@ -192,6 +193,9 @@ class DeepSeekProvider(
 
         Не изобретай числа, которых нет выше. Отвечай по-русски, простым языком, без технических терминов PIOS.
         """.trimIndent()
+        val trendContext = formatTrendContextForPrompt(input.currentDay, input.history)
+        return if (trendContext.isEmpty()) base else "$base\n\n$trendContext"
+    }
 
     private fun formatPercentForPrompt(rate: Double?): String = if (rate == null) "нет данных" else "${(rate * 100).roundToInt()}%"
 
@@ -234,6 +238,81 @@ private data class LlmAnalysis(
     val risks: List<String> = emptyList(),
     val recommendations: List<String> = emptyList()
 )
+
+/**
+ * PIOS Intelligence Trend Context — data-quality fix (2026-08-17): formats
+ * [PilotAnalysisRequest.currentDay]/[PilotAnalysisRequest.history] into a
+ * prompt section shared by [DeepSeekProvider] and [OllamaProvider] (same
+ * package-level sharing pattern as [insufficientDataResult] just below), so
+ * the wording a model sees is identical regardless of which provider is
+ * active.
+ *
+ * Returns `""` when both [currentDay] and [history] are absent — the caller
+ * then leaves its own prompt byte-for-byte unchanged, exactly preserving old
+ * prompt behavior (this task's own explicit backward-compatibility
+ * requirement).
+ *
+ * **Why this is not simply "format the history list"** (the bug this
+ * function replaces): [PilotAnalysisRequest]'s own ALL-PERIOD fields
+ * (`orders`/`proposals`/`assignments` in the base prompt above) are
+ * cumulative over the whole observation period, not "today" — comparing
+ * them to a single day of [history] as if both were daily numbers is
+ * comparing different scales (e.g. "18 orders all-time" is not a real
+ * day-over-day counterpart to "12 orders yesterday"). [currentDay] is the
+ * only value on the same daily scale as [history]'s own entries, so this
+ * function explicitly labels each section by its real semantics (ALL-PERIOD
+ * / CURRENT DAY / HISTORICAL DAILY / LIVE) and states in the prompt itself
+ * which comparisons are valid, rather than trusting the model to infer scale
+ * from context.
+ */
+internal fun formatTrendContextForPrompt(currentDay: DailySnapshot?, history: List<DailySnapshot>?): String {
+    val hasHistory = !history.isNullOrEmpty()
+    if (currentDay == null && !hasHistory) {
+        return ""
+    }
+
+    val sections = mutableListOf<String>()
+
+    if (currentDay != null) {
+        sections.add(
+            "ТЕКУЩИЙ ДЕНЬ (${currentDay.date}) — отдельная, НЕ кумулятивная величина, только за сегодня: " +
+                "заказы ${currentDay.orders.total} (завершено ${currentDay.orders.completed}, отменено ${currentDay.orders.cancelled}), " +
+                "предложения приняты ${currentDay.proposals.accepted} из ${currentDay.proposals.total}, " +
+                "поездки завершены ${currentDay.assignments.completed}, activeDrivers (водителей с активностью сегодня) ${currentDay.activeDrivers}."
+        )
+    }
+
+    if (hasHistory) {
+        val lines = history!!.joinToString("\n") { day ->
+            "- ${day.date}: заказы ${day.orders.total} (завершено ${day.orders.completed}, отменено ${day.orders.cancelled}), " +
+                "предложения приняты ${day.proposals.accepted} из ${day.proposals.total}, " +
+                "поездки завершены ${day.assignments.completed}, activeDrivers ${day.activeDrivers}"
+        }
+        sections.add(
+            "ИСТОРИЯ ПО ДНЯМ (последние ${history.size} дн. до сегодня, не включая сегодня; от новых к старым; реальные, уже посчитанные факты PIOS):\n$lines"
+        )
+    }
+
+    val rules = buildString {
+        append(
+            "ПРАВИЛА СРАВНЕНИЯ (обязательно): раздел \"Данные пилота\" выше — это ALL-PERIOD, кумулятивные показатели за весь период наблюдения. Их НЕЛЬЗЯ напрямую сравнивать ни с текущим днём, ни с историей по дням как \"выросло/упало\" — это разные по масштабу величины. "
+        )
+        when {
+            currentDay != null && hasHistory ->
+                append("Для вывода о тренде по дням сравнивай ТОЛЬКО текущий день с историей по дням — обе величины дневные и сопоставимы между собой. ")
+            hasHistory ->
+                append("Текущий день недоступен (за сегодня ещё нет ни одной записи с сегодняшней датой), поэтому сравнение \"сегодня против истории\" сделать нельзя — явно сообщи об этом в ответе, если вывод о сегодняшнем дне запрошен, вместо того чтобы для этого использовать кумулятивные данные выше. ")
+            else ->
+                append("История отсутствует, доступен только текущий день — сравнивать его не с чем, тренд не определяй. ")
+        }
+        append(
+            "Показатель \"на линии СЕЙЧАС\" в разделе \"Данные пилота\" — это LIVE-состояние на текущий момент, а activeDrivers (в текущем дне/истории) — число водителей с хотя бы одной активностью за конкретный день; это РАЗНЫЕ метрики, не называй изменение между ними ростом или падением доступности водителей. Сами числа не пересчитывай — они уже точны. Не придумывай отсутствующие дни."
+        )
+    }
+    sections.add(rules)
+
+    return sections.joinToString("\n\n")
+}
 
 /** Shared with [MockAIProvider]'s own identical zero-orders branch — same wording, same reasoning, never spent on a model call. */
 internal fun insufficientDataResult(input: PilotAnalysisRequest, metrics: PilotAnalysisMetricsDto, providerName: String): PilotAnalysisResultDto =

@@ -45,18 +45,50 @@ logging:
 #       max-calls-per-day: 200
 #       max-calls-per-month: 2000
 
-# ADR-056 Rollout Step 3 (DeepSeekProvider). "provider" selects which
-# AIProvider bean is active (Spring @ConditionalOnProperty) -- deliberately
-# defaulting to "mock" so the existing pilot never depends on a funded
-# DeepSeek account existing. Set to "deepseek" only once
+# ADR-056 Rollout Step 3 (DeepSeekProvider) / PIOS Intelligence first local
+# step (OllamaProvider) / PIOS Intelligence real hosted Qwen step
+# (QwenProvider). "provider" selects which AIProvider bean is active
+# (Spring @ConditionalOnProperty) -- deliberately defaulting to "mock" so the
+# existing pilot never depends on a funded DeepSeek/Qwen account, or on
+# Ollama being installed, existing. Set to "deepseek" only once
 # pios.ai-advisor.deepseek.api-key is configured for real; a blank key with
 # provider=deepseek fails every analysis closed (outcome:
-# "provider_unavailable"), never a crash and never a fabricated answer.
+# "provider_unavailable"), never a crash and never a fabricated answer. Set
+# to "ollama" once a local Ollama instance is actually running and reachable
+# at pios.ai-advisor.ollama.base-url -- unlike DeepSeek, a blank
+# pios.ai-advisor.ollama.api-key is the *normal*, expected case (Ollama has
+# no built-in credential of its own) and does not fail closed by itself; a
+# request still fails with "provider_unavailable" if Ollama is simply not
+# running at that address. Set to "qwen" only once
+# pios.ai-advisor.qwen.api-key is configured for real (DashScope, a paid
+# cloud API like DeepSeek, not a local server like Ollama) -- a blank key
+# with provider=qwen fails every analysis closed the same way DeepSeek does.
+# The key itself is never hardcoded here: set it via the environment
+# variable PIOS_AI_ADVISOR_QWEN_API_KEY (Spring Boot's own relaxed
+# environment-variable binding for pios.ai-advisor.qwen.api-key), the same
+# mechanism already available for pios.ai-advisor.deepseek.api-key.
+# pios.ai-advisor.qwen.base-url defaults to the DashScope INTERNATIONAL
+# endpoint (dashscope-intl.aliyuncs.com), not the mainland-China one and not
+# a workspace-specific endpoint -- this deployment's own API key lives in
+# DashScope's Singapore region, and a real API test from this machine
+# against a workspace-specific endpoint returned
+# "403 Workspace endpoint access denied"; -intl is the endpoint actually
+# confirmed working for this key (2026-08-17).
 pios:
   ai-advisor:
     # provider: mock
     deepseek:
       # base-url: https://api.deepseek.com
       # model: deepseek-v4-flash
+      # timeout-ms: 30000
+      # api-key: ""
+    ollama:
+      # base-url: http://localhost:11434
+      # model: qwen2.5
+      # timeout-ms: 30000
+      # api-key: ""
+    qwen:
+      # base-url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      # model: qwen-plus
       # timeout-ms: 30000
       # api-key: ""

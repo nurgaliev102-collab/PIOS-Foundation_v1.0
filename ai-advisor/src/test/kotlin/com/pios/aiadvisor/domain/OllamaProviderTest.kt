@@ -25,26 +25,30 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * Proves [DeepSeekProvider] end to end against [FakeDeepSeekServer] — the
- * real DeepSeek API is never called (this task's own explicit requirement).
+ * Proves [OllamaProvider] end to end against [FakeOllamaServer] — a real
+ * Ollama instance is never called (this task's own explicit requirement),
+ * and no test in this class requires Ollama to be installed. Mirrors
+ * [DeepSeekProviderTest] exactly except where Ollama's own operating model
+ * genuinely differs (no fail-closed on a missing key; 403 also classified
+ * as AUTH_FAILED) — see those specific tests below.
  */
-class DeepSeekProviderTest {
+class OllamaProviderTest {
 
-    private lateinit var server: FakeDeepSeekServer
-    private val secretApiKey = "sk-super-secret-test-key-do-not-leak"
+    private lateinit var server: FakeOllamaServer
+    private val secretApiKey = "ollama-super-secret-test-key-do-not-leak"
     private val logAppender = ListAppender<ILoggingEvent>()
 
     @BeforeEach
     fun setUp() {
-        server = FakeDeepSeekServer()
+        server = FakeOllamaServer()
         logAppender.start()
-        (LoggerFactory.getLogger(DeepSeekProvider::class.java) as Logger).addAppender(logAppender)
+        (LoggerFactory.getLogger(OllamaProvider::class.java) as Logger).addAppender(logAppender)
     }
 
     @AfterEach
     fun tearDown() {
         server.stop()
-        (LoggerFactory.getLogger(DeepSeekProvider::class.java) as Logger).detachAppender(logAppender)
+        (LoggerFactory.getLogger(OllamaProvider::class.java) as Logger).detachAppender(logAppender)
         logAppender.stop()
         logAppender.list.clear()
     }
@@ -60,8 +64,8 @@ class DeepSeekProviderTest {
         )
         .build()
 
-    private fun provider(apiKey: String = secretApiKey, timeoutMillis: Long = 5000) =
-        DeepSeekProvider(restClient(timeoutMillis), apiKey, "deepseek-v4-flash")
+    private fun provider(apiKey: String = "", timeoutMillis: Long = 5000) =
+        OllamaProvider(restClient(timeoutMillis), apiKey, "qwen2.5")
 
     private fun realisticRequest() = PilotAnalysisRequest(
         generatedAt = "2026-08-17T12:00:00.000Z",
@@ -101,30 +105,41 @@ class DeepSeekProviderTest {
         assertEquals("attention", success.result.status)
         assertEquals("Есть на что обратить внимание.", success.result.summary)
         assertEquals(listOf("finding-1"), success.result.keyFindings)
-        assertEquals("deepseek", success.result.providerName)
+        assertEquals("ollama", success.result.providerName)
         // Metrics come from calculateAcceptanceRate/CompletionRate/CancellationRate applied to
-        // realisticRequest()'s own numbers, never from the model's own JSON -- the model's fake
-        // response above deliberately carries no metrics field at all, and the assertions below
-        // would fail if this class ever started trusting a model-supplied number instead.
+        // realisticRequest()'s own numbers, never from the model's own JSON.
         assertEquals(0.75, success.result.metrics.acceptanceRate) // 3 accepted / (3 accepted + 0 declined + 1 lapsed)
         assertEquals(0.75, success.result.metrics.completionRate) // 3 completed / 4 total orders
         assertEquals(0.25, success.result.metrics.cancellationRate) // 1 cancelled / 4 total orders
     }
 
+    // --- No fail-closed on a missing key (deliberate difference from DeepSeekProvider) ---
+
     @Test
-    fun `the Authorization header carries Bearer plus the configured key, and the key never otherwise appears in the request`() {
+    fun `with no api key configured, the request is sent with no Authorization header at all, and still succeeds`() {
         server.enqueue(200, successBody("""{"status":"ok","summary":"x"}"""))
 
-        provider().analyze(realisticRequest())
+        val outcome = provider(apiKey = "").analyze(realisticRequest())
+
+        assertTrue(outcome is AIProviderOutcome.Success)
+        assertNull(server.lastAuthorizationHeader)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `with an api key configured, the Authorization header carries Bearer plus the configured key`() {
+        server.enqueue(200, successBody("""{"status":"ok","summary":"x"}"""))
+
+        provider(apiKey = secretApiKey).analyze(realisticRequest())
 
         assertEquals("Bearer $secretApiKey", server.lastAuthorizationHeader)
     }
 
     @Test
     fun `a 401 from the provider maps to AUTH_FAILED, without leaking the response body into any log line`() {
-        server.enqueue(401, """{"error":{"message":"Invalid API key: $secretApiKey"}}""")
+        server.enqueue(401, """{"error":{"message":"Invalid credentials: $secretApiKey"}}""")
 
-        val outcome = provider().analyze(realisticRequest())
+        val outcome = provider(apiKey = secretApiKey).analyze(realisticRequest())
 
         val failure = outcome as AIProviderOutcome.Failure
         assertEquals(FailureReason.AUTH_FAILED, failure.reason)
@@ -133,14 +148,14 @@ class DeepSeekProviderTest {
     }
 
     @Test
-    fun `a 402 (no balance) maps to QUOTA_EXCEEDED`() {
-        server.enqueue(402, """{"error":"Insufficient Balance"}""")
+    fun `a 403 (reverse proxy in front of local Ollama) also maps to AUTH_FAILED, not UNAVAILABLE`() {
+        server.enqueue(403, """{"error":"forbidden"}""")
 
-        val outcome = provider().analyze(realisticRequest())
+        val outcome = provider(apiKey = secretApiKey).analyze(realisticRequest())
 
         val failure = outcome as AIProviderOutcome.Failure
-        assertEquals(FailureReason.QUOTA_EXCEEDED, failure.reason)
-        assertEquals(402, failure.providerStatusCode)
+        assertEquals(FailureReason.AUTH_FAILED, failure.reason)
+        assertEquals(403, failure.providerStatusCode)
     }
 
     @Test
@@ -178,23 +193,6 @@ class DeepSeekProviderTest {
     }
 
     @Test
-    fun `a missing API key never calls the network at all, and fails closed with AUTH_FAILED`() {
-        val outcome = provider(apiKey = "").analyze(realisticRequest())
-
-        val failure = outcome as AIProviderOutcome.Failure
-        assertEquals(FailureReason.AUTH_FAILED, failure.reason)
-        assertEquals(0, server.requestCount)
-    }
-
-    @Test
-    fun `a blank API key from whitespace only is also treated as missing`() {
-        val outcome = provider(apiKey = "   ").analyze(realisticRequest())
-
-        assertEquals(FailureReason.AUTH_FAILED, (outcome as AIProviderOutcome.Failure).reason)
-        assertEquals(0, server.requestCount)
-    }
-
-    @Test
     fun `a response whose content is not valid JSON maps to MALFORMED_RESPONSE, not a crash`() {
         server.enqueue(200, successBody("this is not json at all"))
 
@@ -228,16 +226,6 @@ class DeepSeekProviderTest {
         val outcome = provider().analyze(realisticRequest())
 
         assertEquals(FailureReason.MALFORMED_RESPONSE, (outcome as AIProviderOutcome.Failure).reason)
-    }
-
-    @Test
-    fun `zero orders returns the insufficient-data result without ever calling the network`() {
-        val outcome = provider().analyze(emptyOrdersRequest())
-
-        val success = outcome as AIProviderOutcome.Success
-        assertEquals("unknown", success.result.status)
-        assertEquals("deepseek", success.result.providerName)
-        assertEquals(0, server.requestCount)
     }
 
     // --- PIOS Intelligence Trend Context -- data-quality fix (2026-08-17) ---
@@ -285,22 +273,16 @@ class DeepSeekProviderTest {
         provider().analyze(requestWithTrendContext)
 
         val body = server.lastRequestBody!!
-        // ALL-PERIOD / cumulative section, explicitly labeled as such.
         assertTrue(body.contains("ВЕСЬ ПЕРИОД НАБЛЮДЕНИЯ"))
-        // LIVE driver count, explicitly labeled.
         assertTrue(body.contains("LIVE"))
-        // CURRENT DAY section, distinct from history.
         assertTrue(body.contains("ТЕКУЩИЙ ДЕНЬ"))
         assertTrue(body.contains("2026-08-17"))
-        // HISTORICAL DAILY section.
         assertTrue(body.contains("ИСТОРИЯ ПО ДНЯМ"))
         assertTrue(body.contains("2026-08-16"))
         assertTrue(body.contains("2026-08-15"))
-        // Explicit instruction not to conflate cumulative with daily, or live with historical activeDrivers.
         assertTrue(body.contains("НЕЛЬЗЯ напрямую сравнивать"))
         assertTrue(body.contains("РАЗНЫЕ метрики"))
         assertTrue(body.contains("придумывай"))
-        // Existing metrics section must still be present, unchanged.
         assertTrue(body.contains("Не изобретай числа"))
     }
 
@@ -318,14 +300,23 @@ class DeepSeekProviderTest {
     }
 
     @Test
+    fun `zero orders returns the insufficient-data result without ever calling Ollama`() {
+        val outcome = provider().analyze(emptyOrdersRequest())
+
+        val success = outcome as AIProviderOutcome.Success
+        assertEquals("unknown", success.result.status)
+        assertEquals("ollama", success.result.providerName)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
     fun `the configured API key never appears in any log line this provider writes, across every failure path`() {
         server.enqueue(401, """{"error":"$secretApiKey leaked in body would be bad"}""")
-        provider().analyze(realisticRequest())
+        provider(apiKey = secretApiKey).analyze(realisticRequest())
         server.enqueue(500, """{"error":"another body"}""")
-        provider().analyze(realisticRequest())
-        provider(apiKey = "").analyze(realisticRequest())
+        provider(apiKey = secretApiKey).analyze(realisticRequest())
         server.enqueue(200, successBody("not json"))
-        provider().analyze(realisticRequest())
+        provider(apiKey = secretApiKey).analyze(realisticRequest())
 
         assertNoSecretOrResponseBodyLogged()
     }
@@ -333,7 +324,7 @@ class DeepSeekProviderTest {
     private fun assertNoSecretOrResponseBodyLogged() {
         val allMessages = logAppender.list.joinToString("\n") { it.formattedMessage }
         assertFalse(allMessages.contains(secretApiKey), "log output must never contain the API key")
-        assertFalse(allMessages.contains("Invalid API key"), "log output must never contain the provider's own response body text")
+        assertFalse(allMessages.contains("Invalid credentials"), "log output must never contain the provider's own response body text")
         assertTrue(logAppender.list.isNotEmpty(), "expected at least one log line to have been written")
     }
 }

@@ -25,26 +25,29 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * Proves [DeepSeekProvider] end to end against [FakeDeepSeekServer] — the
- * real DeepSeek API is never called (this task's own explicit requirement).
+ * Proves [QwenProvider] end to end against [FakeQwenServer] — the real
+ * Qwen/DashScope API is never called (this task's own explicit
+ * requirement). Mirrors [DeepSeekProviderTest] structurally (same
+ * fail-closed-on-missing-key operating model, same error-code mapping
+ * shape), not [OllamaProviderTest] — see [QwenProvider]'s own KDoc for why.
  */
-class DeepSeekProviderTest {
+class QwenProviderTest {
 
-    private lateinit var server: FakeDeepSeekServer
-    private val secretApiKey = "sk-super-secret-test-key-do-not-leak"
+    private lateinit var server: FakeQwenServer
+    private val secretApiKey = "sk-qwen-super-secret-test-key-do-not-leak"
     private val logAppender = ListAppender<ILoggingEvent>()
 
     @BeforeEach
     fun setUp() {
-        server = FakeDeepSeekServer()
+        server = FakeQwenServer()
         logAppender.start()
-        (LoggerFactory.getLogger(DeepSeekProvider::class.java) as Logger).addAppender(logAppender)
+        (LoggerFactory.getLogger(QwenProvider::class.java) as Logger).addAppender(logAppender)
     }
 
     @AfterEach
     fun tearDown() {
         server.stop()
-        (LoggerFactory.getLogger(DeepSeekProvider::class.java) as Logger).detachAppender(logAppender)
+        (LoggerFactory.getLogger(QwenProvider::class.java) as Logger).detachAppender(logAppender)
         logAppender.stop()
         logAppender.list.clear()
     }
@@ -61,7 +64,7 @@ class DeepSeekProviderTest {
         .build()
 
     private fun provider(apiKey: String = secretApiKey, timeoutMillis: Long = 5000) =
-        DeepSeekProvider(restClient(timeoutMillis), apiKey, "deepseek-v4-flash")
+        QwenProvider(restClient(timeoutMillis), apiKey, "qwen-plus")
 
     private fun realisticRequest() = PilotAnalysisRequest(
         generatedAt = "2026-08-17T12:00:00.000Z",
@@ -101,14 +104,21 @@ class DeepSeekProviderTest {
         assertEquals("attention", success.result.status)
         assertEquals("Есть на что обратить внимание.", success.result.summary)
         assertEquals(listOf("finding-1"), success.result.keyFindings)
-        assertEquals("deepseek", success.result.providerName)
+        assertEquals("qwen", success.result.providerName)
         // Metrics come from calculateAcceptanceRate/CompletionRate/CancellationRate applied to
-        // realisticRequest()'s own numbers, never from the model's own JSON -- the model's fake
-        // response above deliberately carries no metrics field at all, and the assertions below
-        // would fail if this class ever started trusting a model-supplied number instead.
+        // realisticRequest()'s own numbers, never from the model's own JSON.
         assertEquals(0.75, success.result.metrics.acceptanceRate) // 3 accepted / (3 accepted + 0 declined + 1 lapsed)
         assertEquals(0.75, success.result.metrics.completionRate) // 3 completed / 4 total orders
         assertEquals(0.25, success.result.metrics.cancellationRate) // 1 cancelled / 4 total orders
+    }
+
+    @Test
+    fun `requests are sent to chat completions relative to the configured DashScope-compatible base URL, never repeating v1`() {
+        server.enqueue(200, successBody("""{"status":"ok","summary":"x"}"""))
+
+        provider().analyze(realisticRequest())
+
+        assertEquals(1, server.requestCount)
     }
 
     @Test
@@ -178,7 +188,7 @@ class DeepSeekProviderTest {
     }
 
     @Test
-    fun `a missing API key never calls the network at all, and fails closed with AUTH_FAILED`() {
+    fun `a missing API key never calls the network at all, and fails closed with AUTH_FAILED -- Qwen-DashScope is a paid cloud API, not a local unauthenticated server`() {
         val outcome = provider(apiKey = "").analyze(realisticRequest())
 
         val failure = outcome as AIProviderOutcome.Failure
@@ -236,11 +246,11 @@ class DeepSeekProviderTest {
 
         val success = outcome as AIProviderOutcome.Success
         assertEquals("unknown", success.result.status)
-        assertEquals("deepseek", success.result.providerName)
+        assertEquals("qwen", success.result.providerName)
         assertEquals(0, server.requestCount)
     }
 
-    // --- PIOS Intelligence Trend Context -- data-quality fix (2026-08-17) ---
+    // --- Trend context (shared formatTrendContextForPrompt, same as DeepSeekProvider/OllamaProvider) ---
 
     private val historyDay16 = DailySnapshot(
         date = "2026-08-16",
@@ -248,11 +258,6 @@ class DeepSeekProviderTest {
         proposals = ProposalMetrics(total = 12, accepted = 9, declined = 1, lapsed = 0, withdrawn = 0, open = 0),
         assignments = AssignmentMetrics(total = 9, completed = 9, inProgress = 0),
         activeDrivers = 4
-    )
-    private val historyDay15 = historyDay16.copy(
-        date = "2026-08-15",
-        orders = OrderMetrics(total = 9, completed = 7, cancelled = 1, open = 0),
-        activeDrivers = 3
     )
     private val currentDaySnapshot = DailySnapshot(
         date = "2026-08-17",
@@ -270,8 +275,8 @@ class DeepSeekProviderTest {
 
         val body = server.lastRequestBody!!
         assertTrue(body.contains("Не изобретай числа"), "base prompt content must still be present")
-        assertFalse(body.contains("ИСТОРИЯ ПО ДНЯМ"), "no history section should be added when history is null")
-        assertFalse(body.contains("ТЕКУЩИЙ ДЕНЬ"), "no current-day section should be added when currentDay is null")
+        assertFalse(body.contains("ИСТОРИЯ ПО ДНЯМ"))
+        assertFalse(body.contains("ТЕКУЩИЙ ДЕНЬ"))
     }
 
     @Test
@@ -279,42 +284,18 @@ class DeepSeekProviderTest {
         server.enqueue(200, successBody("""{"status":"ok","summary":"x"}"""))
         val requestWithTrendContext = realisticRequest().copy(
             currentDay = currentDaySnapshot,
-            history = listOf(historyDay16, historyDay15)
+            history = listOf(historyDay16)
         )
 
         provider().analyze(requestWithTrendContext)
 
         val body = server.lastRequestBody!!
-        // ALL-PERIOD / cumulative section, explicitly labeled as such.
         assertTrue(body.contains("ВЕСЬ ПЕРИОД НАБЛЮДЕНИЯ"))
-        // LIVE driver count, explicitly labeled.
         assertTrue(body.contains("LIVE"))
-        // CURRENT DAY section, distinct from history.
         assertTrue(body.contains("ТЕКУЩИЙ ДЕНЬ"))
-        assertTrue(body.contains("2026-08-17"))
-        // HISTORICAL DAILY section.
         assertTrue(body.contains("ИСТОРИЯ ПО ДНЯМ"))
-        assertTrue(body.contains("2026-08-16"))
-        assertTrue(body.contains("2026-08-15"))
-        // Explicit instruction not to conflate cumulative with daily, or live with historical activeDrivers.
         assertTrue(body.contains("НЕЛЬЗЯ напрямую сравнивать"))
         assertTrue(body.contains("РАЗНЫЕ метрики"))
-        assertTrue(body.contains("придумывай"))
-        // Existing metrics section must still be present, unchanged.
-        assertTrue(body.contains("Не изобретай числа"))
-    }
-
-    @Test
-    fun `when history is present but currentDay is absent, the prompt honestly states the day-over-day comparison is unavailable, instead of substituting the cumulative snapshot`() {
-        server.enqueue(200, successBody("""{"status":"ok","summary":"x"}"""))
-        val requestWithHistoryOnly = realisticRequest().copy(history = listOf(historyDay16, historyDay15))
-
-        provider().analyze(requestWithHistoryOnly)
-
-        val body = server.lastRequestBody!!
-        assertFalse(body.contains("ТЕКУЩИЙ ДЕНЬ"), "no current-day section should be fabricated when currentDay is null")
-        assertTrue(body.contains("ИСТОРИЯ ПО ДНЯМ"))
-        assertTrue(body.contains("Текущий день недоступен"))
     }
 
     @Test

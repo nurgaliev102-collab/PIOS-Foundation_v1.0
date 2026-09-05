@@ -1,6 +1,7 @@
 package com.pios.aiadvisor.domain
 
 import com.pios.aiadvisor.api.AssignmentMetrics
+import com.pios.aiadvisor.api.DailySnapshot
 import com.pios.aiadvisor.api.DriverMetrics
 import com.pios.aiadvisor.api.HealthMetrics
 import com.pios.aiadvisor.api.OrderMetrics
@@ -9,6 +10,7 @@ import com.pios.aiadvisor.api.ProposalMetrics
 import com.pios.aiadvisor.api.ReactionTimeMetrics
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -25,7 +27,9 @@ class MockAIProviderTest {
         assignments: AssignmentMetrics = AssignmentMetrics(0, 0, 0),
         drivers: DriverMetrics = DriverMetrics(0, 0, 0),
         reactionTime: ReactionTimeMetrics = ReactionTimeMetrics(null, null, 0),
-        health: HealthMetrics = HealthMetrics(5, 5)
+        health: HealthMetrics = HealthMetrics(5, 5),
+        currentDay: DailySnapshot? = null,
+        history: List<DailySnapshot>? = null
     ) = PilotAnalysisRequest(
         generatedAt = "2026-08-17T12:00:00.000Z",
         periodLabel = "Весь период наблюдения (все данные, доступные системе сейчас)",
@@ -34,7 +38,9 @@ class MockAIProviderTest {
         assignments = assignments,
         drivers = drivers,
         reactionTime = reactionTime,
-        health = health
+        health = health,
+        currentDay = currentDay,
+        history = history
     )
 
     private val provider = MockAIProvider()
@@ -145,6 +151,105 @@ class MockAIProviderTest {
             )
         )
         assertTrue((withoutSample as AIProviderOutcome.Success).result.keyFindings.none { it.contains("реакции") })
+    }
+
+    // --- PIOS Intelligence Trend Context -- data-quality fix (2026-08-17) ---
+
+    private val historyDay16 = DailySnapshot(
+        date = "2026-08-16",
+        orders = OrderMetrics(total = 12, completed = 9, cancelled = 2, open = 0),
+        proposals = ProposalMetrics(total = 12, accepted = 9, declined = 1, lapsed = 0, withdrawn = 0, open = 0),
+        assignments = AssignmentMetrics(total = 9, completed = 9, inProgress = 0),
+        activeDrivers = 4
+    )
+    private val currentDaySnapshot = DailySnapshot(
+        date = "2026-08-17",
+        orders = OrderMetrics(total = 6, completed = 4, cancelled = 1, open = 1),
+        proposals = ProposalMetrics(total = 6, accepted = 4, declined = 1, lapsed = 0, withdrawn = 0, open = 1),
+        assignments = AssignmentMetrics(total = 4, completed = 4, inProgress = 0),
+        activeDrivers = 2
+    )
+
+    @Test
+    fun `both currentDay and history absent -- never adds a trend finding, behaves exactly as before this feature existed`() {
+        val outcome = provider.analyze(
+            baseRequest(
+                orders = OrderMetrics(total = 5, completed = 5, cancelled = 0, open = 0),
+                proposals = ProposalMetrics(total = 5, accepted = 5, declined = 0, lapsed = 0, withdrawn = 0, open = 0)
+            )
+        )
+
+        assertTrue((outcome as AIProviderOutcome.Success).result.keyFindings.none { it.contains("Тренд") || it.contains("сравнени") })
+    }
+
+    @Test
+    fun `history present but empty, and currentDay present -- no trend finding, nothing to compare against`() {
+        val outcome = provider.analyze(
+            baseRequest(
+                orders = OrderMetrics(total = 5, completed = 5, cancelled = 0, open = 0),
+                proposals = ProposalMetrics(total = 5, accepted = 5, declined = 0, lapsed = 0, withdrawn = 0, open = 0),
+                currentDay = currentDaySnapshot,
+                history = emptyList()
+            )
+        )
+
+        assertTrue((outcome as AIProviderOutcome.Success).result.keyFindings.none { it.contains("Тренд") })
+    }
+
+    @Test
+    fun `currentDay and history both present -- compares the two same-scale daily snapshots, never the ALL-PERIOD cumulative total`() {
+        val outcome = provider.analyze(
+            baseRequest(
+                // Deliberately a large ALL-PERIOD total (18) that must NEVER appear in the trend
+                // finding's comparison -- only currentDay.orders.total (6) and historyDay16.orders.total (12)
+                // are real same-scale daily numbers.
+                orders = OrderMetrics(total = 18, completed = 14, cancelled = 3, open = 1),
+                proposals = ProposalMetrics(total = 18, accepted = 14, declined = 1, lapsed = 0, withdrawn = 0, open = 3),
+                drivers = DriverMetrics(total = 5, available = 9, withActivity = 5),
+                currentDay = currentDaySnapshot,
+                history = listOf(historyDay16, historyDay16.copy(date = "2026-08-15", activeDrivers = 3))
+            )
+        )
+
+        val trendFinding = (outcome as AIProviderOutcome.Success).result.keyFindings.single { it.contains("Тренд по дням") }
+        assertTrue(trendFinding.contains("2026-08-16"), "compares against the most recent day, not an older one")
+        assertTrue(trendFinding.contains("было 12, стало 6"), "compares currentDay.orders.total (6) to the previous day's (12), never the ALL-PERIOD total (18)")
+        assertFalse(trendFinding.contains("18"), "the ALL-PERIOD cumulative total must never appear in a daily trend comparison")
+        assertTrue(trendFinding.contains("activeDrivers"))
+        assertFalse(trendFinding.contains("на линии"), "must never compare historical activeDrivers to the live 'на линии сейчас' driver count")
+    }
+
+    @Test
+    fun `history present but currentDay absent -- honestly reports the comparison is unavailable, never substitutes the cumulative snapshot`() {
+        val outcome = provider.analyze(
+            baseRequest(
+                orders = OrderMetrics(total = 18, completed = 14, cancelled = 3, open = 1),
+                proposals = ProposalMetrics(total = 18, accepted = 14, declined = 1, lapsed = 0, withdrawn = 0, open = 3),
+                history = listOf(historyDay16)
+            )
+        )
+
+        val findings = (outcome as AIProviderOutcome.Success).result.keyFindings
+        assertTrue(findings.none { it.contains("Тренд по дням") }, "no fabricated trend finding without a real currentDay")
+        val limitation = findings.single { it.contains("недоступно") }
+        assertTrue(limitation.contains("сегодня"))
+        assertFalse(limitation.contains("18"), "must not silently use the ALL-PERIOD total as if it were today's number")
+    }
+
+    @Test
+    fun `the general driver-activity finding (live available count) is present and unaffected regardless of trend context`() {
+        val outcome = provider.analyze(
+            baseRequest(
+                orders = OrderMetrics(total = 18, completed = 14, cancelled = 3, open = 1),
+                proposals = ProposalMetrics(total = 18, accepted = 14, declined = 1, lapsed = 0, withdrawn = 0, open = 3),
+                drivers = DriverMetrics(total = 5, available = 2, withActivity = 5),
+                currentDay = currentDaySnapshot,
+                history = listOf(historyDay16)
+            )
+        )
+
+        val findings = (outcome as AIProviderOutcome.Success).result.keyFindings
+        assertTrue(findings.any { it.contains("на линии сейчас: 2") }, "the live driver count is still reported, unchanged, as its own finding")
     }
 
     @Test
