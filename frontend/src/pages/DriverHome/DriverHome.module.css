@@ -167,6 +167,96 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Visual-only redesign (product owner request, 2026-09-07): the "Сегодня"
+   card's rows as a grid of stat tiles instead of plain label/value lines.
+   Same underlying numbers, same design tokens -- see the JSX comment above
+   this grid's usage for why each color was chosen. */
+.growthGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--pios-space-3);
+}
+
+.growthTile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.125rem;
+  padding: var(--pios-space-3) var(--pios-space-4);
+  background: var(--pios-color-background);
+  border: 1px solid var(--pios-color-border);
+  border-radius: var(--pios-radius-sm);
+  color: var(--pios-color-text-primary);
+}
+
+.growthTile .growthIcon {
+  color: var(--pios-color-text-muted);
+}
+
+.growthTile .growthCount {
+  color: inherit;
+}
+
+.growthTile .growthLabel {
+  font-size: 0.8125rem;
+  color: var(--pios-color-text-secondary);
+}
+
+.growthTileAccent {
+  color: var(--pios-color-accent);
+}
+
+.growthTileAccent .growthIcon {
+  color: var(--pios-color-accent);
+}
+
+.growthTileSuccess {
+  color: var(--pios-color-success);
+}
+
+.growthTileSuccess .growthIcon {
+  color: var(--pios-color-success);
+}
+
+.growthTileTrust {
+  color: var(--pios-color-trust);
+}
+
+.growthTileTrust .growthIcon {
+  color: var(--pios-color-trust);
+}
+
+.growthIcon {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+}
+
+.growthIcon svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* The lifetime referral total reads as a summary strip under the grid,
+   not one more square tile -- it answers a different question ("ever",
+   not "today") and a horizontal row makes that difference visible at a
+   glance rather than only in the label text. */
+.growthTileWide {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--pios-space-2);
+}
+
+.growthTileWide .growthLabel {
+  flex: 1;
+}
+
+.growthTileWide .growthCount {
+  margin-left: auto;
+  color: var(--pios-color-text-primary);
+}
+
 /* PIOS Install v1 -- same card shape as .growthCard/.availabilityCard just
    above, so this reads as one more fact about this driver's own PIOS, not
    a separate widget bolted on. */

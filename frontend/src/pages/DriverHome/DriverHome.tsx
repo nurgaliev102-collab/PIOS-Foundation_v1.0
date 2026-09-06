@@ -1396,9 +1396,16 @@ export function DriverHome() {
 
         {status === 'ready' && driver && (
           <>
-            {/* H6 ("Driver Growth Snapshot"): one honest number, deliberately --
-                see PIOS_PRODUCT_HYPOTHESES.md's own note on what this Sprint
-                does not do (no congratulatory wording, no hiding a zero).
+            {/* H6 ("Driver Growth Snapshot"): one honest number per tile,
+                deliberately -- see PIOS_PRODUCT_HYPOTHESES.md's own note on
+                what this Sprint does not do (no congratulatory wording, no
+                hiding a zero). Visual-only redesign (product owner request,
+                2026-09-07): a stat-tile grid instead of plain rows, colored
+                by the same semantic tokens PIOS_DESIGN_SYSTEM.md already
+                defines (trust for "Постоянных клиентов" — its own token
+                comment names this exact case: "recognized relationship").
+                No new data, no new business rule -- the four numbers below
+                are the same ones the old row layout already rendered.
                 "Новых клиентов" (fixed genitive plural), not a declined
                 phrase that changes with the count -- same convention
                 TodayCard.tsx already uses ("Заказов создано"), which avoids
@@ -1406,40 +1413,74 @@ export function DriverHome() {
                 getting it subtly wrong. */}
             <section className={styles.growthCard}>
               <p className={styles.growthTitle}>Сегодня</p>
-              <div className={styles.growthRow}>
-                <span className={styles.growthLabel}>Новых клиентов</span>
-                <span className={styles.growthCount}>{todaysNewClientCount(connections)}</span>
-              </div>
-              {/* ADR-064 (Referral Visibility): the one honest signal the
-                  existing data actually supports -- how many passengers have
-                  ever connected through this driver's own personal link.
-                  `connections` is already fetched in full for the row above;
-                  this is its lifetime length, no backend change. */}
-              <div className={styles.growthRow}>
-                <span className={styles.growthLabel}>Всего пришло по вашей ссылке</span>
-                <span className={styles.growthCount}>{connections.length}</span>
-              </div>
-              {/* Growth Loops TZ v1, Phase 2 (docs/PIOS_GROWTH_LOOPS_TZ_V1.md
-                  Section 2): the same "one honest number, no hiding a zero"
-                  convention as the row above -- shown even at 0/0 for a
-                  brand-new driver, not hidden until it looks impressive. */}
-              <div className={styles.growthRow}>
-                <span className={styles.growthLabel}>Завершено поездок</span>
-                <span className={styles.growthCount}>{milestones?.completedRidesCount ?? 0}</span>
-              </div>
-              <div className={styles.growthRow}>
-                <span className={styles.growthLabel}>Недель подряд с поездками</span>
-                <span className={styles.growthCount}>{milestones?.currentStreakWeeks ?? 0}</span>
-              </div>
-              {/* Growth Loops TZ v1, Phase 2 extension (docs/PIOS_GROWTH_LOOPS_TZ_V1.md
-                  Section 2.1): a passenger's second completed ride with this
-                  driver, correlated locally against Order Management's own
-                  OrderSubmitted -- see that section for what this deliberately
-                  does not (and, for an order with no known passenger yet,
-                  cannot) count. */}
-              <div className={styles.growthRow}>
-                <span className={styles.growthLabel}>Постоянных клиентов</span>
-                <span className={styles.growthCount}>{milestones?.repeatClientsCount ?? 0}</span>
+              <div className={styles.growthGrid}>
+                {/* Growth Loops TZ v1, Phase 2 (docs/PIOS_GROWTH_LOOPS_TZ_V1.md
+                    Section 2): the same "one honest number, no hiding a
+                    zero" convention as before -- shown even at 0/0 for a
+                    brand-new driver, not hidden until it looks impressive. */}
+                <div className={`${styles.growthTile} ${styles.growthTileAccent}`}>
+                  <span className={styles.growthIcon} aria-hidden="true">
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6">
+                      <circle cx="10" cy="10" r="7.25" />
+                      <path d="M6.8 10.2l2 2 4-4.4" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                  <span className={styles.growthCount}>{milestones?.completedRidesCount ?? 0}</span>
+                  <span className={styles.growthLabel}>Завершено поездок</span>
+                </div>
+                <div className={`${styles.growthTile} ${styles.growthTileSuccess}`}>
+                  <span className={styles.growthIcon} aria-hidden="true">
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round">
+                      <path d="M10 2.5c.7 2 .2 3-.7 4-1.3 1.5-2.5 2.7-2.5 4.8a3.2 3.2 0 0 0 6.4 0c0-1-.35-1.7-.85-2.4.9.5 1.65 1.5 1.65 3a4.5 4.5 0 0 1-9 0c0-3.2 2.1-4.7 3.4-6.4.6-.8 1.1-1.8.9-3z" />
+                    </svg>
+                  </span>
+                  <span className={styles.growthCount}>{milestones?.currentStreakWeeks ?? 0}</span>
+                  <span className={styles.growthLabel}>Недель подряд с поездками</span>
+                </div>
+                {/* Growth Loops TZ v1, Phase 2 extension (docs/PIOS_GROWTH_LOOPS_TZ_V1.md
+                    Section 2.1): a passenger's second completed ride with
+                    this driver, correlated locally against Order
+                    Management's own OrderSubmitted -- see that section for
+                    what this deliberately does not (and, for an order with
+                    no known passenger yet, cannot) count. Trust-colored:
+                    tokens.css's own comment defines that hue for exactly
+                    this case, "this is someone you know". */}
+                <div className={`${styles.growthTile} ${styles.growthTileTrust}`}>
+                  <span className={styles.growthIcon} aria-hidden="true">
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round">
+                      <path d="M10 16.8s-6-3.7-6-8.1a3.7 3.7 0 0 1 6-2.9 3.7 3.7 0 0 1 6 2.9c0 4.4-6 8.1-6 8.1z" />
+                    </svg>
+                  </span>
+                  <span className={styles.growthCount}>{milestones?.repeatClientsCount ?? 0}</span>
+                  <span className={styles.growthLabel}>Постоянных клиентов</span>
+                </div>
+                <div className={styles.growthTile}>
+                  <span className={styles.growthIcon} aria-hidden="true">
+                    <svg viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M10 2.5l1.4 4.1 4.1 1.4-4.1 1.4-1.4 4.1-1.4-4.1-4.1-1.4 4.1-1.4z" />
+                    </svg>
+                  </span>
+                  <span className={styles.growthCount}>{todaysNewClientCount(connections)}</span>
+                  <span className={styles.growthLabel}>Новых клиентов</span>
+                </div>
+                {/* ADR-064 (Referral Visibility): the one honest signal the
+                    existing data actually supports -- how many passengers
+                    have ever connected through this driver's own personal
+                    link. `connections` is already fetched in full for the
+                    tile above; this is its lifetime length, no backend
+                    change. Wide summary strip, not a fifth square tile --
+                    it's a lifetime total, not one more "today" fact. */}
+                <div className={`${styles.growthTile} ${styles.growthTileWide}`}>
+                  <span className={styles.growthIcon} aria-hidden="true">
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                      <path d="M8.2 11.8L11.8 8.2" />
+                      <path d="M7.4 12.6l-1.6 1.6a2.6 2.6 0 0 1-3.7-3.7l2.4-2.4a2.6 2.6 0 0 1 3.7 0" />
+                      <path d="M12.6 7.4l1.6-1.6a2.6 2.6 0 0 0-3.7-3.7l-2.4 2.4a2.6 2.6 0 0 0 0 3.7" />
+                    </svg>
+                  </span>
+                  <span className={styles.growthLabel}>Всего пришло по вашей ссылке</span>
+                  <span className={styles.growthCount}>{connections.length}</span>
+                </div>
               </div>
             </section>
 
