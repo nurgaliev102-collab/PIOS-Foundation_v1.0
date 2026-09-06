@@ -1,0 +1,113 @@
+# ADR-064: Referral Visibility — Existing Passenger Experience Connection, Network Management Formally Superseded
+
+## Status
+
+**Accepted for implementation.**
+
+**Decision Date:** 2026-09-06
+
+**Product authority.** This ADR is the architectural record of a decision the product owner explicitly ratified in conversation on 2026-09-06, after requesting and confirming an architect-role recommendation: do not activate `network-management`; do not create a second Person/identity system; keep Identity/Passenger Experience's real account IDs as the sole source of truth; build referral visibility on the existing `Connection` concept in Passenger Experience; mark `network-management` superseded and closed to new features. This document records that decision, its boundaries, and the technical audit it was conditioned on. It invents no business rule of its own (`CLAUDE.md`, "Never Invent Business Rules").
+
+Amends no existing ADR's own decision text. Does not touch `network-management`'s code, schema, or Sprint 7A tests. Creates no new cross-module contract; `INTERFACE_CONTRACTS.md` §5 is unchanged.
+
+## Context
+
+### Why this needs an ADR and not an implementation note
+
+Per `.claude/CLAUDE.md` ("Decision Authority"): "responsibilities between modules are affected" and "a new ADR may be required" are explicit triggers for an architect-level decision before implementation, not a call the implementation engineer makes unilaterally. Two things here cross that line: (1) a currently-dormant module (`network-management`) is being given a formal disposition (superseded, closed to new work) rather than left in the open-ended limbo `ADR-037` and project memory both recorded; (2) a new user-facing feature (referral visibility) is being placed in a specific module ahead of writing any code for it — exactly the kind of placement decision `ADR-054` treated as ADR-worthy for the same module, one sprint earlier.
+
+### What exists today (audit, read from the code, not remembered or assumed)
+
+**Passenger Experience already records the one relationship that exists, and it is already keyed on real account IDs.**
+
+- `backend/passenger-experience/src/main/resources/db/migration/passengerexperience/V1__create_connections.sql`: `connections(id, driver_id, passenger_reference, created_at)`, `UNIQUE (driver_id, passenger_reference)` (cited in full in `ADR-054`).
+- `ConnectionController.kt` verifies, on every endpoint, that `request.passengerReference`/the `passengerReference` query param equals the session token's own `sub` claim, and that `driverId` equals the token's own `drv` claim (lines 101, 126, 145, 167 — `SessionTokenVerifier.VerifiedToken(sub, drv)`). **This confirms `passenger_reference` and `driver_id` are the real Identity/Driver Management account IDs already flowing through the rest of the system** — not a separate reference space, and nothing to bridge.
+- Two read endpoints already exist: `GET /v1/connections?driverId=` → `List<ConnectionResponse>` (`passengerId`, `createdAt`) for everyone who connected to this driver; `GET /v1/connections?passengerReference=` → `List<PassengerConnectionResponse>` (`connectionId`, `driverId`, `createdAt`, `isPrimary`) for every driver this passenger has connected to. Both session-token-gated to the record's own owner.
+- **Creation is already, in fact, a referral record.** `frontend/src/pages/PassengerLanding/PassengerLanding.tsx`'s `handleRegisterSubmit`/`handleAddToCircle` call `POST /v1/connections` only after a passenger opens a specific driver's own personal link (`/i/:driverId`) and confirms. A `connections` row **is**, today, the fact "this passenger reached PIOS through this driver's link, at this time" — nothing needs to be added to *capture* that fact; it is only not yet *surfaced* anywhere as a growth signal.
+- `frontend/src/pages/DriverHome/DriverHome.tsx` already fetches a driver's full connection list (`loadConnections`) into `connections` state and derives `todaysNewClientCount(connections)` (a same-day filter, `DriverHome.tsx:318-321`) for the existing growth card. The full, unfiltered list is already in memory on that screen; only a lifetime count is missing, not the data.
+
+**Identity carries no referral concept of any kind.** `RegisterIdentityRequest(phone, password)` (`backend/identity/src/main/kotlin/com/pios/identity/api/RegisterIdentityRequest.kt`) — no field records who, if anyone, referred a new registration. There is no driver-to-driver referral record anywhere in the codebase, and no passenger-to-passenger one either: a passenger has no personal, shareable link of their own today (only drivers do). **The entire "who invited whom" fact PIOS captures anywhere, today, is the single-hop, driver→passenger `Connection` described above.**
+
+**`network-management` is a separate, self-generated identity space, not an extension of the real one.** `PersonId` (`backend/network-management/src/main/kotlin/com/pios/networkmanagement/domain/PersonId.kt`) is generated by `CreatePersonApplicationService` on creation — "no external system assigns a person an identity before PIOS does" (that class's own KDoc) — meaning a `Person` record is never the same identifier as a real Identity/Driver Management account unless a separate, ongoing bridging mechanism is built and maintained. `network-management`'s own founding decision, `ADR-037`, is itself still recorded with **Status: Proposed**, not Accepted, and states plainly: "No existing module depends on `network-management`, and `network-management` depends on no existing module... Sprint 7A introduces zero integration in either direction." `frontend/vite.config.ts`'s own routing comment states it is "intentionally not routed here; it is excluded from the pilot flow (ADR-037)." No frontend screen has ever called it. `ADR-054` already independently reached, and recorded, the identical rejection for the circle-of-trust feature one sprint earlier ("Placing the circle in `network-management`... Rejected: that module's `Connection` is a Person↔Person referral edge... in abstract Persons, not Driver/Passenger identifiers").
+
+### The honest limitation this audit surfaces
+
+"Referral chain" as originally discussed — a recursive, person-to-person graph ("Sergey invited you, and you've invited 3 more") — **is not representable in today's data model at all**, and this ADR does not invent the capability that would make it so. What the data actually supports is narrower: a driver can see how many passengers have ever connected through their own personal link (a simple count, already fetched, not yet totaled), and a passenger can see which driver(s) they connected through (already queryable, not yet surfaced in any screen). Neither is a multi-hop chain. This gap is recorded here rather than papered over with a feature that quietly promises more than the data can support.
+
+## Decision
+
+### Part 1 — Placement: Passenger Experience's existing `Connection`, no new module, no new table
+
+Referral visibility is built entirely on the `connections` table and its two existing read endpoints. **No new table, no new column, no new endpoint is required for the minimal shape in Part 3** — per the product owner's own explicit instruction not to add new Invitation/Person storage while the existing model already suffices.
+
+- **No new module.** `INTERFACE_CONTRACTS.md` already assigns Personal Client relationship ownership to Passenger Experience (cited in `ADR-054`); this ADR exercises that ownership, exactly as `ADR-054` did.
+- **No new Person/identity concept.** `passenger_reference`/`driver_id` remain the real Identity/Driver Management account IDs already verified against session-token claims — see Context. No bridging table, no synchronization job, no second source of truth is introduced.
+- **First Refusal, Dispatch, and the circle-of-trust mechanism are untouched.** `ADR-062`'s contract, `dispatch`'s schema/code, and `ADR-054`'s `primary_connections` table and its own endpoints are not read, written, or referenced by anything in this ADR.
+
+### Part 2 — `network-management`: formally superseded, not deleted
+
+Effective this ADR, `network-management` is **superseded for all new product work**:
+
+- Its existing code, schema (`pios_network_management`), and Sprint 7A tests (`ConnectionTest`, `InvitationTest`, `PersonIdTest`) are left exactly as they are — **not deleted**, per `CLAUDE.md`'s "Never Delete Documentation" spirit applied here to a working, tested (if unused) module, and per the product owner's own explicit instruction.
+- **No new feature may read from, write to, or otherwise depend on `network-management` going forward** without a decision that explicitly reopens this question — the inverse of `ADR-037`'s own still-"Proposed" status, which this ADR treats as closed rather than perpetually open.
+- This is not a formal amendment to `ADR-037`'s own text (that ADR's Decision stands, describing what was built and why, accurately, at the time); it is the disposition decision `ADR-037` itself anticipated needing ("Future work connecting `network-management`'s `Connection` concept to actual order routing... will need its own ADR when it introduces the first real cross-module dependency — not authorized here") — this ADR answers that question in the negative for the referral-visibility use case specifically, and records the module's general status as closed to new work absent a future, separate decision.
+
+### Part 3 — The feature, scoped to what the audit actually found
+
+**Minimal shape, proposed for confirmation before implementation** (per the product owner's own instruction: audit first, propose second, code last):
+
+- **Driver-side (build this):** a lifetime "invited N clients through your link" count, alongside the existing same-day count already on `DriverHome`'s growth card. Derivable entirely from data `DriverHome.tsx` already fetches (`connections.length`, the same array `todaysNewClientCount` already filters) — **no backend change of any kind.**
+- **Passenger-side (not proposed for this minimal pass):** showing a passenger "you connected through {driver}'s link, on {date}" is technically available (`GET /v1/connections?passengerReference=`) but not obviously valuable — a passenger already knows which driver's link they used — and is left as an open option rather than built speculatively.
+- **A true multi-hop chain is not proposed, because it cannot be built from what exists** without inventing a new mechanism (a passenger's own shareable link, or a driver-to-driver referral record) — a product decision this ADR does not make.
+
+## Alternatives Considered
+
+- **Activate `network-management`'s `Person`/`Connection`/`Invitation`.** Rejected — see Context: a self-generated, parallel identity space with no bridge to real accounts, explicitly excluded from the pilot flow, and already rejected once for the closely related circle-of-trust feature (`ADR-054`).
+- **A new `Invitation` table in Passenger Experience, modeling person-to-person referral explicitly.** Rejected for now, per explicit product owner instruction — the existing `connections` table already captures the one relationship (`driver→passenger`, via personal link) that actually exists in the product today; a new table would model a relationship (person-to-person) nothing currently creates.
+- **Build the full recursive referral chain now, inventing a passenger-shareable link to make it possible.** Rejected — this would be inventing a new product mechanism and, implicitly, a business rule about how a passenger's own referral works, which `CLAUDE.md` reserves for explicit product-owner decision, not something to infer from a growth-loop brainstorm.
+
+## Consequences
+
+### Positive
+
+- Zero new schema, zero new module, zero new cross-module contract. The minimal feature (Part 3) is addable as a pure frontend change against data already in memory.
+- Reuses already-authenticated, already-correct identity references (`sub`/`drv` claims) rather than introducing a second identity space to keep in sync forever.
+- Consistent with, and reinforces, `ADR-054`'s own reasoning and precedent for the same module and the same rejected alternative.
+- `network-management`'s open-ended disposition (`ADR-037`, project memory: "that module's own disposition is still open") is finally closed for the referral-visibility question, removing one recurring source of "should we use this?" re-litigation.
+
+### Negative
+
+- The "referral chain" as originally envisioned in the growth-loops brainstorm (recursive, person-to-person, "Sergey invited you, and you've invited 3 more") is **not delivered** — only a single-hop, driver-side count. If the fuller vision is wanted, it requires a new, separate product decision (Evolution Path below), not an implementation detail of this ADR.
+- `network-management` remains in the repository, unused, indefinitely — a known, accepted carrying cost rather than a resolved one; a future cleanup decision (retire fully vs. repurpose) is still open.
+
+## Evolution Path
+
+None of the following is resolved here; each requires its own Product Decision, its own ADR, or both:
+
+1. **A passenger's own shareable invite link** — the prerequisite for any passenger-to-passenger referral visibility; not decided here.
+2. **Driver-to-driver referral** — no data path exists today; not decided here.
+3. **`network-management`'s final disposition** — retained-but-superseded (this ADR) vs. formally retired/deleted vs. repurposed for a materially different future need.
+4. **Passenger-side referral visibility** ("you connected through {driver}") — technically available today, left unbuilt pending a product decision that it's worth showing.
+
+Any change to Part 1 (placement) or Part 2 (`network-management`'s superseded status) requires a decision that explicitly supersedes this one, consistent with `ADR-015`.
+
+## What This ADR Does Not Authorize
+
+Any read from, write to, or new dependency on `network-management`; any new Person/identity concept anywhere in the codebase; any change to `dispatch`, `ADR-062` (First Refusal), or `ADR-054` (circle of trust); any new table, column, or endpoint in `passenger-experience` beyond what Part 3's minimal shape needs (none, today); any passenger-shareable invite link or driver-to-driver referral mechanism; any deletion of `network-management`'s existing code, schema, or tests.
+
+## Related ADRs
+
+- [ADR-005: Data Ownership](ADR-005-Data-Ownership.md) / [ADR-009: Domain Isolation](ADR-009-Domain-Isolation.md) / [ADR-019: Conceptual Data Ownership](ADR-019-Conceptual-Data-Ownership.md) — exclusive-ownership and reference-not-ownership, applied unmodified.
+- [ADR-037: Network Management Module Bounded Context Extension](ADR-037-Network-Management-Module-Bounded-Context-Extension.md) — the module this ADR marks superseded for new work; its own Decision text is not amended.
+- [ADR-054: Circle of Trust — Passenger-Experience-Owned Primary Driver Relationship](ADR-054-Circle-of-Trust-Passenger-Experience-Owned-Primary-Driver-Relationship.md) — the direct precedent this ADR follows: same module, same rejection of `network-management`, same "extend the existing `Connection` concept" placement.
+- [ADR-062: Primary Driver / First Refusal — Passenger Experience / Dispatch Contract](ADR-062-Primary-Driver-First-Refusal-Passenger-Experience-Dispatch-Contract.md) — explicitly untouched by this ADR.
+- [ADR-015](ADR-015-Architecture-Decision-Record-Process.md) — supersession discipline for any future change to Part 1/Part 2.
+
+## References
+
+- `docs/PIOS_GROWTH_LOOPS_TZ_V1.md` §3 — the original Phase 3 proposal this ADR resolves the placement question for.
+- This conversation's own product-owner ratification, 2026-09-06 ("Согласен с твоей рекомендацией. Принимаем её как архитектурное направление.").
+- `backend/passenger-experience/src/main/kotlin/com/pios/passengerexperience/api/ConnectionController.kt`, `persistence/PostgreSQLConnectionRepository.kt` — read, not modified.
+- `backend/network-management/src/main/kotlin/com/pios/networkmanagement/domain/PersonId.kt`, `application/CreatePersonApplicationService.kt` — read, not modified; the basis for "self-generated identity space."
+- `backend/identity/src/main/kotlin/com/pios/identity/api/RegisterIdentityRequest.kt` — read, confirming no referral field exists anywhere in registration.
+- `frontend/src/pages/DriverHome/DriverHome.tsx` lines 318-321, `frontend/src/pages/PassengerLanding/PassengerLanding.tsx` — read, not modified; the basis for Part 3's minimal, no-backend-change shape.
