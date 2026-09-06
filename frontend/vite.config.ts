@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { BACKEND_ROUTES } from './server/backendRoutes.mjs'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -42,20 +43,12 @@ export default defineConfig({
     // `vite preview` does not apply here -- unlike `platform-ops`, this is
     // a plain, unprivileged proxy row, forwarded unchanged like every row
     // above it.
-    proxy: {
-      '/v1/drivers': 'http://localhost:8081',
-      '/v1/connections': 'http://localhost:8082',
-      '/v1/orders': 'http://localhost:8083',
-      '/v1/proposals': 'http://localhost:8084',
-      '/v1/assignments': 'http://localhost:8084',
-      '/v1/identities': 'http://localhost:8086',
-      '/v1/advisor': 'http://localhost:8091',
-      '/v1/health/driver-management': 'http://localhost:8081',
-      '/v1/health/passenger-experience': 'http://localhost:8082',
-      '/v1/health/order-management': 'http://localhost:8083',
-      '/v1/health/dispatch': 'http://localhost:8084',
-      '/v1/health/identity': 'http://localhost:8086',
-    },
+    // Growth Loops TZ v1, Phase 1: this map now lives in
+    // `server/backendRoutes.mjs`, shared with `server/serve.mjs` (the
+    // production replacement for `vite preview` that also needs to
+    // reverse-proxy these exact same paths) — imported here rather than
+    // inlined so the two can never silently drift apart.
+    proxy: BACKEND_ROUTES,
   },
   plugins: [
     react(),

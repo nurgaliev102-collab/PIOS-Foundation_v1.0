@@ -186,6 +186,13 @@ interface ConnectionListItem {
   createdAt: string
 }
 
+/** Growth Loops TZ v1, Phase 2 (docs/PIOS_GROWTH_LOOPS_TZ_V1.md Section 2): `GET /v1/drivers/:id/milestones`'s own response shape. */
+interface DriverMilestonesInfo {
+  completedRidesCount: number
+  currentStreakWeeks: number
+  repeatClientsCount: number
+}
+
 /**
  * Pilot readiness fix: a driver should never have to read a raw UUID
  * (`ARCHITECTURE_VERIFICATION_REPORT.md`-adjacent finding: this screen
@@ -432,6 +439,7 @@ export function DriverHome() {
   const [etaInputs, setEtaInputs] = useState<Record<string, number | null>>({})
   const [orderDetails, setOrderDetails] = useState<Record<string, OrderListItem>>({})
   const [connections, setConnections] = useState<ConnectionListItem[]>([])
+  const [milestones, setMilestones] = useState<DriverMilestonesInfo | null>(null)
   // ADR-040 (Assignment Ride Lifecycle): keyed by orderId, one entry per
   // ACCEPTED proposal that already has an Assignment — an OPEN proposal
   // has none yet, so never appears here.
@@ -531,9 +539,11 @@ export function DriverHome() {
     let active = true
     loadProposals(active, driverId, identity.token, { silent: false })
     loadConnections(active, driverId, identity.token)
+    loadMilestones(active, driverId, identity.token)
     const interval = setInterval(() => {
       loadProposals(active, driverId, identity.token, { silent: true })
       loadConnections(active, driverId, identity.token)
+      loadMilestones(active, driverId, identity.token)
     }, PROPOSALS_POLL_INTERVAL_MS)
     return () => {
       active = false
@@ -583,6 +593,22 @@ export function DriverHome() {
           return
         }
         setConnections(result)
+      })
+      .catch(() => {
+        // Best-effort: see this function's own KDoc.
+      })
+  }
+
+  /** Growth Loops TZ v1, Phase 2 (docs/PIOS_GROWTH_LOOPS_TZ_V1.md Section 2): best-effort, same tolerance as [loadConnections] -- a failure here only hides the growth card's ride count/streak, nothing actionable on this screen depends on it. */
+  function loadMilestones(active: boolean, forDriverId: string, token: string) {
+    request<DriverMilestonesInfo>(`/v1/drivers/${forDriverId}/milestones`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((result) => {
+        if (!active) {
+          return
+        }
+        setMilestones(result)
       })
       .catch(() => {
         // Best-effort: see this function's own KDoc.
@@ -1383,6 +1409,37 @@ export function DriverHome() {
               <div className={styles.growthRow}>
                 <span className={styles.growthLabel}>Новых клиентов</span>
                 <span className={styles.growthCount}>{todaysNewClientCount(connections)}</span>
+              </div>
+              {/* ADR-064 (Referral Visibility): the one honest signal the
+                  existing data actually supports -- how many passengers have
+                  ever connected through this driver's own personal link.
+                  `connections` is already fetched in full for the row above;
+                  this is its lifetime length, no backend change. */}
+              <div className={styles.growthRow}>
+                <span className={styles.growthLabel}>Всего пришло по вашей ссылке</span>
+                <span className={styles.growthCount}>{connections.length}</span>
+              </div>
+              {/* Growth Loops TZ v1, Phase 2 (docs/PIOS_GROWTH_LOOPS_TZ_V1.md
+                  Section 2): the same "one honest number, no hiding a zero"
+                  convention as the row above -- shown even at 0/0 for a
+                  brand-new driver, not hidden until it looks impressive. */}
+              <div className={styles.growthRow}>
+                <span className={styles.growthLabel}>Завершено поездок</span>
+                <span className={styles.growthCount}>{milestones?.completedRidesCount ?? 0}</span>
+              </div>
+              <div className={styles.growthRow}>
+                <span className={styles.growthLabel}>Недель подряд с поездками</span>
+                <span className={styles.growthCount}>{milestones?.currentStreakWeeks ?? 0}</span>
+              </div>
+              {/* Growth Loops TZ v1, Phase 2 extension (docs/PIOS_GROWTH_LOOPS_TZ_V1.md
+                  Section 2.1): a passenger's second completed ride with this
+                  driver, correlated locally against Order Management's own
+                  OrderSubmitted -- see that section for what this deliberately
+                  does not (and, for an order with no known passenger yet,
+                  cannot) count. */}
+              <div className={styles.growthRow}>
+                <span className={styles.growthLabel}>Постоянных клиентов</span>
+                <span className={styles.growthCount}>{milestones?.repeatClientsCount ?? 0}</span>
               </div>
             </section>
 

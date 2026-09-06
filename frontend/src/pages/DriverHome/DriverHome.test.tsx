@@ -101,6 +101,7 @@ describe('DriverHome', () => {
       { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'OPEN', statedPrice: null, statedEtaMinutes: null },
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1
 
     renderDriverHome()
@@ -139,6 +140,7 @@ describe('DriverHome', () => {
       { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'OPEN', statedPrice: null, statedEtaMinutes: null },
     ]) // GET /v1/proposals?driverId=driver-1
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections?driverId=driver-1 (fired right after proposals, before it resolves)
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1 (chained after proposals resolves -- ADR-060)
 
     renderDriverHome()
@@ -191,8 +193,9 @@ describe('DriverHome', () => {
         statedEtaMinutes: null,
       },
     ])
-    mockedRequest.mockResolvedValueOnce([])
-    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1
 
     renderDriverHome()
 
@@ -210,8 +213,9 @@ describe('DriverHome', () => {
     mockedRequest.mockResolvedValueOnce([
       { proposalId: 'p2', orderId: 'o2', driverId: 'driver-1', status: 'OPEN', statedPrice: null, statedEtaMinutes: null },
     ])
-    mockedRequest.mockResolvedValueOnce([])
-    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o2
 
     renderDriverHome()
 
@@ -242,6 +246,7 @@ describe('DriverHome', () => {
       { proposalId: 'p3', orderId: 'o3', driverId: 'driver-1', status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: null },
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
     mockedRequest.mockResolvedValueOnce([
       { assignmentId: 'a1', orderId: 'o3', driverId: 'driver-1', status: 'CREATED', statusChangedAt: null },
     ]) // GET /v1/assignments?orderId=o3
@@ -275,6 +280,7 @@ describe('DriverHome', () => {
       { proposalId: 'p4', orderId: 'o4', driverId: 'driver-1', status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: null },
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
     mockedRequest.mockResolvedValueOnce([
       { assignmentId: 'a4', orderId: 'o4', driverId: 'driver-1', status: 'IN_PROGRESS', statusChangedAt: null },
     ]) // GET /v1/assignments?orderId=o4
@@ -303,6 +309,7 @@ describe('DriverHome', () => {
       { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: 7 },
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections (fired right after proposals, before it resolves)
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/assignments?orderId=o1 (loadAssignments, chained after proposals resolves)
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1 (chained after proposals resolves -- ADR-060)
 
@@ -320,6 +327,7 @@ describe('DriverHome', () => {
       { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'WITHDRAWN', statedPrice: null, statedEtaMinutes: null },
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections (fired right after proposals, before it resolves)
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1 (chained after proposals resolves -- ADR-060)
 
     renderDriverHome()
@@ -338,6 +346,7 @@ describe('DriverHome', () => {
       { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'OPEN', statedPrice: null, statedEtaMinutes: null },
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections (fired right after proposals, before it resolves)
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
     mockedRequest.mockResolvedValueOnce([
       {
         id: 'o1',
@@ -362,6 +371,7 @@ describe('DriverHome', () => {
       { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'OPEN', statedPrice: null, statedEtaMinutes: null },
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections (fired right after proposals, before it resolves)
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
     mockedRequest.mockResolvedValueOnce([
       {
         id: 'o1',
@@ -378,6 +388,30 @@ describe('DriverHome', () => {
 
     await screen.findByText('Куда: Аэропорт Уфа')
     expect(screen.queryByText(/Предварительный заказ/)).not.toBeInTheDocument()
+  })
+
+  // --- Referral visibility (ADR-064): lifetime clients via the driver's own link ---
+
+  it("shows the lifetime count of clients who connected through this driver's own link, not just today's", async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals
+    mockedRequest.mockResolvedValueOnce([
+      { passengerReference: 'passenger-1', createdAt: '2026-07-01T10:00:00Z' },
+      { passengerReference: 'passenger-2', createdAt: '2026-08-15T10:00:00Z' },
+      { passengerReference: 'passenger-3', createdAt: new Date().toISOString() },
+    ]) // GET /v1/connections -- three ever, only one of them today
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0, repeatClientsCount: 0 }) // GET /v1/drivers/driver-1/milestones
+
+    renderDriverHome()
+
+    await screen.findByText('Мой бизнес')
+
+    const totalRow = screen.getByText('Всего пришло по вашей ссылке').closest('div')
+    expect(totalRow).toHaveTextContent('3')
+
+    const todayRow = screen.getByText('Новых клиентов').closest('div')
+    expect(todayRow).toHaveTextContent('1')
   })
 
   // --- PIOS Install v1 (Product Owner exception) ---
