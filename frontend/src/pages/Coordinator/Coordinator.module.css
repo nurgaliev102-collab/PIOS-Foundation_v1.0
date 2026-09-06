@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   min-height: 100svh;
-  background: #f8fafc;
+  background: var(--pios-color-background);
 }
 
 .content {
@@ -19,9 +19,10 @@
 
 .title {
   margin: 0 0 0.25rem;
+  font-family: var(--pios-font-family-display);
   font-size: 1.375rem;
-  font-weight: 700;
-  color: #0f172a;
+  font-weight: 600;
+  color: var(--pios-color-text-primary);
 }
 
 /* ADR-061 (Coordinator Owner-Gated Access): houses the "Выйти" action next
@@ -40,14 +41,14 @@
 
 .status {
   font-size: 0.9375rem;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
   text-align: center;
 }
 
 .hint {
   margin: 0 0 0.25rem;
   font-size: 0.8125rem;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
 }
 
 .orderRow {
@@ -55,9 +56,9 @@
   flex-direction: column;
   gap: 0.375rem;
   padding: 0.875rem 1rem;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border);
+  border-radius: var(--pios-radius-sm);
 }
 
 .orderMain {
@@ -69,7 +70,7 @@
 .orderId {
   font-size: 0.8125rem;
   font-family: monospace;
-  color: #0f172a;
+  color: var(--pios-color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -83,9 +84,9 @@
   font-weight: 600;
   letter-spacing: 0.03em;
   padding: 0.125rem 0.5rem;
-  border-radius: 999px;
-  color: #1d4ed8;
-  background: #eff6ff;
+  border-radius: var(--pios-radius-full);
+  color: var(--pios-color-information);
+  background: var(--pios-color-information-surface);
 }
 
 /* UX audit (pilot readiness): replaces the old single-value .orderOrigin
@@ -97,7 +98,7 @@
   flex-direction: column;
   gap: 0.125rem;
   font-size: 0.8125rem;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
 }
 
 .clickableRow {
@@ -114,8 +115,8 @@
 }
 
 .selectedRow {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 1px #2563eb;
+  border-color: var(--pios-color-accent);
+  box-shadow: 0 0 0 1px var(--pios-color-accent);
 }
 
 .actionRow {
@@ -142,7 +143,7 @@
   margin: 0;
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #dc2626;
+  color: var(--pios-color-error);
   text-align: center;
 }
 

@@ -8,7 +8,7 @@
   margin: 0 auto;
   padding: 1.25rem 1rem 2rem;
   box-sizing: border-box;
-  background: #f8fafc;
+  background: var(--pios-color-background);
 }
 
 .headerRow {
@@ -19,7 +19,7 @@
 
 .clock {
   font-size: 0.9375rem;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
 }
 
 /* --- Status card --- */
@@ -30,9 +30,9 @@
   align-items: center;
   gap: 0.5rem;
   padding: 2rem 1.25rem;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border);
+  border-radius: var(--pios-radius-sm);
   text-align: center;
 }
 
@@ -44,32 +44,33 @@
 }
 
 .circleGreen {
-  background: #16a34a;
+  background: var(--pios-color-success);
 }
 
 .circleYellow {
-  background: #ca8a04;
+  background: var(--pios-color-warning);
 }
 
 .circleRed {
-  background: #dc2626;
+  background: var(--pios-color-error);
 }
 
 .circleGrey {
-  background: #94a3b8;
+  background: var(--pios-color-text-muted);
 }
 
 .statusHeadline {
   margin: 0;
+  font-family: var(--pios-font-family-display);
   font-size: 1.25rem;
-  font-weight: 700;
-  color: #0f172a;
+  font-weight: 600;
+  color: var(--pios-color-text-primary);
 }
 
 .statusBody {
   margin: 0;
   font-size: 0.9375rem;
-  color: #475569;
+  color: var(--pios-color-text-secondary);
 }
 
 .retryButton {
@@ -77,10 +78,10 @@
   padding: 0.625rem 1.25rem;
   font-size: 0.9375rem;
   font-family: inherit;
-  color: #ffffff;
-  background: #2563eb;
+  color: var(--pios-color-surface);
+  background: var(--pios-color-accent);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--pios-radius-sm);
 }
 
 /* --- Today card --- */
@@ -88,9 +89,9 @@
 .todayCard,
 .eventFeed {
   padding: 1rem 1.125rem;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border);
+  border-radius: var(--pios-radius-sm);
 }
 
 .sectionTitle {
@@ -98,7 +99,7 @@
   font-size: 0.8125rem;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: #64748b;
+  color: var(--pios-color-text-muted);
   text-transform: uppercase;
 }
 
@@ -111,20 +112,20 @@
 
 .todayGrid dt {
   font-size: 0.9375rem;
-  color: #334155;
+  color: var(--pios-color-text-primary);
 }
 
 .todayGrid dd {
   margin: 0;
   font-size: 0.9375rem;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--pios-color-text-primary);
   text-align: right;
 }
 
 .todaySubItem {
   padding-left: 1rem;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
 }
 
 /* --- Event feed --- */
@@ -142,12 +143,12 @@
   display: flex;
   gap: 0.75rem;
   font-size: 0.9375rem;
-  color: #334155;
+  color: var(--pios-color-text-primary);
 }
 
 .eventTime {
   flex-shrink: 0;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -156,10 +157,10 @@
   padding: 0.5rem 1rem;
   font-size: 0.875rem;
   font-family: inherit;
-  color: #2563eb;
+  color: var(--pios-color-accent);
   background: transparent;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
+  border: 1px solid var(--pios-color-border-strong);
+  border-radius: var(--pios-radius-sm);
 }
 
 /* --- AI Analyst card --- */
@@ -169,15 +170,15 @@
   flex-direction: column;
   gap: 0.75rem;
   padding: 1rem 1.125rem;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border);
+  border-radius: var(--pios-radius-sm);
 }
 
 .aiError {
   margin: 0;
   font-size: 0.875rem;
-  color: #dc2626;
+  color: var(--pios-color-error);
 }
 
 .aiResult {
@@ -194,31 +195,31 @@
   font-size: 0.8125rem;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: #ffffff;
-  border-radius: 999px;
+  color: var(--pios-color-surface);
+  border-radius: var(--pios-radius-full);
 }
 
 .aiStatusOk {
-  background: #16a34a;
+  background: var(--pios-color-success);
 }
 
 .aiStatusAttention {
-  background: #ca8a04;
+  background: var(--pios-color-warning);
 }
 
 .aiStatusCritical {
-  background: #dc2626;
+  background: var(--pios-color-error);
 }
 
 .aiStatusUnknown {
-  background: #94a3b8;
+  background: var(--pios-color-text-muted);
 }
 
 .aiSummary {
   margin: 0;
   font-size: 0.9375rem;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--pios-color-text-primary);
 }
 
 .aiSubheading {
@@ -226,7 +227,7 @@
   font-size: 0.8125rem;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: #64748b;
+  color: var(--pios-color-text-muted);
   text-transform: uppercase;
 }
 
@@ -237,13 +238,13 @@
   margin: 0;
   padding: 0 0 0 1.125rem;
   font-size: 0.9375rem;
-  color: #334155;
+  color: var(--pios-color-text-primary);
 }
 
 .aiTimestamp {
   margin: 0.25rem 0 0;
   font-size: 0.8125rem;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
 }
 
 /* --- Actions --- */
@@ -264,37 +265,38 @@
   min-height: 100svh;
   padding: 1.25rem;
   box-sizing: border-box;
-  background: #f8fafc;
+  background: var(--pios-color-background);
 }
 
 .loginCard {
   width: 100%;
   max-width: 360px;
   padding: 2rem 1.5rem;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border);
+  border-radius: var(--pios-radius-sm);
   text-align: center;
 }
 
 .loginBrand {
   margin: 0;
+  font-family: var(--pios-font-family-display);
   font-size: 1.5rem;
-  font-weight: 700;
-  color: #0f172a;
+  font-weight: 600;
+  color: var(--pios-color-text-primary);
 }
 
 .loginSubtitle {
   margin: 0.25rem 0 1.5rem;
   font-size: 0.9375rem;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
 }
 
 .loginLabel {
   display: block;
   margin: 0.75rem 0 0.375rem;
   font-size: 0.875rem;
-  color: #334155;
+  color: var(--pios-color-text-primary);
   text-align: left;
 }
 
@@ -304,16 +306,16 @@
   padding: 0.625rem 0.875rem;
   font-size: 1rem;
   font-family: inherit;
-  color: #0f172a;
-  background: #ffffff;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
+  color: var(--pios-color-text-primary);
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border-strong);
+  border-radius: var(--pios-radius-sm);
   box-sizing: border-box;
 }
 
 .loginInput:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: var(--pios-color-accent);
 }
 
 .loginButton {
@@ -323,5 +325,5 @@
 .loginError {
   margin: 1rem 0 0;
   font-size: 0.875rem;
-  color: #dc2626;
+  color: var(--pios-color-error);
 }
