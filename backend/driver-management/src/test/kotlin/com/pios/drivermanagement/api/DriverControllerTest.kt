@@ -4,9 +4,11 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.drivermanagement.application.CreateDriverApplicationService
 import com.pios.drivermanagement.application.DriverAvailabilityApplicationService
 import com.pios.drivermanagement.application.RetrieveDriverAvailabilityHandler
+import com.pios.drivermanagement.application.RetrieveDriverMilestonesHandler
 import com.pios.drivermanagement.domain.Availability
 import com.pios.drivermanagement.domain.Driver
 import com.pios.drivermanagement.domain.DriverId
+import com.pios.drivermanagement.persistence.InMemoryDriverMilestonesRepository
 import com.pios.drivermanagement.persistence.InMemoryDriverRepository
 import org.springframework.http.HttpStatus
 import java.time.Instant
@@ -43,9 +45,10 @@ class DriverControllerTest {
     private val handler = RetrieveDriverAvailabilityHandler(repository)
     private val availabilityService = DriverAvailabilityApplicationService(repository)
     private val createDriverService = CreateDriverApplicationService(repository)
+    private val milestonesHandler = RetrieveDriverMilestonesHandler(InMemoryDriverMilestonesRepository())
     private val secret = Base64.getEncoder().encodeToString("driver-controller-test-secret".toByteArray())
     private val sessionTokenVerifier = SessionTokenVerifier(secretBase64 = secret)
-    private val controller = DriverController(handler, availabilityService, createDriverService, sessionTokenVerifier)
+    private val controller = DriverController(handler, availabilityService, createDriverService, milestonesHandler, sessionTokenVerifier)
 
     // --- Token minting test helper (mirrors ProposalControllerTest's own) ---
 

@@ -7,6 +7,7 @@ import com.pios.drivermanagement.application.DriverAlreadyExistsException
 import com.pios.drivermanagement.application.DriverAvailabilityApplicationService
 import com.pios.drivermanagement.application.DriverNotFoundException
 import com.pios.drivermanagement.application.RetrieveDriverAvailabilityHandler
+import com.pios.drivermanagement.application.RetrieveDriverMilestonesHandler
 import com.pios.drivermanagement.domain.Availability
 import com.pios.drivermanagement.domain.DriverId
 import org.springframework.http.HttpStatus
@@ -82,6 +83,15 @@ import org.springframework.web.bind.annotation.RestController
  * differently-named or passenger-only (`drv == null`) token, checked
  * before the existing 404/400 mapping below, exactly the same ordering
  * that controller already established.
+ *
+ * ## Growth Loops TZ v1, Phase 2 (docs/PIOS_GROWTH_LOOPS_TZ_V1.md Section 2)
+ *
+ * `getMilestones` exposes a driver's own completed-ride count and
+ * week-streak — private business data about that driver, not a public
+ * fact the way `displayName` (read by `getDriver` for the link-preview
+ * feature, Phase 1) is. Requires the same `Bearer` session-token check as
+ * `declareAvailability`: 401 with no valid token, 403 for any token not
+ * naming this exact [driverId].
  */
 @RestController
 @RequestMapping("/v1/drivers")
@@ -89,6 +99,7 @@ class DriverController(
     private val retrieveDriverAvailabilityHandler: RetrieveDriverAvailabilityHandler,
     private val driverAvailabilityApplicationService: DriverAvailabilityApplicationService,
     private val createDriverApplicationService: CreateDriverApplicationService,
+    private val retrieveDriverMilestonesHandler: RetrieveDriverMilestonesHandler,
     private val sessionTokenVerifier: SessionTokenVerifier
 ) {
 
@@ -123,6 +134,32 @@ class DriverController(
             retrieveDriverAvailabilityHandler.handleAll()
                 .map { DriverResponse(it.id.value, it.availability.name, it.displayName, it.createdAt?.toString(), it.isTest) }
         )
+
+    @GetMapping("/{driverId}/milestones")
+    fun getMilestones(
+        @PathVariable driverId: String,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<DriverMilestonesResponse> {
+        return try {
+            val id = DriverId(driverId)
+            val verified = sessionTokenVerifier.verify(authorization)
+                ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            if (verified.drv != driverId) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+            }
+            val milestones = retrieveDriverMilestonesHandler.handle(id)
+            ResponseEntity.ok(
+                DriverMilestonesResponse(
+                    milestones.driverId.value,
+                    milestones.completedRidesCount,
+                    milestones.currentStreakWeeks,
+                    milestones.repeatClientsCount
+                )
+            )
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        }
+    }
 
     @PostMapping("/{driverId}/availability")
     fun declareAvailability(
