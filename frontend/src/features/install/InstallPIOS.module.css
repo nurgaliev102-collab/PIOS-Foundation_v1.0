@@ -17,7 +17,7 @@
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: #f8fafc;
+  background: var(--pios-color-background);
   overflow-y: auto;
 }
 
@@ -35,18 +35,18 @@
   height: 44px;
   border: none;
   background: transparent;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
   font-size: 18px;
-  border-radius: 999px;
+  border-radius: var(--pios-radius-full);
   cursor: pointer;
 }
 
 .closeButton:hover {
-  background: #f1f5f9;
+  background: var(--pios-color-border);
 }
 
 .closeButton:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--pios-color-focus-ring);
   outline-offset: 2px;
 }
 
@@ -78,16 +78,17 @@
 
 .title {
   margin: 0;
+  font-family: var(--pios-font-family-display);
   font-size: 1.375rem;
-  font-weight: 700;
-  color: #0f172a;
+  font-weight: 600;
+  color: var(--pios-color-text-primary);
   text-align: center;
 }
 
 .subtitle {
   margin: 0;
   font-size: 0.9375rem;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
   text-align: center;
   max-width: 320px;
 }
@@ -103,16 +104,16 @@
 .hint {
   margin: 0;
   font-size: 0.8125rem;
-  color: #94a3b8;
+  color: var(--pios-color-text-muted);
   text-align: center;
 }
 
 .detecting {
   width: 32px;
   height: 32px;
-  border: 3px solid #e2e8f0;
-  border-top-color: #2563eb;
-  border-radius: 999px;
+  border: 3px solid var(--pios-color-border);
+  border-top-color: var(--pios-color-accent);
+  border-radius: var(--pios-radius-full);
   animation: spin 0.8s linear infinite;
 }
 
@@ -132,7 +133,7 @@
 .textAction {
   padding: 0.5rem;
   font-size: 0.8125rem;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
   background: none;
   border: none;
   text-decoration: underline;
@@ -141,14 +142,14 @@
 }
 
 .textAction:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--pios-color-focus-ring);
   outline-offset: 2px;
 }
 
 .feedback {
   margin: 0;
   font-size: 0.8125rem;
-  color: #16a34a;
+  color: var(--pios-color-success);
 }
 
 .deviceChoice {
@@ -168,14 +169,14 @@
 .laterText {
   margin: 0;
   font-size: 0.8125rem;
-  color: #94a3b8;
+  color: var(--pios-color-text-muted);
 }
 
 .laterButton {
   padding: 0.5rem 1rem;
   font-size: 0.9375rem;
   font-weight: 600;
-  color: #2563eb;
+  color: var(--pios-color-accent);
   background: none;
   border: none;
   cursor: pointer;
@@ -184,7 +185,7 @@
 }
 
 .laterButton:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--pios-color-focus-ring);
   outline-offset: 2px;
 }
 

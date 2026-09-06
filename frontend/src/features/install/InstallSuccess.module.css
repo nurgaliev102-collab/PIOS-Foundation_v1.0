@@ -13,14 +13,15 @@
 
 .title {
   margin: 0;
+  font-family: var(--pios-font-family-display);
   font-size: 1.375rem;
-  font-weight: 700;
-  color: #0f172a;
+  font-weight: 600;
+  color: var(--pios-color-text-primary);
 }
 
 .text {
   margin: 0 0 0.5rem;
   font-size: 0.9375rem;
-  color: #64748b;
+  color: var(--pios-color-text-secondary);
   max-width: 320px;
 }

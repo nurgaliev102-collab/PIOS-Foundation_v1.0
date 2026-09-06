@@ -19,9 +19,9 @@
   align-items: center;
   gap: 0.75rem;
   padding: 0.875rem 1rem;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border);
+  border-radius: var(--pios-radius-sm);
 }
 
 .stepIcon {
@@ -32,8 +32,8 @@
   width: 2.5rem;
   height: 2.5rem;
   font-size: 1.25rem;
-  background: #f1f5f9;
-  border-radius: 999px;
+  background: var(--pios-color-background);
+  border-radius: var(--pios-radius-full);
 }
 
 .stepNumber {
@@ -42,14 +42,14 @@
   font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  color: #94a3b8;
+  color: var(--pios-color-text-muted);
 }
 
 .stepTitle {
   margin: 0.125rem 0 0;
   font-size: 0.9375rem;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--pios-color-text-primary);
 }
 
 .finalText {
@@ -57,10 +57,10 @@
   padding: 0.875rem 1rem;
   font-size: 0.9375rem;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--pios-color-text-primary);
   text-align: center;
-  background: #eff6ff;
-  border-radius: 12px;
+  background: var(--pios-color-information-surface);
+  border-radius: var(--pios-radius-sm);
 }
 
 .wrongBrowser {
@@ -70,20 +70,20 @@
   gap: 0.75rem;
   padding: 1.125rem;
   text-align: center;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border);
+  border-radius: var(--pios-radius-sm);
 }
 
 .wrongBrowserText {
   margin: 0;
   font-size: 0.9375rem;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--pios-color-text-primary);
 }
 
 .wrongBrowserHint {
   margin: 0;
   font-size: 0.8125rem;
-  color: #94a3b8;
+  color: var(--pios-color-text-muted);
 }
