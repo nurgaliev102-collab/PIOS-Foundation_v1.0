@@ -8,7 +8,12 @@ import com.pios.drivermanagement.application.DriverAvailabilityApplicationServic
 import com.pios.drivermanagement.application.DriverNotFoundException
 import com.pios.drivermanagement.application.RetrieveDriverAvailabilityHandler
 import com.pios.drivermanagement.application.RetrieveDriverMilestonesHandler
+import com.pios.drivermanagement.application.UpdateLongDistancePreferenceApplicationService
+import com.pios.drivermanagement.application.UpdateLongDistancePreferenceCommand
+import com.pios.drivermanagement.application.UpdateVehicleApplicationService
+import com.pios.drivermanagement.application.UpdateVehicleCommand
 import com.pios.drivermanagement.domain.Availability
+import com.pios.drivermanagement.domain.Driver
 import com.pios.drivermanagement.domain.DriverId
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -92,6 +97,26 @@ import org.springframework.web.bind.annotation.RestController
  * feature, Phase 1) is. Requires the same `Bearer` session-token check as
  * `declareAvailability`: 401 with no valid token, 403 for any token not
  * naming this exact [driverId].
+ *
+ * ## Update Vehicle (PIOS Group and Long-Distance Rides Roadmap, Stage 1)
+ *
+ * `updateVehicle` is a driver's own declaration of their car's details --
+ * requires the identical `Bearer`/`drv == driverId` check as
+ * `declareAvailability` (401/403 in the same order), since only the driver
+ * identified by the path may change their own vehicle record. Unlike
+ * `getMilestones`, this fact is public: `getDriver`/`listDrivers` already
+ * surface it unauthenticated, alongside `displayName`, for the same
+ * invite-preview reason (see [DriverResponse]'s own KDoc).
+ *
+ * ## Update Long-Distance Preference (PIOS Group and Long-Distance Rides
+ * Roadmap, Stage 3)
+ *
+ * `updateLongDistancePreference` is a driver's own declaration of
+ * willingness to take long-distance trips -- requires the identical
+ * `Bearer`/`drv == driverId` check as `updateVehicle` (401/403 in the same
+ * order), since only the driver identified by the path may change their
+ * own preference. Public on `getDriver`/`listDrivers`, the same reasoning
+ * as `updateVehicle`.
  */
 @RestController
 @RequestMapping("/v1/drivers")
@@ -100,6 +125,8 @@ class DriverController(
     private val driverAvailabilityApplicationService: DriverAvailabilityApplicationService,
     private val createDriverApplicationService: CreateDriverApplicationService,
     private val retrieveDriverMilestonesHandler: RetrieveDriverMilestonesHandler,
+    private val updateVehicleApplicationService: UpdateVehicleApplicationService,
+    private val updateLongDistancePreferenceApplicationService: UpdateLongDistancePreferenceApplicationService,
     private val sessionTokenVerifier: SessionTokenVerifier
 ) {
 
@@ -109,8 +136,7 @@ class DriverController(
             val driver = createDriverApplicationService.handle(
                 CreateDriverCommand(DriverId(request.driverId), request.displayName, request.isTest)
             )
-            ResponseEntity.status(HttpStatus.CREATED)
-                .body(DriverResponse(driver.id.value, driver.availability.name, driver.displayName, driver.createdAt?.toString(), driver.isTest))
+            ResponseEntity.status(HttpStatus.CREATED).body(driver.toResponse())
         } catch (ex: DriverAlreadyExistsException) {
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         } catch (ex: IllegalArgumentException) {
@@ -121,7 +147,7 @@ class DriverController(
     fun getDriver(@PathVariable driverId: String): ResponseEntity<DriverResponse> =
         try {
             val driver = retrieveDriverAvailabilityHandler.handle(DriverId(driverId))
-            ResponseEntity.ok(DriverResponse(driver.id.value, driver.availability.name, driver.displayName, driver.createdAt?.toString(), driver.isTest))
+            ResponseEntity.ok(driver.toResponse())
         } catch (ex: DriverNotFoundException) {
             ResponseEntity.notFound().build()
         } catch (ex: IllegalArgumentException) {
@@ -130,10 +156,69 @@ class DriverController(
 
     @GetMapping
     fun listDrivers(): ResponseEntity<List<DriverResponse>> =
-        ResponseEntity.ok(
-            retrieveDriverAvailabilityHandler.handleAll()
-                .map { DriverResponse(it.id.value, it.availability.name, it.displayName, it.createdAt?.toString(), it.isTest) }
-        )
+        ResponseEntity.ok(retrieveDriverAvailabilityHandler.handleAll().map { it.toResponse() })
+
+    @PostMapping("/{driverId}/vehicle")
+    fun updateVehicle(
+        @PathVariable driverId: String,
+        @RequestBody request: UpdateVehicleRequest,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<DriverResponse> {
+        return try {
+            val id = DriverId(driverId)
+            val verified = sessionTokenVerifier.verify(authorization)
+                ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            if (verified.drv != driverId) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+            }
+            val driver = updateVehicleApplicationService.handle(
+                UpdateVehicleCommand(id, request.make, request.model, request.color, request.plateNumber, request.seatCount)
+            )
+            ResponseEntity.ok(driver.toResponse())
+        } catch (ex: DriverNotFoundException) {
+            ResponseEntity.notFound().build()
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        }
+    }
+
+    @PostMapping("/{driverId}/long-distance-preference")
+    fun updateLongDistancePreference(
+        @PathVariable driverId: String,
+        @RequestBody request: UpdateLongDistancePreferenceRequest,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<DriverResponse> {
+        return try {
+            val id = DriverId(driverId)
+            val verified = sessionTokenVerifier.verify(authorization)
+                ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            if (verified.drv != driverId) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+            }
+            val driver = updateLongDistancePreferenceApplicationService.handle(
+                UpdateLongDistancePreferenceCommand(id, request.accepts)
+            )
+            ResponseEntity.ok(driver.toResponse())
+        } catch (ex: DriverNotFoundException) {
+            ResponseEntity.notFound().build()
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        }
+    }
+
+    private fun Driver.toResponse(): DriverResponse = DriverResponse(
+        id.value,
+        availability.name,
+        displayName,
+        createdAt?.toString(),
+        isTest,
+        vehicleMake,
+        vehicleModel,
+        vehicleColor,
+        vehiclePlateNumber,
+        vehicleSeatCount,
+        acceptsLongDistanceTrips
+    )
 
     @GetMapping("/{driverId}/milestones")
     fun getMilestones(

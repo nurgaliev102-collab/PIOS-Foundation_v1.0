@@ -5,6 +5,8 @@ import com.pios.drivermanagement.application.CreateDriverApplicationService
 import com.pios.drivermanagement.application.DriverAvailabilityApplicationService
 import com.pios.drivermanagement.application.RetrieveDriverAvailabilityHandler
 import com.pios.drivermanagement.application.RetrieveDriverMilestonesHandler
+import com.pios.drivermanagement.application.UpdateLongDistancePreferenceApplicationService
+import com.pios.drivermanagement.application.UpdateVehicleApplicationService
 import com.pios.drivermanagement.domain.Availability
 import com.pios.drivermanagement.domain.Driver
 import com.pios.drivermanagement.domain.DriverId
@@ -18,6 +20,7 @@ import javax.crypto.spec.SecretKeySpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -47,9 +50,11 @@ class DriverControllerTest {
     private val createDriverService = CreateDriverApplicationService(repository)
     private val milestonesRepository = InMemoryDriverMilestonesRepository()
     private val milestonesHandler = RetrieveDriverMilestonesHandler(milestonesRepository)
+    private val updateVehicleService = UpdateVehicleApplicationService(repository)
+    private val updateLongDistancePreferenceService = UpdateLongDistancePreferenceApplicationService(repository)
     private val secret = Base64.getEncoder().encodeToString("driver-controller-test-secret".toByteArray())
     private val sessionTokenVerifier = SessionTokenVerifier(secretBase64 = secret)
-    private val controller = DriverController(handler, availabilityService, createDriverService, milestonesHandler, sessionTokenVerifier)
+    private val controller = DriverController(handler, availabilityService, createDriverService, milestonesHandler, updateVehicleService, updateLongDistancePreferenceService, sessionTokenVerifier)
 
     // --- Token minting test helper (mirrors ProposalControllerTest's own) ---
 
@@ -263,6 +268,180 @@ class DriverControllerTest {
         )
 
         assertEquals(HttpStatus.NOT_FOUND, response.statusCode)
+    }
+
+    // --- Vehicle (PIOS Group and Long-Distance Rides Roadmap, Stage 1) ---
+
+    @Test
+    fun `vehicle -- the driver's own token succeeds, and getDriver reflects it afterwards`() {
+        controller.createDriver(CreateDriverRequest("driver-vehicle-1"))
+
+        val response = controller.updateVehicle(
+            "driver-vehicle-1",
+            UpdateVehicleRequest(make = "Lada", model = "Vesta", color = "белый", plateNumber = "А123БВ102", seatCount = 4),
+            authorization = driverToken("driver-vehicle-1")
+        )
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals("Lada", response.body?.vehicleMake)
+        assertEquals(4, response.body?.vehicleSeatCount)
+        val fetched = controller.getDriver("driver-vehicle-1")
+        assertEquals("Vesta", fetched.body?.vehicleModel)
+    }
+
+    @Test
+    fun `vehicle -- no Authorization header is rejected`() {
+        controller.createDriver(CreateDriverRequest("driver-vehicle-anon"))
+
+        val response = controller.updateVehicle("driver-vehicle-anon", UpdateVehicleRequest(make = "Lada"))
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
+    fun `vehicle -- a different driver's token is rejected -- IDOR`() {
+        controller.createDriver(CreateDriverRequest("driver-vehicle-victim"))
+
+        val response = controller.updateVehicle(
+            "driver-vehicle-victim",
+            UpdateVehicleRequest(make = "Lada"),
+            authorization = driverToken("driver-vehicle-attacker")
+        )
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+        assertNull(controller.getDriver("driver-vehicle-victim").body?.vehicleMake)
+    }
+
+    @Test
+    fun `vehicle -- a passenger-only token (drv null) is rejected`() {
+        controller.createDriver(CreateDriverRequest("driver-vehicle-passenger-token"))
+
+        val response = controller.updateVehicle(
+            "driver-vehicle-passenger-token",
+            UpdateVehicleRequest(make = "Lada"),
+            authorization = "Bearer " + issueToken(sub = "some-passenger")
+        )
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+    }
+
+    @Test
+    fun `vehicle -- an unknown driver id with a valid, matching token returns 404`() {
+        val response = controller.updateVehicle(
+            "driver-vehicle-unknown",
+            UpdateVehicleRequest(make = "Lada"),
+            authorization = driverToken("driver-vehicle-unknown")
+        )
+
+        assertEquals(HttpStatus.NOT_FOUND, response.statusCode)
+    }
+
+    @Test
+    fun `vehicle -- an invalid seat count returns 400`() {
+        controller.createDriver(CreateDriverRequest("driver-vehicle-bad-seats"))
+
+        val response = controller.updateVehicle(
+            "driver-vehicle-bad-seats",
+            UpdateVehicleRequest(seatCount = 0),
+            authorization = driverToken("driver-vehicle-bad-seats")
+        )
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
+    @Test
+    fun `vehicle -- getDriver and listDrivers surface it unauthenticated, alongside displayName`() {
+        controller.createDriver(CreateDriverRequest("driver-vehicle-public"))
+        controller.updateVehicle(
+            "driver-vehicle-public",
+            UpdateVehicleRequest(make = "Kia", plateNumber = "В456ГД102"),
+            authorization = driverToken("driver-vehicle-public")
+        )
+
+        val getResponse = controller.getDriver("driver-vehicle-public")
+        assertEquals("Kia", getResponse.body?.vehicleMake)
+        val listResponse = controller.listDrivers()
+        assertTrue(listResponse.body?.any { it.id == "driver-vehicle-public" && it.vehiclePlateNumber == "В456ГД102" } == true)
+    }
+
+    // --- Long-distance preference (PIOS Group and Long-Distance Rides Roadmap, Stage 3) ---
+
+    @Test
+    fun `long-distance preference -- the driver's own token succeeds, and getDriver reflects it afterwards`() {
+        controller.createDriver(CreateDriverRequest("driver-ld-1"))
+
+        val response = controller.updateLongDistancePreference(
+            "driver-ld-1",
+            UpdateLongDistancePreferenceRequest(accepts = true),
+            authorization = driverToken("driver-ld-1")
+        )
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals(true, response.body?.acceptsLongDistanceTrips)
+        val fetched = controller.getDriver("driver-ld-1")
+        assertEquals(true, fetched.body?.acceptsLongDistanceTrips)
+    }
+
+    @Test
+    fun `long-distance preference -- no Authorization header is rejected`() {
+        controller.createDriver(CreateDriverRequest("driver-ld-anon"))
+
+        val response = controller.updateLongDistancePreference("driver-ld-anon", UpdateLongDistancePreferenceRequest(accepts = true))
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
+    fun `long-distance preference -- a different driver's token is rejected -- IDOR`() {
+        controller.createDriver(CreateDriverRequest("driver-ld-victim"))
+
+        val response = controller.updateLongDistancePreference(
+            "driver-ld-victim",
+            UpdateLongDistancePreferenceRequest(accepts = true),
+            authorization = driverToken("driver-ld-attacker")
+        )
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+        assertEquals(false, controller.getDriver("driver-ld-victim").body?.acceptsLongDistanceTrips)
+    }
+
+    @Test
+    fun `long-distance preference -- a passenger-only token (drv null) is rejected`() {
+        controller.createDriver(CreateDriverRequest("driver-ld-passenger-token"))
+
+        val response = controller.updateLongDistancePreference(
+            "driver-ld-passenger-token",
+            UpdateLongDistancePreferenceRequest(accepts = true),
+            authorization = "Bearer " + issueToken(sub = "some-passenger")
+        )
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+    }
+
+    @Test
+    fun `long-distance preference -- an unknown driver id with a valid, matching token returns 404`() {
+        val response = controller.updateLongDistancePreference(
+            "driver-ld-unknown",
+            UpdateLongDistancePreferenceRequest(accepts = true),
+            authorization = driverToken("driver-ld-unknown")
+        )
+
+        assertEquals(HttpStatus.NOT_FOUND, response.statusCode)
+    }
+
+    @Test
+    fun `long-distance preference -- getDriver and listDrivers surface it unauthenticated, alongside vehicle`() {
+        controller.createDriver(CreateDriverRequest("driver-ld-public"))
+        controller.updateLongDistancePreference(
+            "driver-ld-public",
+            UpdateLongDistancePreferenceRequest(accepts = true),
+            authorization = driverToken("driver-ld-public")
+        )
+
+        val getResponse = controller.getDriver("driver-ld-public")
+        assertEquals(true, getResponse.body?.acceptsLongDistanceTrips)
+        val listResponse = controller.listDrivers()
+        assertTrue(listResponse.body?.any { it.id == "driver-ld-public" && it.acceptsLongDistanceTrips } == true)
     }
 
     // --- isTest (Owner Control Center test/production data separation, 2026-08-17) ---

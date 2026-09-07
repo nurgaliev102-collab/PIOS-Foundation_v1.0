@@ -31,47 +31,60 @@ class PostgreSQLDriverRepository(
     private val jdbcTemplate: JdbcTemplate
 ) : DriverRepository {
 
+    private val selectColumns =
+        "id, availability, display_name, created_at, is_test, vehicle_make, vehicle_model, vehicle_color, vehicle_plate_number, vehicle_seat_count, accepts_long_distance_trips"
+
     override fun save(driver: Driver) {
         jdbcTemplate.update(
             """
-            INSERT INTO drivers (id, availability, display_name, created_at, is_test) VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT (id) DO UPDATE SET availability = EXCLUDED.availability
+            INSERT INTO drivers (id, availability, display_name, created_at, is_test, vehicle_make, vehicle_model, vehicle_color, vehicle_plate_number, vehicle_seat_count, accepts_long_distance_trips)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET
+                availability = EXCLUDED.availability,
+                vehicle_make = EXCLUDED.vehicle_make,
+                vehicle_model = EXCLUDED.vehicle_model,
+                vehicle_color = EXCLUDED.vehicle_color,
+                vehicle_plate_number = EXCLUDED.vehicle_plate_number,
+                vehicle_seat_count = EXCLUDED.vehicle_seat_count,
+                accepts_long_distance_trips = EXCLUDED.accepts_long_distance_trips
             """.trimIndent(),
             driver.id.value,
             driver.availability.name,
             driver.displayName,
             driver.createdAt?.let { java.sql.Timestamp.from(it) },
-            driver.isTest
+            driver.isTest,
+            driver.vehicleMake,
+            driver.vehicleModel,
+            driver.vehicleColor,
+            driver.vehiclePlateNumber,
+            driver.vehicleSeatCount,
+            driver.acceptsLongDistanceTrips
         )
     }
 
     override fun findById(id: DriverId): Driver? {
         val rows = jdbcTemplate.query(
-            "SELECT id, availability, display_name, created_at, is_test FROM drivers WHERE id = ?",
-            { rs, _ ->
-                Driver(
-                    id = DriverId(rs.getString("id")),
-                    availability = Availability.valueOf(rs.getString("availability")),
-                    displayName = rs.getString("display_name"),
-                    createdAt = rs.getTimestamp("created_at")?.toInstant(),
-                    isTest = rs.getBoolean("is_test")
-                )
-            },
+            "SELECT $selectColumns FROM drivers WHERE id = ?",
+            { rs, _ -> reconstruct(rs) },
             id.value
         )
         return rows.firstOrNull()
     }
 
     override fun findAll(): List<Driver> =
-        jdbcTemplate.query(
-            "SELECT id, availability, display_name, created_at, is_test FROM drivers"
-        ) { rs, _ ->
-            Driver(
-                id = DriverId(rs.getString("id")),
-                availability = Availability.valueOf(rs.getString("availability")),
-                displayName = rs.getString("display_name"),
-                createdAt = rs.getTimestamp("created_at")?.toInstant(),
-                isTest = rs.getBoolean("is_test")
-            )
-        }
+        jdbcTemplate.query("SELECT $selectColumns FROM drivers") { rs, _ -> reconstruct(rs) }
+
+    private fun reconstruct(rs: java.sql.ResultSet): Driver = Driver(
+        id = DriverId(rs.getString("id")),
+        availability = Availability.valueOf(rs.getString("availability")),
+        displayName = rs.getString("display_name"),
+        createdAt = rs.getTimestamp("created_at")?.toInstant(),
+        isTest = rs.getBoolean("is_test"),
+        vehicleMake = rs.getString("vehicle_make"),
+        vehicleModel = rs.getString("vehicle_model"),
+        vehicleColor = rs.getString("vehicle_color"),
+        vehiclePlateNumber = rs.getString("vehicle_plate_number"),
+        vehicleSeatCount = rs.getInt("vehicle_seat_count").let { if (rs.wasNull()) null else it },
+        acceptsLongDistanceTrips = rs.getBoolean("accepts_long_distance_trips")
+    )
 }

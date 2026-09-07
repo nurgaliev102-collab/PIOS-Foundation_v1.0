@@ -3,6 +3,7 @@ package com.pios.drivermanagement.domain
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
@@ -68,5 +69,103 @@ class DriverTest {
         driver.declareAvailability(Availability.UNAVAILABLE)
 
         assertEquals(Availability.UNAVAILABLE, driver.availability)
+    }
+
+    // --- Vehicle (PIOS Group and Long-Distance Rides Roadmap, Stage 1) ---
+
+    @Test
+    fun `vehicle fields default to null when not supplied`() {
+        val driver = Driver(id = DriverId("driver-1"))
+
+        assertNull(driver.vehicleMake)
+        assertNull(driver.vehicleModel)
+        assertNull(driver.vehicleColor)
+        assertNull(driver.vehiclePlateNumber)
+        assertNull(driver.vehicleSeatCount)
+    }
+
+    @Test
+    fun `updateVehicle records every field`() {
+        val driver = Driver(id = DriverId("driver-1"))
+
+        driver.updateVehicle(make = "Lada", model = "Vesta", color = "белый", plateNumber = "А123БВ102", seatCount = 4)
+
+        assertEquals("Lada", driver.vehicleMake)
+        assertEquals("Vesta", driver.vehicleModel)
+        assertEquals("белый", driver.vehicleColor)
+        assertEquals("А123БВ102", driver.vehiclePlateNumber)
+        assertEquals(4, driver.vehicleSeatCount)
+    }
+
+    @Test
+    fun `updateVehicle trims whitespace and treats a blank string as not provided`() {
+        val driver = Driver(id = DriverId("driver-1"))
+
+        driver.updateVehicle(make = "  Lada  ", model = "   ", color = null, plateNumber = "", seatCount = null)
+
+        assertEquals("Lada", driver.vehicleMake)
+        assertNull(driver.vehicleModel)
+        assertNull(driver.vehicleColor)
+        assertNull(driver.vehiclePlateNumber)
+    }
+
+    @Test
+    fun `updateVehicle replaces the whole record, not merging with the previous one`() {
+        val driver = Driver(id = DriverId("driver-1"))
+        driver.updateVehicle(make = "Lada", model = "Vesta", color = "белый", plateNumber = "А123БВ102", seatCount = 4)
+
+        driver.updateVehicle(make = "Kia", model = null, color = null, plateNumber = null, seatCount = null)
+
+        assertEquals("Kia", driver.vehicleMake)
+        assertNull(driver.vehicleModel)
+        assertNull(driver.vehicleColor)
+        assertNull(driver.vehiclePlateNumber)
+        assertNull(driver.vehicleSeatCount)
+    }
+
+    @Test
+    fun `updateVehicle rejects a zero seat count`() {
+        val driver = Driver(id = DriverId("driver-1"))
+
+        assertFailsWith<IllegalArgumentException> {
+            driver.updateVehicle(make = null, model = null, color = null, plateNumber = null, seatCount = 0)
+        }
+    }
+
+    @Test
+    fun `updateVehicle rejects a negative seat count`() {
+        val driver = Driver(id = DriverId("driver-1"))
+
+        assertFailsWith<IllegalArgumentException> {
+            driver.updateVehicle(make = null, model = null, color = null, plateNumber = null, seatCount = -1)
+        }
+    }
+
+    // --- Long-distance preference (PIOS Group and Long-Distance Rides Roadmap, Stage 3) ---
+
+    @Test
+    fun `acceptsLongDistanceTrips defaults to false when not supplied`() {
+        val driver = Driver(id = DriverId("driver-1"))
+
+        assertEquals(false, driver.acceptsLongDistanceTrips)
+    }
+
+    @Test
+    fun `updateLongDistancePreference records the driver's declaration`() {
+        val driver = Driver(id = DriverId("driver-1"))
+
+        driver.updateLongDistancePreference(true)
+
+        assertEquals(true, driver.acceptsLongDistanceTrips)
+    }
+
+    @Test
+    fun `updateLongDistancePreference can withdraw a previous declaration`() {
+        val driver = Driver(id = DriverId("driver-1"))
+        driver.updateLongDistancePreference(true)
+
+        driver.updateLongDistancePreference(false)
+
+        assertEquals(false, driver.acceptsLongDistanceTrips)
     }
 }

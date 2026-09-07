@@ -93,4 +93,67 @@ class PostgreSQLDriverRepositoryTest {
 
         assertEquals(false, repository.findById(driver.id)?.isTest)
     }
+
+    // --- Vehicle (PIOS Group and Long-Distance Rides Roadmap, Stage 1) ---
+
+    @Test
+    fun `vehicle fields round-trip through PostgreSQL`() {
+        val driver = Driver(DriverId("postgres-driver-vehicle-1"))
+        driver.updateVehicle(make = "Lada", model = "Vesta", color = "белый", plateNumber = "А123БВ102", seatCount = 4)
+
+        repository.save(driver)
+        val loaded = repository.findById(driver.id)
+
+        assertEquals("Lada", loaded?.vehicleMake)
+        assertEquals("Vesta", loaded?.vehicleModel)
+        assertEquals("белый", loaded?.vehicleColor)
+        assertEquals("А123БВ102", loaded?.vehiclePlateNumber)
+        assertEquals(4, loaded?.vehicleSeatCount)
+    }
+
+    @Test
+    fun `a driver saved without a vehicle loads back with every vehicle field null`() {
+        val driver = Driver(DriverId("postgres-driver-vehicle-none"))
+
+        repository.save(driver)
+
+        val loaded = repository.findById(driver.id)
+        assertNull(loaded?.vehicleMake)
+        assertNull(loaded?.vehicleSeatCount)
+    }
+
+    @Test
+    fun `updating a vehicle on a second save overwrites the previously persisted one, read from a fresh repository instance`() {
+        val driver = Driver(DriverId("postgres-driver-vehicle-2"))
+        driver.updateVehicle(make = "Lada", model = "Vesta", color = null, plateNumber = null, seatCount = null)
+        repository.save(driver)
+
+        driver.updateVehicle(make = "Kia", model = "Rio", color = null, plateNumber = null, seatCount = null)
+        repository.save(driver)
+
+        val freshRepository = PostgreSQLDriverRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
+        assertEquals("Kia", freshRepository.findById(driver.id)?.vehicleMake)
+        assertEquals("Rio", freshRepository.findById(driver.id)?.vehicleModel)
+    }
+
+    // --- Long-distance preference (PIOS Group and Long-Distance Rides Roadmap, Stage 3) ---
+
+    @Test
+    fun `acceptsLongDistanceTrips round-trips through PostgreSQL`() {
+        val driver = Driver(DriverId("postgres-driver-ld-true"))
+        driver.updateLongDistancePreference(true)
+
+        repository.save(driver)
+
+        assertEquals(true, repository.findById(driver.id)?.acceptsLongDistanceTrips)
+    }
+
+    @Test
+    fun `a driver saved without a long-distance preference loads back with acceptsLongDistanceTrips false`() {
+        val driver = Driver(DriverId("postgres-driver-ld-default"))
+
+        repository.save(driver)
+
+        assertEquals(false, repository.findById(driver.id)?.acceptsLongDistanceTrips)
+    }
 }

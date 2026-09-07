@@ -5,6 +5,8 @@ import com.pios.drivermanagement.application.CreateDriverApplicationService
 import com.pios.drivermanagement.application.DriverAvailabilityApplicationService
 import com.pios.drivermanagement.application.RetrieveDriverAvailabilityHandler
 import com.pios.drivermanagement.application.RetrieveDriverMilestonesHandler
+import com.pios.drivermanagement.application.UpdateLongDistancePreferenceApplicationService
+import com.pios.drivermanagement.application.UpdateVehicleApplicationService
 import com.pios.drivermanagement.domain.Availability
 import com.pios.drivermanagement.domain.Driver
 import com.pios.drivermanagement.domain.DriverId
@@ -43,8 +45,18 @@ class DriverControllerPostgreSQLSecurityTest {
     private val createDriverService = CreateDriverApplicationService(repository)
     private val milestonesRepository = PostgreSQLDriverMilestonesRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
     private val milestonesHandler = RetrieveDriverMilestonesHandler(milestonesRepository)
+    private val updateVehicleService = UpdateVehicleApplicationService(repository)
+    private val updateLongDistancePreferenceService = UpdateLongDistancePreferenceApplicationService(repository)
     private val secret = Base64.getEncoder().encodeToString("driver-postgres-security-test-secret".toByteArray())
-    private val controller = DriverController(handler, availabilityService, createDriverService, milestonesHandler, SessionTokenVerifier(secretBase64 = secret))
+    private val controller = DriverController(
+        handler,
+        availabilityService,
+        createDriverService,
+        milestonesHandler,
+        updateVehicleService,
+        updateLongDistancePreferenceService,
+        SessionTokenVerifier(secretBase64 = secret)
+    )
 
     private val objectMapper = ObjectMapper()
 
