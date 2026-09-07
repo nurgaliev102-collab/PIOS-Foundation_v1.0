@@ -7,10 +7,10 @@ import com.pios.passengerexperience.application.SubmitOrderCommand
 import com.pios.passengerexperience.domain.PassengerReference
 import com.pios.passengerexperience.persistence.OrderManagementTestServer
 import com.pios.passengerexperience.persistence.RestClientOrderSubmissionClient
+import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.RestClient
 import kotlin.test.Test
-import kotlin.test.assertNotEquals
-import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
 
 /**
  * End-to-end verification that Passenger Experience's own application
@@ -26,6 +26,16 @@ import kotlin.test.assertTrue
  * This is a verification scenario only (ADR-027's own precedent,
  * `MvpVerticalSliceScenarioTest`): it creates no production
  * orchestration, and no class it exercises is changed by it.
+ *
+ * Order Provenance / Authentication Remediation (P0,
+ * `docs/PIOS_DATA_FLOW_CODE_AUDIT.md` Section 5): this whole chain sends no
+ * session token -- [RestClientOrderSubmissionClientTest]'s own KDoc
+ * explains why that is correct (this Tranche 2 REST path was already
+ * superseded as the live product's own order-submission caller). What this
+ * scenario now verifies end-to-end is that the same 401 rejection reaches
+ * this application layer's own collaborators intact, as a real
+ * [HttpClientErrorException.Unauthorized] thrown from
+ * [RestClientOrderSubmissionClient.submit], not a silently-created order.
  */
 class PassengerOrderSubmissionEndToEndTest {
 
@@ -39,17 +49,19 @@ class PassengerOrderSubmissionEndToEndTest {
     )
 
     @Test
-    fun `a passenger's submit order request reaches Order Management over real HTTP and a real order is created`() {
-        val orderId = coordinator.submitOrder(SubmitOrderCommand(PassengerReference("passenger-e2e-1")))
-
-        assertTrue(orderId.isNotBlank())
+    fun `a passenger's submit order request reaches Order Management over real HTTP and is rejected with 401, since this path sends no session token`() {
+        assertFailsWith<HttpClientErrorException.Unauthorized> {
+            coordinator.submitOrder(SubmitOrderCommand(PassengerReference("passenger-e2e-1")))
+        }
     }
 
     @Test
-    fun `distinct submissions create distinct orders, proving a real order is created each time`() {
-        val first = coordinator.submitOrder(SubmitOrderCommand(PassengerReference("passenger-e2e-2")))
-        val second = coordinator.submitOrder(SubmitOrderCommand(PassengerReference("passenger-e2e-3")))
-
-        assertNotEquals(first, second)
+    fun `repeated attempts are each independently rejected -- not a one-time or fluky failure`() {
+        assertFailsWith<HttpClientErrorException.Unauthorized> {
+            coordinator.submitOrder(SubmitOrderCommand(PassengerReference("passenger-e2e-2")))
+        }
+        assertFailsWith<HttpClientErrorException.Unauthorized> {
+            coordinator.submitOrder(SubmitOrderCommand(PassengerReference("passenger-e2e-3")))
+        }
     }
 }

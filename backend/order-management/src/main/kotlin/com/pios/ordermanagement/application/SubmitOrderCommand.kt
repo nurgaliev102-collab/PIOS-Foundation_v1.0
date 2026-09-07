@@ -31,6 +31,10 @@ import java.time.Instant
  * Completion and Concurrency Safety), defaulting to `false` — see
  * [com.pios.ordermanagement.domain.Order.explicitDriverIntent]'s own
  * KDoc for why this must be knowable atomically at submission time.
+ *
+ * Carries [passengerCount] (PIOS Group and Long-Distance Rides Roadmap,
+ * Stage 2), defaulting to `null` for the same reason [pickupAddress]
+ * does — see [com.pios.ordermanagement.domain.Order]'s own KDoc.
  */
 class SubmitOrderCommand(
     val origin: OrderOrigin,
@@ -39,5 +43,6 @@ class SubmitOrderCommand(
     val pickupAddress: String? = null,
     val requestedPickupAt: Instant? = null,
     val isTest: Boolean = false,
-    val explicitDriverIntent: Boolean = false
+    val explicitDriverIntent: Boolean = false,
+    val passengerCount: Int? = null
 )

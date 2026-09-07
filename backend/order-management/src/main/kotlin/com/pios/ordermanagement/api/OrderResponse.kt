@@ -32,6 +32,14 @@ package com.pios.ordermanagement.api
  * for the same reason [destination] is. This is what lets a driver, reading
  * this same list, see where to pick the passenger up, not only where they
  * are going.
+ *
+ * [passengerCount] (PIOS Group and Long-Distance Rides Roadmap, Stage 2)
+ * carries [com.pios.ordermanagement.domain.Order.passengerCount] unchanged
+ * — nullable for the same reason [destination] is. This is what lets a
+ * driver or Coordinator see, next to a driver's own declared vehicle seat
+ * count (`DriverResponse.vehicleSeatCount`), whether a car fits a group —
+ * a fact this response merely carries, never a comparison this module
+ * performs (see [com.pios.ordermanagement.domain.Order]'s own KDoc).
  */
 data class OrderResponse(
     val id: String,
@@ -42,5 +50,6 @@ data class OrderResponse(
     val createdAt: String?,
     val pickupAddress: String?,
     val requestedPickupAt: String? = null,
-    val isTest: Boolean = false
+    val isTest: Boolean = false,
+    val passengerCount: Int? = null
 )

@@ -85,6 +85,17 @@ abstract class OrderRepositoryContractTest {
     }
 
     @Test
+    fun `a saved order's passenger count survives a round trip`() {
+        val repository = createRepository()
+        val submitted = Order.submit(contractOrigin, passengerCount = 4)
+
+        repository.save(submitted.order)
+        val reloaded = repository.findById(submitted.order.id)
+
+        assertEquals(4, reloaded?.passengerCount)
+    }
+
+    @Test
     fun `a saved order's requested pickup instant survives a round trip`() {
         val repository = createRepository()
         val requestedPickupAt = java.time.Instant.parse("2026-08-25T06:30:00Z")

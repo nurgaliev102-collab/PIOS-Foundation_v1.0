@@ -328,4 +328,17 @@ class OrderQueryControllerTest {
         assertEquals("Агидель", order.pickupAddress)
         assertTrue(order.requestedPickupAt?.startsWith("2026-08-25T06:30:00") == true)
     }
+
+    // --- Passenger count (PIOS Group and Long-Distance Rides Roadmap, Stage 2) ---
+
+    @Test
+    fun `a returned order carries its own passenger count`() {
+        val submitted = Order.submit(origin = OrderOrigin(passengerAId), passengerCount = 4)
+        repository.save(submitted.order)
+
+        val response = controller.listOrders(passengerAToken, passengerAId, null)
+
+        val order = assertNotNull(response.body).first()
+        assertEquals(4, order.passengerCount)
+    }
 }

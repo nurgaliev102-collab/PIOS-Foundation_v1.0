@@ -67,7 +67,8 @@ class OrderLifecycleApplicationService(
             command.pickupAddress,
             command.requestedPickupAt,
             command.isTest,
-            command.explicitDriverIntent
+            command.explicitDriverIntent,
+            command.passengerCount
         )
         orderRepository.save(submitted.order)
         outboxRepository.save(outboxRecordFor(submitted.event))

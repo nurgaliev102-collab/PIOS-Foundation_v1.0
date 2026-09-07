@@ -161,4 +161,36 @@ class PostgreSQLOrderRepositoryTest {
 
         assertEquals(false, repository.findById(submitted.order.id)?.isTest)
     }
+
+    // --- Passenger count (PIOS Group and Long-Distance Rides Roadmap, Stage 2) ---
+
+    @Test
+    fun `an order saved to PostgreSQL with a passenger count can be loaded back with it preserved`() {
+        val submitted = Order.submit(origin, passengerCount = 4)
+
+        repository.save(submitted.order)
+        val loaded = repository.findById(submitted.order.id)
+
+        assertEquals(4, loaded?.passengerCount)
+    }
+
+    @Test
+    fun `an order saved to PostgreSQL without a passenger count loads back with a null passenger count`() {
+        val submitted = Order.submit(origin)
+
+        repository.save(submitted.order)
+        val loaded = repository.findById(submitted.order.id)
+
+        assertNull(loaded?.passengerCount)
+    }
+
+    @Test
+    fun `passenger count survives a fresh read through a brand new repository instance -- proving real persistence`() {
+        val submitted = Order.submit(origin, passengerCount = 4)
+        repository.save(submitted.order)
+
+        val freshRepository = PostgreSQLOrderRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
+
+        assertEquals(4, freshRepository.findById(submitted.order.id)?.passengerCount)
+    }
 }

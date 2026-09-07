@@ -135,6 +135,22 @@ import org.springframework.stereotype.Repository
  * reflected constructor below gains a tenth, trailing
  * `Boolean::class.java` parameter, for the identical unboxing reason
  * `is_test`'s own paragraph above already explains.
+ *
+ * PIOS Group and Long-Distance Rides Roadmap, Stage 2 adds
+ * `passenger_count`, excluded from `ON CONFLICT ... UPDATE` since
+ * [Order.passengerCount] is likewise set once, at submission, and never
+ * changes. It is [Order]'s own new last constructor parameter (declared
+ * after [Order.explicitDriverIntent]) — unlike `is_test`/`explicit_driver_intent`,
+ * this one is a **nullable** `Int?`, which, unlike ADR-066's own
+ * `PassengerReference?` lesson on Dispatch's `Proposal` (a value class
+ * wrapping `String`, which does not box since `String` already represents
+ * `null`), genuinely does box here: `Int` is a primitive with no `null`
+ * representation of its own, so a nullable `Int?` constructor parameter's
+ * real JVM type is `java.lang.Integer`, not the primitive `int`. The
+ * reflected constructor below therefore gains an eleventh, trailing
+ * `Integer::class.java` parameter — confirmed empirically against the
+ * compiled class (`javap`) before this repository's own tests were run,
+ * not merely asserted from the general rule.
  */
 @Repository
 class PostgreSQLOrderRepository(
@@ -144,7 +160,7 @@ class PostgreSQLOrderRepository(
     override fun save(order: Order) {
         jdbcTemplate.update(
             """
-            INSERT INTO orders (id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test, explicit_driver_intent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO orders (id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test, explicit_driver_intent, passenger_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status
             """.trimIndent(),
             order.id.value,
@@ -156,13 +172,14 @@ class PostgreSQLOrderRepository(
             order.pickupAddress,
             order.requestedPickupAt?.let { java.sql.Timestamp.from(it) },
             order.isTest,
-            order.explicitDriverIntent
+            order.explicitDriverIntent,
+            order.passengerCount
         )
     }
 
     override fun findById(id: OrderId): Order? {
         val rows = jdbcTemplate.query(
-            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test, explicit_driver_intent FROM orders WHERE id = ?",
+            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test, explicit_driver_intent, passenger_count FROM orders WHERE id = ?",
             { rs, _ ->
                 reconstruct(
                     id = rs.getString("id"),
@@ -174,7 +191,8 @@ class PostgreSQLOrderRepository(
                     pickupAddress = rs.getString("pickup_address"),
                     requestedPickupAt = rs.getTimestamp("requested_pickup_at"),
                     isTest = rs.getBoolean("is_test"),
-                    explicitDriverIntent = rs.getBoolean("explicit_driver_intent")
+                    explicitDriverIntent = rs.getBoolean("explicit_driver_intent"),
+                    passengerCount = rs.getInt("passenger_count").let { if (rs.wasNull()) null else it }
                 )
             },
             id.value
@@ -184,7 +202,7 @@ class PostgreSQLOrderRepository(
 
     override fun findAll(): List<Order> =
         jdbcTemplate.query(
-            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test, explicit_driver_intent FROM orders"
+            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test, explicit_driver_intent, passenger_count FROM orders"
         ) { rs, _ ->
             reconstruct(
                 id = rs.getString("id"),
@@ -196,7 +214,8 @@ class PostgreSQLOrderRepository(
                 pickupAddress = rs.getString("pickup_address"),
                 requestedPickupAt = rs.getTimestamp("requested_pickup_at"),
                 isTest = rs.getBoolean("is_test"),
-                explicitDriverIntent = rs.getBoolean("explicit_driver_intent")
+                explicitDriverIntent = rs.getBoolean("explicit_driver_intent"),
+                passengerCount = rs.getInt("passenger_count").let { if (rs.wasNull()) null else it }
             )
         }
 
@@ -210,7 +229,8 @@ class PostgreSQLOrderRepository(
         pickupAddress: String?,
         requestedPickupAt: java.sql.Timestamp?,
         isTest: Boolean,
-        explicitDriverIntent: Boolean
+        explicitDriverIntent: Boolean,
+        passengerCount: Int?
     ): Order {
         val constructor = Order::class.java.getDeclaredConstructor(
             String::class.java,
@@ -222,7 +242,8 @@ class PostgreSQLOrderRepository(
             String::class.java,
             java.time.Instant::class.java,
             Boolean::class.java,
-            Boolean::class.java
+            Boolean::class.java,
+            Integer::class.java
         )
         constructor.isAccessible = true
         return constructor.newInstance(
@@ -235,7 +256,8 @@ class PostgreSQLOrderRepository(
             pickupAddress,
             requestedPickupAt?.toInstant(),
             isTest,
-            explicitDriverIntent
+            explicitDriverIntent,
+            passengerCount
         )
     }
 }

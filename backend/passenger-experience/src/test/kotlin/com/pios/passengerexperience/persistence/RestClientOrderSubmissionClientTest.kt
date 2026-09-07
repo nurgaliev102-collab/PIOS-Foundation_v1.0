@@ -20,23 +20,33 @@ import kotlin.test.assertTrue
  * timeout, and a validation failure each surface as distinct exceptions
  * -- never silently converted into a successful result (Tranche 2:
  * Passenger Experience REST Transport, Part 7/Part 9).
+ *
+ * Order Provenance / Authentication Remediation (P0,
+ * `docs/PIOS_DATA_FLOW_CODE_AUDIT.md` Section 5): [RestClientOrderSubmissionClient]
+ * itself sends no `Authorization` header and has no notion of a session
+ * token to send one with -- this REST path was already superseded as the
+ * live product's own order-submission caller before this remediation
+ * (`frontend/src/pages/RideRequest/RideRequest.tsx` calls Order
+ * Management directly). The two tests below are updated, not deleted, to
+ * assert the new, correct behavior: an unauthenticated caller is rejected
+ * with 401, the same rule the live frontend caller must now satisfy too.
  */
 class RestClientOrderSubmissionClientTest {
 
     @Test
-    fun `submitting a valid passenger reference returns the order id Order Management created`() {
+    fun `submitting with no Authorization header is rejected with 401, since this client sends none`() {
         val client = RestClientOrderSubmissionClient(restClientFor(OrderManagementTestServer.baseUrl))
 
-        val orderId = client.submit("passenger-rest-1")
-
-        assertTrue(orderId.isNotBlank())
+        assertFailsWith<HttpClientErrorException.Unauthorized> {
+            client.submit("passenger-rest-1")
+        }
     }
 
     @Test
-    fun `submitting a blank passenger reference surfaces Order Management's 400 as a distinct exception`() {
+    fun `submitting a blank passenger reference is still rejected with 401 -- auth is checked before content validation`() {
         val client = RestClientOrderSubmissionClient(restClientFor(OrderManagementTestServer.baseUrl))
 
-        assertFailsWith<HttpClientErrorException.BadRequest> {
+        assertFailsWith<HttpClientErrorException.Unauthorized> {
             client.submit("")
         }
     }

@@ -111,6 +111,21 @@ import java.util.UUID
  * driver identity — Order Management does not own that information — only
  * the bare fact that one is already spoken for; see [OrderSubmitted]'s own
  * KDoc for how this crosses the module boundary.
+ *
+ * [passengerCount] (PIOS Group and Long-Distance Rides Roadmap, Stage 2 --
+ * group orders) is the passenger's own statement of how many people this
+ * ride is for — a plain, optional `Int?`, following [pickupAddress]'s own
+ * precedent exactly: `null` means "not specified" (today's own implicit
+ * assumption of one passenger, unchanged), never a default PIOS invents on
+ * anyone's behalf. Order Management asserts only that a *supplied* value is
+ * positive (see [submit]'s own `require`) — it does not compare this value
+ * against any driver's vehicle capacity, does not filter, rank, or match
+ * anything by it: that comparison, if it happens at all, is a human
+ * decision (the passenger choosing a driver, or a Coordinator reading both
+ * facts side by side), mirroring this codebase's own "no algorithm, human
+ * decides" convention for dispatch (ADR-002, ADR-034). Set once, at
+ * submission, and never changes for the rest of the order's lifecycle,
+ * mirroring every other optional field's own immutability.
  */
 class Order private constructor(
     val id: OrderId,
@@ -122,7 +137,8 @@ class Order private constructor(
     val pickupAddress: String?,
     val requestedPickupAt: Instant?,
     val isTest: Boolean = false,
-    val explicitDriverIntent: Boolean = false
+    val explicitDriverIntent: Boolean = false,
+    val passengerCount: Int? = null
 ) {
     var status: OrderStatus = status
         private set
@@ -181,8 +197,10 @@ class Order private constructor(
             pickupAddress: String? = null,
             requestedPickupAt: Instant? = null,
             isTest: Boolean = false,
-            explicitDriverIntent: Boolean = false
+            explicitDriverIntent: Boolean = false,
+            passengerCount: Int? = null
         ): SubmittedOrder {
+            require(passengerCount == null || passengerCount > 0) { "passengerCount must be positive" }
             val order = Order(
                 id = OrderId(UUID.randomUUID().toString()),
                 status = OrderStatus.SUBMITTED,
@@ -193,7 +211,8 @@ class Order private constructor(
                 pickupAddress = pickupAddress,
                 requestedPickupAt = requestedPickupAt,
                 isTest = isTest,
-                explicitDriverIntent = explicitDriverIntent
+                explicitDriverIntent = explicitDriverIntent,
+                passengerCount = passengerCount
             )
             return SubmittedOrder(
                 order = order,

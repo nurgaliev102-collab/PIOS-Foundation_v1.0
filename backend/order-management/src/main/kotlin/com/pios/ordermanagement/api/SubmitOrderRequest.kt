@@ -46,6 +46,13 @@ package com.pios.ordermanagement.api
  * own KDoc. Not sent by any current caller; the field exists so a future
  * caller that already knows it is about to make an explicit driver
  * choice for this order can record that fact atomically with submission.
+ *
+ * [passengerCount] (PIOS Group and Long-Distance Rides Roadmap, Stage 2)
+ * follows the same optional, defaulting-to-`null` shape — see
+ * [com.pios.ordermanagement.domain.Order]'s own KDoc. A negative or zero
+ * value surfaces as the domain's own [IllegalArgumentException], mapped
+ * by [OrderSubmissionController] to the same 400 every other invalid
+ * input on this contract already produces.
  */
 data class SubmitOrderRequest(
     val passengerReference: String,
@@ -54,5 +61,6 @@ data class SubmitOrderRequest(
     val pickupAddress: String? = null,
     val requestedPickupAt: String? = null,
     val isTest: Boolean = false,
-    val explicitDriverIntent: Boolean = false
+    val explicitDriverIntent: Boolean = false,
+    val passengerCount: Int? = null
 )

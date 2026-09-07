@@ -309,4 +309,43 @@ class OrderTest {
         assertEquals(true, submitted.order.isTest)
         assertEquals(true, submitted.event.isTest)
     }
+
+    // --- Passenger count (PIOS Group and Long-Distance Rides Roadmap, Stage 2) ---
+
+    @Test
+    fun `a submitted order carries the passenger count it was submitted with`() {
+        val submitted = Order.submit(origin, passengerCount = 4)
+
+        assertEquals(4, submitted.order.passengerCount)
+    }
+
+    @Test
+    fun `a submitted order without a passenger count has a null passenger count`() {
+        val submitted = Order.submit(origin)
+
+        assertEquals(null, submitted.order.passengerCount)
+    }
+
+    @Test
+    fun `passenger count survives completion unchanged`() {
+        val order = Order.submit(origin, passengerCount = 4).order
+
+        order.complete()
+
+        assertEquals(4, order.passengerCount)
+    }
+
+    @Test
+    fun `submitting with a zero passenger count is rejected`() {
+        assertFailsWith<IllegalArgumentException> {
+            Order.submit(origin, passengerCount = 0)
+        }
+    }
+
+    @Test
+    fun `submitting with a negative passenger count is rejected`() {
+        assertFailsWith<IllegalArgumentException> {
+            Order.submit(origin, passengerCount = -1)
+        }
+    }
 }

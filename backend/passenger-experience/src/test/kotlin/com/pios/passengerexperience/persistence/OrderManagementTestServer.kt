@@ -1,9 +1,11 @@
 package com.pios.passengerexperience.persistence
 
 import com.pios.ordermanagement.api.OrderSubmissionController
+import com.pios.ordermanagement.api.SessionTokenVerifier
 import com.pios.ordermanagement.application.OrderLifecycleApplicationService
 import com.pios.ordermanagement.application.OrderSubmissionRequestHandler
 import com.pios.ordermanagement.persistence.InMemoryOrderRepository
+import java.util.Base64
 import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory
 import org.springframework.boot.web.servlet.ServletRegistrationBean
 import org.springframework.boot.web.servlet.context.AnnotationConfigServletWebServerApplicationContext
@@ -26,6 +28,17 @@ import org.springframework.web.servlet.config.annotation.EnableWebMvc
  * tasks in parallel (`org.gradle.parallel=true`, gradle.properties) --
  * this narrower server avoids that collision entirely while still
  * exercising the genuine controller class over real HTTP.
+ *
+ * Order Provenance / Authentication Remediation (P0,
+ * `docs/PIOS_DATA_FLOW_CODE_AUDIT.md` Section 5): [OrderSubmissionController]
+ * now requires a Bearer session token (see its own KDoc). This test server
+ * wires in the same real [SessionTokenVerifier] class the production
+ * controller uses, with a fixed test-only secret -- [RestClientOrderSubmissionClient]
+ * itself sends no token (this Tranche 2 REST path was already superseded as
+ * the live product's own order-submission caller before this remediation;
+ * see [OrderSubmissionClient]'s own KDoc), so every test exercising it
+ * through this server now correctly observes a 401, not a silent bypass of
+ * the same rule the live frontend caller must satisfy.
  */
 @Configuration
 @EnableWebMvc
@@ -43,7 +56,10 @@ class TestOrderSubmissionWebConfiguration {
 
     @Bean
     fun orderSubmissionController(): OrderSubmissionController =
-        OrderSubmissionController(OrderSubmissionRequestHandler(OrderLifecycleApplicationService(InMemoryOrderRepository())))
+        OrderSubmissionController(
+            OrderSubmissionRequestHandler(OrderLifecycleApplicationService(InMemoryOrderRepository())),
+            SessionTokenVerifier(secretBase64 = Base64.getEncoder().encodeToString("order-management-test-server-secret".toByteArray()))
+        )
 }
 
 /**
