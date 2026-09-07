@@ -106,6 +106,10 @@ describe('DriverHome', () => {
 
     renderDriverHome()
 
+    // Business tabs / bottom nav (product owner request, 2026-09-07): open
+    // proposals now live under the "Работа" bottom-nav tab, not the default
+    // "Главное".
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
     await screen.findByLabelText('Через сколько вы приедете')
 
     const proposalsCall = mockedRequest.mock.calls.find(([path]) => (path as string).startsWith('/v1/proposals?driverId='))
@@ -126,6 +130,7 @@ describe('DriverHome', () => {
 
     renderDriverHome()
 
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
     await screen.findByText('Пока нет заказов. Как только клиент оформит поездку, она появится здесь.')
 
     expect(mockedRequest.mock.calls.some(([path]) => (path as string).startsWith('/v1/orders'))).toBe(false)
@@ -145,6 +150,7 @@ describe('DriverHome', () => {
 
     renderDriverHome()
 
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
     const select = await screen.findByLabelText('Через сколько вы приедете')
     expect(screen.getByRole('option', { name: '5 мин' })).toBeInTheDocument()
 
@@ -199,6 +205,7 @@ describe('DriverHome', () => {
 
     renderDriverHome()
 
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
     expect(await screen.findByText('Ожидает решения клиента')).toBeInTheDocument()
     expect(screen.getByText('Стоимость: 350')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Предложить цену' })).not.toBeInTheDocument()
@@ -219,6 +226,7 @@ describe('DriverHome', () => {
 
     renderDriverHome()
 
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
     await screen.findByRole('button', { name: 'Отклонить' })
 
     mockedRequest.mockResolvedValueOnce({
@@ -254,6 +262,7 @@ describe('DriverHome', () => {
 
     renderDriverHome()
 
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
     await screen.findByRole('button', { name: 'Прибыл' })
 
     mockedRequest.mockResolvedValueOnce({
@@ -288,6 +297,7 @@ describe('DriverHome', () => {
 
     renderDriverHome()
 
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
     await screen.findByRole('button', { name: 'Завершить поездку' })
 
     mockedRequest.mockResolvedValueOnce({
@@ -315,6 +325,7 @@ describe('DriverHome', () => {
 
     renderDriverHome()
 
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
     expect(await screen.findByText('Будет примерно через: 7 мин')).toBeInTheDocument()
   })
 
@@ -332,6 +343,7 @@ describe('DriverHome', () => {
 
     renderDriverHome()
 
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
     expect(await screen.findByText('Отменено пассажиром')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Предложить цену' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Отклонить' })).not.toBeInTheDocument()
@@ -361,6 +373,7 @@ describe('DriverHome', () => {
 
     renderDriverHome()
 
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
     expect(await screen.findByText(/Предварительный заказ/)).toBeInTheDocument()
   })
 
@@ -386,6 +399,7 @@ describe('DriverHome', () => {
 
     renderDriverHome()
 
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
     await screen.findByText('Куда: Аэропорт Уфа')
     expect(screen.queryByText(/Предварительный заказ/)).not.toBeInTheDocument()
   })
@@ -405,7 +419,11 @@ describe('DriverHome', () => {
 
     renderDriverHome()
 
-    await screen.findByText('Мой бизнес')
+    // Business tabs / bottom nav (product owner request, 2026-09-07): the
+    // growth tiles live under the "Бизнес" bottom-nav tab (its own default
+    // "Обзор" sub-tab), not the default "Главное".
+    await userEvent.click(await screen.findByRole('tab', { name: 'Бизнес' }))
+    await screen.findByText('Сегодня')
 
     const totalRow = screen.getByText('Всего пришло по вашей ссылке').closest('div')
     expect(totalRow).toHaveTextContent('3')
@@ -425,11 +443,11 @@ describe('DriverHome', () => {
 
     renderDriverHome()
 
-    await screen.findByText('Мой бизнес')
+    // Bottom nav (product owner request, 2026-09-07): "Как это работает"
+    // now lives under "Профиль", alongside the install card, not the
+    // default "Главное".
+    await userEvent.click(await screen.findByRole('tab', { name: 'Профиль' }))
     expect(screen.getByText('Как это работает')).toBeInTheDocument()
-    // Business tabs (product owner request, 2026-09-07): the install card
-    // lives under "Клиенты", not "Обзор" (the default tab).
-    await userEvent.click(screen.getByRole('tab', { name: 'Клиенты' }))
     expect(screen.getByText('PIOS всегда под рукой')).toBeInTheDocument()
     expect(screen.getByText('Добавьте PIOS на экран телефона.')).toBeInTheDocument()
   })
@@ -442,15 +460,14 @@ describe('DriverHome', () => {
     mockedRequest.mockResolvedValueOnce([])
 
     renderDriverHome()
-    await screen.findByText('Мой бизнес')
-    await userEvent.click(screen.getByRole('tab', { name: 'Клиенты' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Профиль' }))
 
     await userEvent.click(screen.getAllByRole('button', { name: 'Установить PIOS' })[0])
     expect(await screen.findByRole('button', { name: 'Закрыть' })).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: 'Закрыть' }))
     expect(screen.queryByRole('button', { name: 'Закрыть' })).not.toBeInTheDocument()
-    expect(screen.getByText('Мой бизнес')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Профиль' })).toBeInTheDocument()
   })
 
   it('chains into the install overlay once, right after this driver\'s very first onboarding completion', async () => {
@@ -477,7 +494,7 @@ describe('DriverHome', () => {
     mockedRequest.mockResolvedValueOnce([])
 
     renderDriverHome()
-    await screen.findByText('Мой бизнес')
+    await userEvent.click(await screen.findByRole('tab', { name: 'Профиль' }))
 
     await userEvent.click(screen.getByText('Как это работает'))
     expect(await screen.findByText('Как работает PIOS')).toBeInTheDocument()

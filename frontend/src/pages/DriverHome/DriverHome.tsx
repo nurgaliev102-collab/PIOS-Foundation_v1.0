@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Header } from '../../components/Header'
+import { BottomNav } from '../../components/BottomNav'
 import { DriverCard } from '../../components/DriverCard'
 import { QRCard } from '../../components/QRCard'
 import { ActionButton } from '../../components/ActionButton'
@@ -451,6 +452,11 @@ export function DriverHome() {
   // default tab; never auto-switches on its own, so a driver who has
   // navigated to another tab is never yanked back to it mid-shift.
   const [activeBusinessTab, setActiveBusinessTab] = useState<'overview' | 'clients' | 'routes'>('overview')
+  // Product owner request, 2026-09-07: the app-shell-level bottom nav
+  // (Главное/Работа/Бизнес/Профиль) from the same concept mockup. Defaults
+  // to "home" -- the leftmost tab, matching the mockup's own house icon --
+  // never auto-switches, same reasoning as [activeBusinessTab] above.
+  const [activeMainTab, setActiveMainTab] = useState<'home' | 'work' | 'business' | 'profile'>('home')
   // ADR-040 (Assignment Ride Lifecycle): keyed by orderId, one entry per
   // ACCEPTED proposal that already has an Assignment — an OPEN proposal
   // has none yet, so never appears here.
@@ -1216,18 +1222,21 @@ export function DriverHome() {
           </div>
         )}
 
-        {status === 'ready' && driver && (
+        {/* Product owner request, 2026-09-07: bottom-tab app shell
+            (Главное/Работа/Бизнес/Профиль), matching the concept mockup's
+            own bottom navigation -- see BottomNav below. Each of the four
+            top-level sections below is gated on `activeMainTab` in
+            addition to `status === 'ready' && driver`; nothing about any
+            individual section's own internal logic changed, only which
+            `activeMainTab` value makes it visible. "Работа" (Ваши заказы)
+            keeps the exact reasoning docs/PIOS_DRIVER_HOME_UX_AUDIT.md
+            Sections 4/9/11 already established for why it must never be
+            silently buried -- BottomNav's own badge on this tab is that
+            reasoning's equivalent for a tabbed shell: a driver on another
+            tab still sees that something needs a response. */}
+        {status === 'ready' && driver && activeMainTab === 'home' && (
           <>
-            {/* Sprint "My Business + Circle of Trust", Section 5/6: this
-                screen is gradually becoming "Мой бизнес", not a technical
-                dashboard -- one plain heading at the top, same weight
-                Coordinator.tsx already gives its own section titles. */}
-            <h1 className={styles.pageTitle}>Мой бизнес</h1>
-
-            <button type="button" className={styles.linkAction} onClick={() => setShowOnboarding(true)}>
-              Как это работает
-            </button>
-
+            <h1 className={styles.pageTitle}>Главное</h1>
             <AvailabilityStatus
               availability={driver.availability}
               onToggle={() => void toggleAvailability()}
@@ -1237,55 +1246,45 @@ export function DriverHome() {
           </>
         )}
 
-        {/* Information architecture fix
-            (docs/PIOS_DRIVER_HOME_UX_AUDIT.md Sections 4/9/11): "Ваши
-            заказы" -- open requests and the active ride -- now renders
-            directly under AvailabilityStatus, ahead of growth/QR/install/
-            passengers, so the one thing this screen answers ("what do I
-            do right now") is visible without scrolling past business
-            content first. This block's own conditions (independent of
-            `status`/`driver`, gated only by its own `proposalsStatus`,
-            exactly as before) are unchanged -- only its position moved,
-            per that audit's own explicit "reorder only" scope. */}
-        <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}>Ваши заказы</h2>
-        </div>
-        <p className={styles.hint}>
-          Здесь появляются заявки от ваших клиентов. Проверьте, откуда забрать пассажира и куда его отвезти, и
-          нажмите «Принять», если готовы выполнить поездку.
-        </p>
-
-        {/* UX audit Section 5/9 ("COMPLETE"): a ride used to simply vanish
-            from `visibleProposals` (still does, unchanged -- see that
-            filter's own KDoc, ADR-040's "экран освобождается") with no
-            acknowledgment at all. Minimal fix: the same transient-
-            feedback pattern this file already uses for copy/share
-            (`showFeedback`/`feedbackTimeout`), a dedicated state so it
-            can never be overwritten by an unrelated copy/share toast,
-            rendered with the already-existing `StatusMessage` (no new
-            component, no modal). Clears itself; does not delay or alter
-            the existing filter in any way. */}
-        {completionFeedback && <StatusMessage tone="success">{completionFeedback}</StatusMessage>}
-
-        {proposalsStatus === 'loading' && <Spinner label="Загружаем заказы…" />}
-        {proposalsStatus === 'error' && (
-          <div className={styles.errorBlock}>
-            <p className={styles.error} role="alert">
-              Не удалось загрузить заказы. Проверьте связь с интернетом.
+        {activeMainTab === 'work' && (
+          <>
+            <h1 className={styles.pageTitle}>Ваши заказы</h1>
+            <p className={styles.hint}>
+              Здесь появляются заявки от ваших клиентов. Проверьте, откуда забрать пассажира и куда его отвезти, и
+              нажмите «Принять», если готовы выполнить поездку.
             </p>
-            <ActionButton
-              label="Попробовать снова"
-              variant="secondary"
-              onClick={() => loadProposals(true, identity.driverId!, identity.token)}
-            />
-          </div>
-        )}
-        {proposalsStatus === 'ready' && visibleProposals.length === 0 && (
-          <p className={styles.status}>Пока нет заказов. Как только клиент оформит поездку, она появится здесь.</p>
-        )}
 
-        {proposalsStatus === 'ready' &&
-          visibleProposals.map((proposal) => {
+            {/* UX audit Section 5/9 ("COMPLETE"): a ride used to simply vanish
+                from `visibleProposals` (still does, unchanged -- see that
+                filter's own KDoc, ADR-040's "экран освобождается") with no
+                acknowledgment at all. Minimal fix: the same transient-
+                feedback pattern this file already uses for copy/share
+                (`showFeedback`/`feedbackTimeout`), a dedicated state so it
+                can never be overwritten by an unrelated copy/share toast,
+                rendered with the already-existing `StatusMessage` (no new
+                component, no modal). Clears itself; does not delay or alter
+                the existing filter in any way. */}
+            {completionFeedback && <StatusMessage tone="success">{completionFeedback}</StatusMessage>}
+
+            {proposalsStatus === 'loading' && <Spinner label="Загружаем заказы…" />}
+            {proposalsStatus === 'error' && (
+              <div className={styles.errorBlock}>
+                <p className={styles.error} role="alert">
+                  Не удалось загрузить заказы. Проверьте связь с интернетом.
+                </p>
+                <ActionButton
+                  label="Попробовать снова"
+                  variant="secondary"
+                  onClick={() => loadProposals(true, identity.driverId!, identity.token)}
+                />
+              </div>
+            )}
+            {proposalsStatus === 'ready' && visibleProposals.length === 0 && (
+              <p className={styles.status}>Пока нет заказов. Как только клиент оформит поездку, она появится здесь.</p>
+            )}
+
+            {proposalsStatus === 'ready' &&
+              visibleProposals.map((proposal) => {
             const order = orderDetails[proposal.orderId]
             const time = formatOrderTime(order?.createdAt ?? null)
             const assignment = assignments[proposal.orderId]
@@ -1412,20 +1411,23 @@ export function DriverHome() {
               </Card>
             )
           })}
+          </>
+        )}
 
-        {status === 'ready' && driver && (
+        {status === 'ready' && driver && activeMainTab === 'business' && (
           <>
+            <h1 className={styles.pageTitle}>Мой бизнес</h1>
             {/* Product owner request, 2026-09-07: "Мой бизнес" as three
                 separate screens (Обзор/Клиенты/Маршруты), not one long
                 scroll, matching the tab set from the concept mockup shown
-                earlier. Deliberately NOT wrapping "Ваши заказы" above --
-                docs/PIOS_DRIVER_HOME_UX_AUDIT.md Section 4/9/11 put open/
-                active orders directly under AvailabilityStatus specifically
-                so "what do I do right now" is never hidden behind a click;
-                folding that into a tab a driver might not be looking at
-                would reverse a deliberate safety property. The "Маршруты"
-                tab badge below still surfaces when something there needs
-                attention, so a driver on another tab is not blindsided. */}
+                earlier. This whole section is now itself one of four
+                BottomNav tabs (Главное/Работа/Бизнес/Профиль) -- "Ваши
+                заказы" lives under "Работа", not here; BottomNav's own
+                badge on that tab is what now carries the safety property
+                docs/PIOS_DRIVER_HOME_UX_AUDIT.md Section 4/9/11
+                established (a driver must never lose sight of something
+                needing a response), since the two are siblings rather
+                than one being folded into the other. */}
             <div className={styles.tabBar} role="tablist" aria-label="Мой бизнес">
               <button
                 type="button"
@@ -1578,12 +1580,6 @@ export function DriverHome() {
 
             {activeBusinessTab === 'clients' && (
             <div className={styles.tabPanel} role="tabpanel">
-              <DriverCard
-                driverCode={driver.id}
-                displayName={driver.displayName}
-                availability={driver.availability}
-                hideCode
-              />
               <QRCard
                 invitationLink={invitationProvider.linkFor(driver.id)}
                 linkTo={`/i/${driver.id}`}
@@ -1592,19 +1588,6 @@ export function DriverHome() {
                 feedback={feedback}
               />
               <p className={styles.hint}>Отправьте эту ссылку клиенту — он сможет заказать поездку прямо у вас.</p>
-
-              {/* PIOS Install v1 (Product Owner exception): a separate,
-                  additive card -- never replaces "Как это работает" above,
-                  which stays the onboarding-replay control. Hidden once PIOS
-                  is already running installed (`isStandalone()`) -- nothing
-                  to offer a driver who already has it. */}
-              {!isStandalone() && (
-                <section className={styles.installCard}>
-                  <p className={styles.growthTitle}>PIOS всегда под рукой</p>
-                  <p className={styles.installCardText}>Добавьте PIOS на экран телефона.</p>
-                  <ActionButton label="Установить PIOS" variant="secondary" onClick={() => setShowInstall(true)} />
-                </section>
-              )}
 
               {/* Sprint "My Business + Circle of Trust", journey item 8 --
                   "Мои пассажиры", not "Пассажиры PIOS" (Section 14 of the
@@ -1650,10 +1633,44 @@ export function DriverHome() {
           </>
         )}
 
-        <button type="button" className={styles.linkAction} onClick={handleLogout}>
-          Выйти
-        </button>
+        {status === 'ready' && driver && activeMainTab === 'profile' && (
+          <>
+            <h1 className={styles.pageTitle}>Профиль</h1>
+            <button type="button" className={styles.linkAction} onClick={() => setShowOnboarding(true)}>
+              Как это работает
+            </button>
+            <DriverCard
+              driverCode={driver.id}
+              displayName={driver.displayName}
+              availability={driver.availability}
+              hideCode
+            />
+            {/* PIOS Install v1 (Product Owner exception): a separate,
+                additive card -- never replaces "Как это работает" above,
+                which stays the onboarding-replay control. Hidden once PIOS
+                is already running installed (`isStandalone()`) -- nothing
+                to offer a driver who already has it. */}
+            {!isStandalone() && (
+              <section className={styles.installCard}>
+                <p className={styles.growthTitle}>PIOS всегда под рукой</p>
+                <p className={styles.installCardText}>Добавьте PIOS на экран телефона.</p>
+                <ActionButton label="Установить PIOS" variant="secondary" onClick={() => setShowInstall(true)} />
+              </section>
+            )}
+            <button type="button" className={styles.linkAction} onClick={handleLogout}>
+              Выйти
+            </button>
+          </>
+        )}
       </main>
+
+      {status === 'ready' && driver && (
+        <BottomNav
+          activeTab={activeMainTab}
+          onChange={setActiveMainTab}
+          workBadgeCount={routesNeedingAttentionCount}
+        />
+      )}
       {showOnboarding && (
         <DriverOnboarding onComplete={handleOnboardingDismiss} onSkip={handleOnboardingDismiss} />
       )}

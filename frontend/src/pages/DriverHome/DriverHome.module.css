@@ -13,7 +13,11 @@
   width: 100%;
   max-width: 480px;
   margin: 0 auto;
-  padding: 1.25rem 1rem 2rem;
+  /* Bottom padding clears the fixed BottomNav (product owner request,
+     2026-09-07) -- roughly its own height (icon + label + vertical
+     padding) plus the safe-area inset BottomNav.module.css already adds
+     for itself, so content never renders underneath it. */
+  padding: 1.25rem 1rem calc(4.25rem + env(safe-area-inset-bottom, 0px));
   box-sizing: border-box;
 }
 
