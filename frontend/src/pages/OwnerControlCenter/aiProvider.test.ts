@@ -25,6 +25,8 @@ const SAMPLE_INPUT: PilotAnalyticsInput = {
   drivers: { total: 2, available: 1, withActivity: 2 },
   reactionTime: { averageMinutes: null, medianMinutes: null, sampleSize: 0 },
   health: { modulesUp: 5, modulesTotal: 5 },
+  currentDay: null,
+  history: [],
 }
 
 describe('BackendAIProvider', () => {
