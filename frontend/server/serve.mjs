@@ -100,7 +100,7 @@ async function serveDriverPreview(req, res, driverCode) {
     // Unknown or nameless driver code: same document a real browser would
     // get anyway (PassengerLanding itself renders the "not-found" state) --
     // no crawler-specific card to build without a name.
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
     res.end(rawHtml)
     return
   }
@@ -109,7 +109,7 @@ async function serveDriverPreview(req, res, driverCode) {
     canonicalUrl: `${PUBLIC_ORIGIN}${req.url}`,
     iconUrl: `${PUBLIC_ORIGIN}/pios-icon.svg`,
   })
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
   res.end(html)
 }
 
@@ -130,6 +130,21 @@ function proxyRequest(req, res, targetBaseUrl) {
   req.pipe(proxyReq)
 }
 
+// Root cause of a whole session's worth of "old design" reports (2026-09-07):
+// this server never sent a Cache-Control header at all, leaving every
+// response -- including index.html itself -- to each browser's own
+// caching heuristics. index.html is the one file that must never be
+// cached, since it is what points a returning visitor at the current
+// build's hashed asset filenames; a mobile browser (observed: iOS Safari,
+// both as a plain tab and as an installed PWA) caching it long-term is
+// exactly what makes a real redeploy invisible to a real device while
+// every server-side check keeps passing. Only `/assets/*` (Vite's own
+// content-hashed output -- a new build always gets new filenames) is safe
+// to cache aggressively; everything else gets `no-store`.
+function cacheControlFor(pathname) {
+  return pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-store'
+}
+
 async function serveStaticOrFallback(req, res, pathname) {
   const filePath = path.join(DIST_DIR, decodeURIComponent(pathname))
   // Reject any resolved path that escapes DIST_DIR (a `..` segment) --
@@ -143,7 +158,7 @@ async function serveStaticOrFallback(req, res, pathname) {
   const hasExtension = path.extname(pathname) !== ''
   if (hasExtension && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
     const contentType = CONTENT_TYPES[path.extname(pathname)] ?? 'application/octet-stream'
-    res.writeHead(200, { 'Content-Type': contentType })
+    res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': cacheControlFor(pathname) })
     fs.createReadStream(filePath).pipe(res)
     return
   }
@@ -155,7 +170,7 @@ async function serveStaticOrFallback(req, res, pathname) {
   // No extension: an SPA client-side route (e.g. `/me`, `/coordinator`) --
   // same fallback `vite preview` already provides.
   const html = await readIndexHtml()
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
   res.end(html)
 }
 
