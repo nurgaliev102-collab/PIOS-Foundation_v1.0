@@ -25,8 +25,28 @@ import { ApiError, request } from '../../api/apiClient'
  * misreport a transient backend problem as a permanently broken link.
  */
 
+/**
+ * [vehicleMake]/[vehicleModel]/[vehicleColor]/[vehiclePlateNumber]
+ * (PIOS Group and Long-Distance Rides Roadmap, Stage 1): the same public
+ * `GET /v1/drivers/:driverId` fields `DriverHome.tsx`'s own "Моя машина"
+ * card writes -- shown here so a passenger knows which car to look for
+ * from the very first screen, the same trust-building role [driverName]
+ * already plays. `null`/absent for a driver who has not declared one yet
+ * -- not required for an invitation to resolve, unlike [driverName].
+ *
+ * [acceptsLongDistanceTrips] (PIOS Group and Long-Distance Rides Roadmap,
+ * Stage 3): the same public `GET /v1/drivers/:driverId` field
+ * `DriverHome.tsx`'s own long-distance checkbox writes -- shown here so a
+ * passenger planning a vakhta/airport/another-city trip knows to ask this
+ * driver about it, before any login exists to gate behind.
+ */
 export interface InvitationInfo {
   driverName: string
+  vehicleMake: string | null
+  vehicleModel: string | null
+  vehicleColor: string | null
+  vehiclePlateNumber: string | null
+  acceptsLongDistanceTrips: boolean
 }
 
 export type InvitationResult =
@@ -38,6 +58,11 @@ interface DriverResponse {
   id: string
   availability: string
   displayName: string | null
+  vehicleMake?: string | null
+  vehicleModel?: string | null
+  vehicleColor?: string | null
+  vehiclePlateNumber?: string | null
+  acceptsLongDistanceTrips?: boolean
 }
 
 export async function getInvitationByDriverCode(driverCode: string): Promise<InvitationResult> {
@@ -49,7 +74,17 @@ export async function getInvitationByDriverCode(driverCode: string): Promise<Inv
     if (!driver.displayName) {
       return { status: 'not-found' }
     }
-    return { status: 'found', invitation: { driverName: driver.displayName } }
+    return {
+      status: 'found',
+      invitation: {
+        driverName: driver.displayName,
+        vehicleMake: driver.vehicleMake ?? null,
+        vehicleModel: driver.vehicleModel ?? null,
+        vehicleColor: driver.vehicleColor ?? null,
+        vehiclePlateNumber: driver.vehiclePlateNumber ?? null,
+        acceptsLongDistanceTrips: driver.acceptsLongDistanceTrips ?? false,
+      },
+    }
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
       return { status: 'not-found' }

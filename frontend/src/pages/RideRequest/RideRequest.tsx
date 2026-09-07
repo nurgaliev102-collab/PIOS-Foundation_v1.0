@@ -325,6 +325,14 @@ export function RideRequest() {
   const [pickupAddressError, setPickupAddressError] = useState<string | null>(null)
   const [destination, setDestination] = useState('')
   const [destinationError, setDestinationError] = useState<string | null>(null)
+  // PIOS Group and Long-Distance Rides Roadmap, Stage 2: optional --
+  // `null` (never sent) is the existing, unchanged "one passenger, not
+  // specified" assumption, same as leaving it blank. No matching or
+  // filtering happens on this value anywhere in PIOS (see
+  // `Order.passengerCount`'s own KDoc, Order Management); it exists so a
+  // driver/Coordinator can see it next to a group's own request.
+  const [passengerCount, setPassengerCount] = useState('')
+  const [passengerCountError, setPassengerCountError] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [orderId, setOrderId] = useState<string | null>(null)
@@ -468,7 +476,14 @@ export function RideRequest() {
     const currentIdentity = identity
     let active = true
     function poll() {
-      request<ProposalStatusItem[]>(`/v1/proposals?orderId=${orderId}`, { baseUrl: DISPATCH_BASE_URL })
+      // Proposal Participant Authorization (ADR-066, P0 remediation):
+      // `GET /v1/proposals?orderId=` now requires this passenger's own
+      // Bearer token -- `currentIdentity` is already guaranteed non-null
+      // by this effect's own early return above.
+      request<ProposalStatusItem[]>(`/v1/proposals?orderId=${orderId}`, {
+        baseUrl: DISPATCH_BASE_URL,
+        headers: { Authorization: `Bearer ${currentIdentity.token}` },
+      })
         .then((items) => {
           if (!active) {
             return
@@ -620,6 +635,13 @@ export function RideRequest() {
     }
   }
 
+  function handlePassengerCountChange(value: string) {
+    setPassengerCount(value)
+    if (passengerCountError) {
+      setPassengerCountError(null)
+    }
+  }
+
   async function handleSubmit() {
     if (isSubmitting) {
       return
@@ -633,6 +655,20 @@ export function RideRequest() {
     if (!trimmedDestination) {
       setDestinationError('Пожалуйста, укажите адрес.')
       return
+    }
+    // PIOS Group and Long-Distance Rides Roadmap, Stage 2: structural
+    // validation only, same as `requestedPickupAt` below -- a value that
+    // does not parse, or is zero/negative, is rejected here in the UI;
+    // PIOS itself asserts nothing about whether it fits any given car.
+    let parsedPassengerCount: number | null = null
+    const trimmedPassengerCount = passengerCount.trim()
+    if (trimmedPassengerCount) {
+      const parsed = Number.parseInt(trimmedPassengerCount, 10)
+      if (Number.isNaN(parsed) || !Number.isFinite(parsed) || parsed < 1) {
+        setPassengerCountError('Укажите число больше нуля.')
+        return
+      }
+      parsedPassengerCount = parsed
     }
     // ADR-058 Decision item 5: validation is structural only -- a value
     // that does not parse (or is simply missing while "Заранее" is chosen)
@@ -656,13 +692,23 @@ export function RideRequest() {
     try {
       const response = await request<SubmitOrderResponse>('/v1/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // Order Provenance / Authentication Remediation (P0,
+        // `docs/PIOS_DATA_FLOW_CODE_AUDIT.md` Section 5): `POST /v1/orders`
+        // now requires this passenger's own Bearer token, whose `sub` must
+        // equal `passengerReference` below -- `identity` is already
+        // guaranteed non-null here (this component's own early
+        // `if (!identity) return ...` above); non-null assertion only
+        // because TypeScript's narrowing does not carry into this nested
+        // function's own closure, same reasoning already applied elsewhere
+        // in this file (e.g. `attemptProposal`'s own `identity!.token`).
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity!.token}` },
         body: JSON.stringify({
           passengerReference: passengerId,
           pickupAddress: trimmedPickupAddress,
           destination: trimmedDestination,
           passengerName,
           ...(requestedPickupAt ? { requestedPickupAt } : {}),
+          ...(parsedPassengerCount ? { passengerCount: parsedPassengerCount } : {}),
           // Task 17 (First Refusal Explicit Driver Intent Integration):
           // every order this screen ever creates is already tied to one
           // specific, already-known driver -- `driverCode`, taken verbatim
@@ -706,6 +752,12 @@ export function RideRequest() {
    * check only requires *some* authenticated caller for `create`, not a
    * verified relationship to this specific order or driver (see
    * `docs/PIOS_TAXI_TASK_20_PROPOSAL_SECURITY_AUDIT.md`).
+   *
+   * Proposal Participant Authorization (ADR-066, P0 remediation): the
+   * request body now also carries `passengerReference`, required to equal
+   * this same token's own `sub` (`identity.identityId`) -- Dispatch's own
+   * 403 otherwise. Sent as the same value `passengerId` already uses
+   * elsewhere on this screen (`submitOrder`'s own `passengerReference`).
    */
   async function attemptProposal(forOrderId: string) {
     setProposalStatus('proposing')
@@ -718,7 +770,7 @@ export function RideRequest() {
         // same reasoning already applied elsewhere in this codebase (e.g.
         // DriverHome.tsx's own `identity.driverId!`).
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity!.token}` },
-        body: JSON.stringify({ orderId: forOrderId, driverId: driverCode ?? '' }),
+        body: JSON.stringify({ orderId: forOrderId, driverId: driverCode ?? '', passengerReference: identity!.identityId }),
         baseUrl: DISPATCH_BASE_URL,
       })
       setProposalStatus('proposed')
@@ -1110,6 +1162,19 @@ export function RideRequest() {
                 invalid={Boolean(destinationError)}
                 aria-describedby={destinationError ? 'destination-error' : undefined}
                 onChange={(event) => handleDestinationChange(event.target.value)}
+              />
+            </FormField>
+
+            <FormField label="Сколько пассажиров (необязательно)" htmlFor="passengerCount" error={passengerCountError}>
+              <Input
+                id="passengerCount"
+                type="number"
+                min={1}
+                value={passengerCount}
+                placeholder="Например, 4"
+                invalid={Boolean(passengerCountError)}
+                aria-describedby={passengerCountError ? 'passengerCount-error' : undefined}
+                onChange={(event) => handlePassengerCountChange(event.target.value)}
               />
             </FormField>
 

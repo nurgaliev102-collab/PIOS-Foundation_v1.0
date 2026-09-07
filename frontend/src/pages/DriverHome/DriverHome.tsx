@@ -75,7 +75,16 @@ interface DriverInfo {
   id: string
   availability: 'AVAILABLE' | 'UNAVAILABLE'
   displayName: string | null
+  vehicleMake?: string | null
+  vehicleModel?: string | null
+  vehicleColor?: string | null
+  vehiclePlateNumber?: string | null
+  vehicleSeatCount?: number | null
+  acceptsLongDistanceTrips?: boolean
 }
+
+/** `POST /v1/drivers/:id/vehicle`'s own response shape (`DriverController.updateVehicle`, Driver Management, PIOS Group and Long-Distance Rides Roadmap Stage 1) -- the full driver record, same shape `GET /v1/drivers/:id` already returns. */
+type VehicleResponse = DriverInfo
 
 /**
  * `POST /v1/drivers/:id/availability`'s own response shape
@@ -173,6 +182,12 @@ interface OrderListItem {
   // instant (ISO-8601), for a pre-booked ride -- `null` means "as soon as
   // possible", same as every order before this field existed.
   requestedPickupAt: string | null
+  // PIOS Group and Long-Distance Rides Roadmap, Stage 2 -- the passenger's
+  // own optional statement of group size, rendered conditionally below
+  // exactly like `pickupAddress`. Compared against nothing automatically:
+  // this driver reads it next to their own declared vehicle seat count
+  // ("Моя машина", Profile tab) and judges it themselves.
+  passengerCount?: number | null
 }
 
 /**
@@ -268,6 +283,7 @@ function ProposalDetails({
       {order?.passengerName && <Text role="body">Пассажир: {order.passengerName}</Text>}
       {order?.pickupAddress && <Text role="body">Откуда: {order.pickupAddress}</Text>}
       {order?.destination && <Text role="body">Куда: {order.destination}</Text>}
+      {order?.passengerCount && <Text role="body">Пассажиров: {order.passengerCount}</Text>}
       {time && (
         <Text role="caption" tone="secondary">
           Заказ создан: {time}
@@ -430,6 +446,28 @@ export function DriverHome() {
   const [feedback, setFeedback] = useState<string | null>(null)
   const feedbackTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
+  // PIOS Group and Long-Distance Rides Roadmap, Stage 1: this driver's own
+  // vehicle details -- form inputs seeded from `driver` once it loads (see
+  // the seeding effect near the fetch below), never auto-reset while the
+  // driver is actively editing (mirrors [nameInput]'s own "seed once,
+  // never overwrite mid-edit" convention for this same screen).
+  const [vehicleMakeInput, setVehicleMakeInput] = useState('')
+  const [vehicleModelInput, setVehicleModelInput] = useState('')
+  const [vehicleColorInput, setVehicleColorInput] = useState('')
+  const [vehiclePlateInput, setVehiclePlateInput] = useState('')
+  const [vehicleSeatsInput, setVehicleSeatsInput] = useState('')
+  const [vehicleAction, setVehicleAction] = useState<AvailabilityActionStatus>('idle')
+  const [vehicleSeeded, setVehicleSeeded] = useState(false)
+
+  // PIOS Group and Long-Distance Rides Roadmap, Stage 3: this driver's own
+  // willingness to take long-distance trips (vakhta/airport/another city) --
+  // seeded alongside the vehicle inputs above (same effect, same "seed
+  // once" rule), but saved immediately on toggle rather than through a
+  // separate "Save" button, since it is a single flag, not a multi-field
+  // record.
+  const [longDistanceInput, setLongDistanceInput] = useState(false)
+  const [longDistanceAction, setLongDistanceAction] = useState<AvailabilityActionStatus>('idle')
+
   const [proposalsStatus, setProposalsStatus] = useState<Status>('loading')
   const [proposals, setProposals] = useState<ProposalListItem[]>([])
   const [proposalActions, setProposalActions] = useState<Record<string, ProposalActionStatus>>({})
@@ -535,6 +573,24 @@ export function DriverHome() {
       active = false
     }
   }, [driverId])
+
+  // PIOS Group and Long-Distance Rides Roadmap, Stage 1: seed the vehicle
+  // form inputs from `driver` exactly once, the moment it first loads --
+  // never again afterwards, so a driver actively editing the form is never
+  // overwritten by a background refresh (e.g. the availability poll above
+  // re-fetching `driver` for an unrelated reason).
+  useEffect(() => {
+    if (!driver || vehicleSeeded) {
+      return
+    }
+    setVehicleMakeInput(driver.vehicleMake ?? '')
+    setVehicleModelInput(driver.vehicleModel ?? '')
+    setVehicleColorInput(driver.vehicleColor ?? '')
+    setVehiclePlateInput(driver.vehiclePlateNumber ?? '')
+    setVehicleSeatsInput(driver.vehicleSeatCount != null ? String(driver.vehicleSeatCount) : '')
+    setLongDistanceInput(driver.acceptsLongDistanceTrips ?? false)
+    setVehicleSeeded(true)
+  }, [driver, vehicleSeeded])
 
   // First-pilot feedback: a driver's order list now refreshes itself —
   // polling every `PROPOSALS_POLL_INTERVAL_MS` replaces the manual
@@ -993,6 +1049,88 @@ export function DriverHome() {
       setAvailabilityAction('idle')
     } catch {
       setAvailabilityAction('error')
+    }
+  }
+
+  /**
+   * A driver's own declaration of their vehicle's details, via
+   * `POST /v1/drivers/:id/vehicle` (`DriverController.updateVehicle`, PIOS
+   * Group and Long-Distance Rides Roadmap Stage 1) -- mirrors
+   * [toggleAvailability] exactly, including its own `identity` non-null
+   * reasoning. A blank seat-count input is sent as `null` (not provided);
+   * a non-blank one is parsed as an integer client-side so an obviously
+   * invalid value ("abc") never reaches the server as a confusing 400 --
+   * the server's own positive-only rule (`Driver.updateVehicle`) still
+   * applies to whatever integer *is* sent.
+   */
+  async function handleUpdateVehicle() {
+    if (!driver || vehicleAction === 'submitting' || !identity) {
+      return
+    }
+    const trimmedSeats = vehicleSeatsInput.trim()
+    const seatCount = trimmedSeats ? Number.parseInt(trimmedSeats, 10) : null
+    if (trimmedSeats && (Number.isNaN(seatCount) || !Number.isFinite(seatCount))) {
+      setVehicleAction('error')
+      return
+    }
+    setVehicleAction('submitting')
+    try {
+      const response = await request<VehicleResponse>(`/v1/drivers/${driver.id}/vehicle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity.token}` },
+        body: JSON.stringify({
+          make: vehicleMakeInput.trim() || null,
+          model: vehicleModelInput.trim() || null,
+          color: vehicleColorInput.trim() || null,
+          plateNumber: vehiclePlateInput.trim() || null,
+          seatCount,
+        }),
+      })
+      setDriver((current) =>
+        current
+          ? {
+              ...current,
+              vehicleMake: response.vehicleMake,
+              vehicleModel: response.vehicleModel,
+              vehicleColor: response.vehicleColor,
+              vehiclePlateNumber: response.vehiclePlateNumber,
+              vehicleSeatCount: response.vehicleSeatCount,
+            }
+          : current
+      )
+      setVehicleAction('idle')
+    } catch {
+      setVehicleAction('error')
+    }
+  }
+
+  /**
+   * A driver's own declaration of willingness to take long-distance trips,
+   * via `POST /v1/drivers/:id/long-distance-preference`
+   * (`DriverController.updateLongDistancePreference`, PIOS Group and
+   * Long-Distance Rides Roadmap Stage 3) -- mirrors [toggleAvailability]
+   * exactly: saves immediately on toggle, no separate "Save" button, same
+   * `identity` non-null reasoning.
+   */
+  async function toggleLongDistancePreference() {
+    if (!driver || longDistanceAction === 'submitting' || !identity) {
+      return
+    }
+    const next = !longDistanceInput
+    setLongDistanceAction('submitting')
+    try {
+      const response = await request<DriverInfo>(`/v1/drivers/${driver.id}/long-distance-preference`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity.token}` },
+        body: JSON.stringify({ accepts: next }),
+      })
+      setLongDistanceInput(response.acceptsLongDistanceTrips ?? next)
+      setDriver((current) =>
+        current ? { ...current, acceptsLongDistanceTrips: response.acceptsLongDistanceTrips ?? next } : current
+      )
+      setLongDistanceAction('idle')
+    } catch {
+      setLongDistanceAction('error')
     }
   }
 
@@ -1645,6 +1783,74 @@ export function DriverHome() {
               availability={driver.availability}
               hideCode
             />
+            {/* PIOS Group and Long-Distance Rides Roadmap, Stage 1: a
+                minimal, owned-by-driver vehicle record -- same card shape
+                as the install card just below, so this reads as one more
+                fact about this driver's own profile, not a separate
+                widget bolted on. Public once saved (`GET /v1/drivers`
+                already shows `displayName` unauthenticated for the same
+                invite-preview reason), so a passenger can see which car
+                to look for. */}
+            <section className={styles.growthCard}>
+              <p className={styles.growthTitle}>Моя машина</p>
+              <p className={styles.hint}>Пассажир увидит это на странице приглашения — чтобы узнать вашу машину.</p>
+              <input
+                className={styles.driverCodeInput}
+                placeholder="Марка (например, Lada)"
+                value={vehicleMakeInput}
+                onChange={(event) => setVehicleMakeInput(event.target.value)}
+              />
+              <input
+                className={styles.driverCodeInput}
+                placeholder="Модель (например, Vesta)"
+                value={vehicleModelInput}
+                onChange={(event) => setVehicleModelInput(event.target.value)}
+              />
+              <input
+                className={styles.driverCodeInput}
+                placeholder="Цвет"
+                value={vehicleColorInput}
+                onChange={(event) => setVehicleColorInput(event.target.value)}
+              />
+              <input
+                className={styles.driverCodeInput}
+                placeholder="Гос. номер"
+                value={vehiclePlateInput}
+                onChange={(event) => setVehiclePlateInput(event.target.value)}
+              />
+              <input
+                className={styles.driverCodeInput}
+                type="number"
+                min={1}
+                placeholder="Количество мест"
+                value={vehicleSeatsInput}
+                onChange={(event) => setVehicleSeatsInput(event.target.value)}
+              />
+              {vehicleAction === 'error' && <p className={styles.error}>Не удалось сохранить. Попробуйте ещё раз.</p>}
+              <div className={styles.actionRow}>
+                <ActionButton
+                  label={vehicleAction === 'submitting' ? 'Сохраняем…' : 'Сохранить машину'}
+                  onClick={handleUpdateVehicle}
+                  disabled={vehicleAction === 'submitting'}
+                />
+              </div>
+              {/* PIOS Group and Long-Distance Rides Roadmap, Stage 3: a
+                  simple flag, not a new algorithm -- PIOS records this
+                  driver's own stated willingness and shows it to a
+                  passenger; no automatic matching happens anywhere. */}
+              <label className={styles.checkboxRow}>
+                <input
+                  type="checkbox"
+                  checked={longDistanceInput}
+                  disabled={longDistanceAction === 'submitting'}
+                  onChange={toggleLongDistancePreference}
+                />
+                Беру дальние поездки (вахта, аэропорт, другой город)
+              </label>
+              {longDistanceAction === 'error' && (
+                <p className={styles.error}>Не удалось сохранить. Попробуйте ещё раз.</p>
+              )}
+            </section>
             {/* PIOS Install v1 (Product Owner exception): a separate,
                 additive card -- never replaces "Как это работает" above,
                 which stays the onboarding-replay control. Hidden once PIOS

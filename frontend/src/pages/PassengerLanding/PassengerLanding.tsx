@@ -397,6 +397,24 @@ export function PassengerLanding() {
               Вас пригласили лично
             </Heading>
             <p className={styles.subtitle}>Теперь вы можете быстро заказывать поездки через личный профиль.</p>
+            {/* PIOS Group and Long-Distance Rides Roadmap, Stage 1: shown
+                only once the driver has declared a make/model -- a driver
+                with no vehicle on file simply shows nothing here, the same
+                graceful-degradation convention this screen already applies
+                to every other optional fact. */}
+            {(invitation.vehicleMake || invitation.vehicleModel) && (
+              <p className={styles.subtitle}>
+                Машина: {[invitation.vehicleMake, invitation.vehicleModel].filter(Boolean).join(' ')}
+                {invitation.vehicleColor ? `, ${invitation.vehicleColor}` : ''}
+                {invitation.vehiclePlateNumber ? ` · ${invitation.vehiclePlateNumber}` : ''}
+              </p>
+            )}
+            {/* PIOS Group and Long-Distance Rides Roadmap, Stage 3: shown
+                only when this driver has opted in -- a plain fact, no
+                automatic matching against anything the passenger typed. */}
+            {invitation.acceptsLongDistanceTrips && (
+              <p className={styles.subtitle}>Берёт дальние поездки (вахта, аэропорт, другой город)</p>
+            )}
             <button type="button" className={styles.linkAction} onClick={() => setShowOnboarding(true)}>
               Как это работает
             </button>

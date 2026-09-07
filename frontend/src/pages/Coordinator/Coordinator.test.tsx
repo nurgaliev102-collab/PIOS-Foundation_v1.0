@@ -10,9 +10,11 @@ import { storeOwnerCredential, getStoredOwnerCredential } from '../OwnerControlC
 // Access) restores it behind the same owner `Authorization: Basic`
 // credential `OwnerControlCenter.tsx` already uses. These tests cover the
 // gate itself (no credential -> no authorized fetch at all) and that the
-// credential lands only where ADR-060 actually requires it -- `GET
-// /v1/orders` -- and not on the two endpoints ADR-060 deliberately left
-// open (`GET /v1/drivers`, `GET /v1/proposals?orderId=`).
+// credential lands only where ADR-060 actually required it -- `GET
+// /v1/orders` -- and not on the one endpoint ADR-060 deliberately left open
+// (`GET /v1/drivers`). `GET /v1/proposals?orderId=` was the second such
+// endpoint until ADR-066 (Proposal Participant Authorization, P0
+// remediation) closed it too -- see the test below, updated to match.
 vi.mock('../../api/apiClient', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/apiClient')>()
   return {
@@ -48,7 +50,7 @@ describe('Coordinator', () => {
     expect(mockedRequest).not.toHaveBeenCalled()
   })
 
-  it('sends the owner Basic credential on GET /v1/orders, no header on GET /v1/drivers, and no header on the per-order GET /v1/proposals?orderId=', async () => {
+  it('sends the owner Basic credential on GET /v1/orders and on the per-order GET /v1/proposals?orderId=, no header on GET /v1/drivers', async () => {
     seedOwnerCredential()
     mockedRequest.mockResolvedValueOnce([
       { id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван', registeredAt: null },
@@ -82,7 +84,10 @@ describe('Coordinator', () => {
     const proposalsCall = mockedRequest.mock.calls.find(([path]) => (path as string).startsWith('/v1/proposals?orderId='))
     expect(proposalsCall).toBeDefined()
     expect(proposalsCall?.[0]).toBe('/v1/proposals?orderId=order-1')
-    expect((proposalsCall?.[1] as RequestInit | undefined)?.headers).toBeUndefined()
+    // ADR-066 (Proposal Participant Authorization, P0 remediation): this
+    // endpoint now requires a credential too -- the owner credential this
+    // screen already holds, same as GET /v1/orders above.
+    expect((proposalsCall?.[1] as RequestInit).headers).toMatchObject({ Authorization: EXPECTED_BASIC_HEADER })
   })
 
   it('renders driver, proposal status, price and ETA for an order once a proposal has been accepted, and the predzakaz badge for a scheduled order', async () => {
@@ -216,5 +221,49 @@ describe('Coordinator', () => {
     expect(assignCall).toBeDefined()
     const init = assignCall?.[1] as RequestInit
     expect((init.headers as Record<string, string>).Authorization).toBe(EXPECTED_BASIC_HEADER)
+    const body = JSON.parse(init.body as string)
+    expect(body.passengerReference).toBe('passenger-1')
+  })
+
+  // --- ADR-066 (Proposal Participant Authorization, P0 remediation -- [PO DECISION 2]) ---
+
+  it('sends the owner Basic credential on GET /v1/proposals/:id when checking status', async () => {
+    seedOwnerCredential()
+    mockedRequest.mockResolvedValueOnce([
+      { id: 'driver-1', availability: 'AVAILABLE', displayName: null, registeredAt: null },
+    ]) // GET /v1/drivers
+    mockedRequest.mockResolvedValueOnce([
+      {
+        id: 'order-1',
+        status: 'SUBMITTED',
+        origin: 'passenger-1',
+        destination: 'Аэропорт Уфа',
+        passengerName: 'Аня',
+        createdAt: '2026-08-16T09:00:00Z',
+        pickupAddress: 'Агидель',
+        requestedPickupAt: null,
+      },
+    ]) // GET /v1/orders
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals?orderId=order-1 -- no proposal yet
+
+    render(<Coordinator />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /Заказ №/ }))
+    await userEvent.click(screen.getByRole('button', { name: /driver-1/ }))
+
+    mockedRequest.mockResolvedValueOnce({ proposalId: 'p-new', orderId: 'order-1', driverId: 'driver-1', status: 'OPEN' })
+    mockedRequest.mockResolvedValueOnce([]) // refreshProposalsForOrder's own GET /v1/proposals?orderId=order-1
+    await userEvent.click(screen.getByRole('button', { name: 'Отправить' }))
+    await vi.waitUntil(() => mockedRequest.mock.calls.some(([path]) => path === '/v1/proposals'))
+
+    mockedRequest.mockResolvedValueOnce({ proposalId: 'p-new', orderId: 'order-1', driverId: 'driver-1', status: 'OPEN' })
+    mockedRequest.mockResolvedValueOnce([]) // refreshProposalsForOrder's own GET /v1/proposals?orderId=order-1
+    await userEvent.click(screen.getByRole('button', { name: 'Проверить' }))
+
+    const checkCall = await vi.waitUntil(() =>
+      mockedRequest.mock.calls.find(([path]) => (path as string).startsWith('/v1/proposals/p-new'))
+    )
+    expect(checkCall).toBeDefined()
+    expect((checkCall?.[1] as RequestInit).headers).toMatchObject({ Authorization: EXPECTED_BASIC_HEADER })
   })
 })

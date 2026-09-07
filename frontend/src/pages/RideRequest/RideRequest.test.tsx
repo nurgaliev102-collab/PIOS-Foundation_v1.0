@@ -163,6 +163,102 @@ describe('RideRequest', () => {
     expect(body.explicitDriverIntent).toBe(true)
   })
 
+  // --- Passenger count (PIOS Group and Long-Distance Rides Roadmap, Stage 2) ---
+
+  it('sends passengerCount on POST /v1/orders when the passenger enters one', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+    await userEvent.type(screen.getByLabelText('Сколько пассажиров (необязательно)'), '4')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-group' }) // POST /v1/orders
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
+    mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
+
+    const submitCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/orders')
+    const body = JSON.parse((submitCall?.[1] as RequestInit).body as string)
+    expect(body.passengerCount).toBe(4)
+  })
+
+  it('omits passengerCount on POST /v1/orders when left blank -- regression for the existing contract', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-solo' }) // POST /v1/orders
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
+    mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
+
+    const submitCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/orders')
+    const body = JSON.parse((submitCall?.[1] as RequestInit).body as string)
+    expect(body.passengerCount).toBeUndefined()
+  })
+
+  it('rejects a zero passenger count before ever calling the backend', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+    await userEvent.type(screen.getByLabelText('Сколько пассажиров (необязательно)'), '0')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('Укажите число больше нуля.')).toBeInTheDocument()
+    expect(mockedRequest.mock.calls.some(([path]) => path === '/v1/orders')).toBe(false)
+  })
+
+  // --- Order provenance / authentication (P0, docs/PIOS_DATA_FLOW_CODE_AUDIT.md Section 5) ---
+
+  it('sends this passenger\'s own Bearer token on POST /v1/orders, since that endpoint now requires authentication', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-provenance' }) // POST /v1/orders
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
+    mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
+
+    const submitCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/orders')
+    expect(submitCall).toBeDefined()
+    const headers = (submitCall?.[1] as RequestInit).headers as Record<string, string>
+    expect(headers.Authorization).toBe(`Bearer ${TEST_IDENTITY.token}`)
+  })
+
   // --- Proposal API security (Task 21: Proposal API Security Remediation) ---
 
   it('sends this passenger\'s own Bearer token on POST /v1/proposals, since that endpoint now requires authentication', async () => {
@@ -188,6 +284,32 @@ describe('RideRequest', () => {
     expect(proposalCall).toBeDefined()
     const headers = (proposalCall?.[1] as RequestInit).headers as Record<string, string>
     expect(headers.Authorization).toBe(`Bearer ${TEST_IDENTITY.token}`)
+  })
+
+  // --- Proposal Participant Authorization (ADR-066, P0 remediation) ---
+
+  it('sends passengerReference matching this passenger\'s own identity on POST /v1/proposals', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-passenger-ref' }) // POST /v1/orders
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
+    mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
+
+    const proposalCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/proposals')
+    const body = JSON.parse((proposalCall?.[1] as RequestInit).body as string)
+    expect(body.passengerReference).toBe(TEST_IDENTITY.identityId)
   })
 
   // --- Cancellation (P0-2 Tier 1, docs/SPRINT_PILOT_BLOCKERS.md; ADR-053) ---

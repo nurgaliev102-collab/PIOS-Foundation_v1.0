@@ -346,6 +346,14 @@
   color: var(--pios-color-text-primary);
 }
 
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--pios-color-text-primary);
+}
+
 .error {
   margin: 0;
   font-size: 0.8125rem;

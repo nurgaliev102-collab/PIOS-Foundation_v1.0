@@ -71,6 +71,57 @@ describe('PassengerLanding', () => {
     expect(await screen.findByText(/Заказ получает Иван/)).toBeInTheDocument()
   })
 
+  // --- Vehicle (PIOS Group and Long-Distance Rides Roadmap, Stage 1) ---
+
+  it('shows the driver\'s vehicle when they have declared one', async () => {
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-1',
+      availability: 'AVAILABLE',
+      displayName: 'Иван',
+      vehicleMake: 'Lada',
+      vehicleModel: 'Vesta',
+      vehicleColor: 'белый',
+      vehiclePlateNumber: 'А123БВ102',
+    })
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('Машина: Lada Vesta, белый · А123БВ102')).toBeInTheDocument()
+  })
+
+  it('shows no vehicle line when the driver has not declared one', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText(/Вас пригласили лично/)).toBeInTheDocument()
+    expect(screen.queryByText(/Машина:/)).not.toBeInTheDocument()
+  })
+
+  // --- Long-distance preference (PIOS Group and Long-Distance Rides Roadmap, Stage 3) ---
+
+  it('shows the long-distance line when the driver has opted in', async () => {
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-1',
+      availability: 'AVAILABLE',
+      displayName: 'Иван',
+      acceptsLongDistanceTrips: true,
+    })
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('Берёт дальние поездки (вахта, аэропорт, другой город)')).toBeInTheDocument()
+  })
+
+  it('shows no long-distance line when the driver has not opted in', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText(/Вас пригласили лично/)).toBeInTheDocument()
+    expect(screen.queryByText(/Берёт дальние поездки/)).not.toBeInTheDocument()
+  })
+
   // --- Registration and login (ADR-055, "Final Pre-Pilot Sprint") ---
 
   it('lets a first-time visitor create a real account and lands on the confirmed screen', async () => {

@@ -92,6 +92,68 @@ describe('DriverHome', () => {
     })
   })
 
+  // --- Vehicle (PIOS Group and Long-Distance Rides Roadmap, Stage 1) ---
+
+  it('sends this driver\'s own Bearer token and the entered fields on POST /v1/drivers/:id/vehicle', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderDriverHome()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Профиль' }))
+
+    await userEvent.type(await screen.findByPlaceholderText('Марка (например, Lada)'), 'Lada')
+    await userEvent.type(screen.getByPlaceholderText('Модель (например, Vesta)'), 'Vesta')
+    await userEvent.type(screen.getByPlaceholderText('Количество мест'), '4')
+
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-1',
+      availability: 'AVAILABLE',
+      displayName: 'Иван',
+      vehicleMake: 'Lada',
+      vehicleModel: 'Vesta',
+      vehicleSeatCount: 4,
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить машину' }))
+
+    const vehicleCall = await vi.waitUntil(() =>
+      mockedRequest.mock.calls.find(([path]) => path === '/v1/drivers/driver-1/vehicle')
+    )
+    expect(vehicleCall).toBeDefined()
+    const init = vehicleCall?.[1] as RequestInit
+    expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TEST_IDENTITY.token}`)
+    const body = JSON.parse(init.body as string)
+    expect(body.make).toBe('Lada')
+    expect(body.model).toBe('Vesta')
+    expect(body.seatCount).toBe(4)
+  })
+
+  // --- Long-distance preference (PIOS Group and Long-Distance Rides Roadmap, Stage 3) ---
+
+  it('sends this driver\'s own Bearer token and the toggled value on POST /v1/drivers/:id/long-distance-preference', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван', acceptsLongDistanceTrips: false })
+
+    renderDriverHome()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Профиль' }))
+
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-1',
+      availability: 'AVAILABLE',
+      displayName: 'Иван',
+      acceptsLongDistanceTrips: true,
+    })
+    await userEvent.click(await screen.findByLabelText('Беру дальние поездки (вахта, аэропорт, другой город)'))
+
+    const call = await vi.waitUntil(() =>
+      mockedRequest.mock.calls.find(([path]) => path === '/v1/drivers/driver-1/long-distance-preference')
+    )
+    expect(call).toBeDefined()
+    const init = call?.[1] as RequestInit
+    expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TEST_IDENTITY.token}`)
+    const body = JSON.parse(init.body as string)
+    expect(body.accepts).toBe(true)
+  })
+
   // --- Order query authorization (ADR-060) ---
 
   it('sends this driver\'s own Bearer token on both /v1/proposals?driverId= and the chained /v1/orders?ids=', async () => {

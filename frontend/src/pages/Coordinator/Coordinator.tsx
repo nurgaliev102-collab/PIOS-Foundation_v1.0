@@ -137,8 +137,21 @@ const PROPOSAL_STATUS_LABEL: Record<string, string> = {
  * one driver, `POST /v1/proposals` proposes the driver, and the driver's
  * own acceptance (through `DriverHome`) is what creates the Assignment.
  * Neither this call nor "Check status" (`GET /v1/proposals/:id`) was ever
- * gated by ADR-060, and neither gains a credential here (ADR-061
- * Decision 4) -- only the page itself is gated, not these two actions.
+ * gated by ADR-060, and neither gained a credential at the time (ADR-061
+ * Decision 4) -- only the page itself was gated, not these two actions.
+ *
+ * ADR-066 (Proposal Participant Authorization, P0 remediation) changes
+ * both. `POST /v1/proposals` now also requires `passengerReference` in the
+ * body (the selected order's own `origin` -- already held from
+ * `fetchOrders(credential)`, ADR-060 Decision 2: `Order.origin` is the
+ * authenticated passenger's own identity). "Check status"
+ * (`GET /v1/proposals/:id`) is a sixth surface ADR-066 found beyond the
+ * five Task 20/21 named, and — per [PO DECISION 2], accepted — is closed
+ * in the same change: this screen already holds the owner credential
+ * (ADR-061's own gate), so `handleCheckStatus` now sends it too, superseding
+ * ADR-061 Decision 4's own "gains no credential" statement for this one
+ * action (its `POST /v1/proposals` half was already superseded in fact by
+ * Task 21, per ADR-066's own traceability).
  *
  * Deliberately minimal, per every sprint's own scope so far: no filtering,
  * no search, no sorting, no auto-refresh/WebSocket. It still does not let
@@ -201,7 +214,7 @@ export function Coordinator() {
         setOrdersStatus('ready')
 
         const proposalLists = await Promise.all(
-          result.map((order) => fetchProposalsForOrder(order.id).catch(() => [] as ProposalListItem[]))
+          result.map((order) => fetchProposalsForOrder(order.id, activeCredential).catch(() => [] as ProposalListItem[]))
         )
         if (!active) {
           return
@@ -235,7 +248,10 @@ export function Coordinator() {
   }
 
   async function refreshProposalsForOrder(orderId: string) {
-    const result = await fetchProposalsForOrder(orderId).catch(() => null)
+    if (!credential) {
+      return
+    }
+    const result = await fetchProposalsForOrder(orderId, credential).catch(() => null)
     if (result) {
       setProposalsByOrder((current) => ({ ...current, [orderId]: result }))
     }
@@ -250,8 +266,19 @@ export function Coordinator() {
   // Dispatch's own new check accepts for this endpoint, mirroring
   // OwnerControlCenter/todayData.ts's own toBasicAuthorizationHeader use
   // for this screen's other owner-gated calls.
+  //
+  // ADR-066 (Proposal Participant Authorization): the body now also
+  // carries passengerReference -- the selected order's own origin, already
+  // held in `orders` from fetchOrders(credential); the owner credential
+  // has no sub of its own to compare it against (ADR-044 Decision 6), so
+  // Dispatch trusts this value as-is on this branch, exactly as it already
+  // trusts the owner for lapseProposal.
   async function handleAssign() {
     if (assignStatus === 'submitting' || !selectedOrderId || !selectedDriverId || !credential) {
+      return
+    }
+    const selectedOrder = orders.find((order) => order.id === selectedOrderId)
+    if (!selectedOrder) {
       return
     }
     setAssignStatus('submitting')
@@ -260,7 +287,11 @@ export function Coordinator() {
       const response = await request<ProposalResponse>('/v1/proposals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: toBasicAuthorizationHeader(credential) },
-        body: JSON.stringify({ orderId: selectedOrderId, driverId: selectedDriverId }),
+        body: JSON.stringify({
+          orderId: selectedOrderId,
+          driverId: selectedDriverId,
+          passengerReference: selectedOrder.origin,
+        }),
         baseUrl: DISPATCH_BASE_URL,
       })
       setLastProposal(response)
@@ -279,13 +310,19 @@ export function Coordinator() {
     }
   }
 
+  // ADR-066 (Proposal Participant Authorization -- [PO DECISION 2],
+  // accepted): GET /v1/proposals/:id now requires a credential too --
+  // the owner credential this screen already holds and already gates
+  // itself behind (credential is guaranteed non-null here, same guarantee
+  // handleAssign already relies on).
   async function handleCheckStatus() {
-    if (!lastProposal || checkStatus === 'checking') {
+    if (!lastProposal || checkStatus === 'checking' || !credential) {
       return
     }
     setCheckStatus('checking')
     try {
       const response = await request<ProposalResponse>(`/v1/proposals/${lastProposal.proposalId}`, {
+        headers: { Authorization: toBasicAuthorizationHeader(credential) },
         baseUrl: DISPATCH_BASE_URL,
       })
       setLastProposal(response)
@@ -363,11 +400,17 @@ export function Coordinator() {
                   <span className={styles.orderId}>Заказ №{shortOrderCode(order.id)}</span>
                   <span className={styles.orderStatus}>{ORDER_STATUS_LABEL[order.status] ?? order.status}</span>
                 </div>
-                {(order.passengerName || order.pickupAddress || order.destination) && (
+                {(order.passengerName || order.pickupAddress || order.destination || order.passengerCount) && (
                   <div className={styles.orderDetails}>
                     {order.passengerName && <span>Пассажир: {order.passengerName}</span>}
                     {order.pickupAddress && <span>Откуда: {order.pickupAddress}</span>}
                     {order.destination && <span>Куда: {order.destination}</span>}
+                    {/* PIOS Group and Long-Distance Rides Roadmap, Stage 2:
+                        surfaced so a coordinator can judge, alongside a
+                        driver's own declared vehicle seat count, whether a
+                        car fits this group -- a human comparison, never one
+                        this screen performs itself. */}
+                    {order.passengerCount && <span>Пассажиров: {order.passengerCount}</span>}
                     {/* ADR-058 (Scheduled Pickup Time), surfaced here for the
                         first time by ADR-061: a coordinator proposing a
                         driver "right now" needs to know this order is a

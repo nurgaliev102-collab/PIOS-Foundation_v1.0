@@ -27,6 +27,12 @@ import { toBasicAuthorizationHeader, type OwnerCredential } from './ownerCredent
  * `GET /v1/assignments?orderId=...` are not gated by that ADR and keep
  * sending no credential, unchanged.
  *
+ * ADR-066 (Proposal Participant Authorization): `GET /v1/proposals?orderId=...`
+ * ([fetchProposalsForOrder]) now requires a credential too — the one gap
+ * ADR-060 Decision 4 left open, closed once `Proposal` gained a
+ * `passengerReference` to authorize against. Same owner credential, same
+ * pattern as [fetchProposalsForDriver].
+ *
  * ADR-061 (Coordinator Owner-Gated Access), Decision 2: the individual fetch
  * functions below are exported so `Coordinator.tsx` can reuse the same
  * authorized reads rather than re-implementing its own copy of the
@@ -56,6 +62,8 @@ export interface OrderListItem {
   pickupAddress: string | null
   requestedPickupAt: string | null
   isTest: boolean
+  /** PIOS Group and Long-Distance Rides Roadmap, Stage 2 -- `Order.passengerCount`, unchanged. */
+  passengerCount?: number | null
 }
 
 export interface ProposalListItem {
@@ -128,12 +136,16 @@ export function fetchProposalsForDriver(driverId: string, credential: OwnerCrede
 }
 
 /**
- * `GET /v1/proposals?orderId=...` — left unauthenticated by ADR-060
- * Decision 4 (an enumeration sink, not a source: the caller must already
- * hold the order id). No credential needed or sent.
+ * `GET /v1/proposals?orderId=...` (ADR-066, Proposal Participant
+ * Authorization -- P0 remediation). Previously unauthenticated (ADR-060
+ * Decision 4 left it open as "an enumeration sink, not a source"); that
+ * decision's own named blocker (a `passengerReference` on `Proposal`) is
+ * closed by ADR-066, so this call now sends the owner credential, mirroring
+ * [fetchProposalsForOrder]'s own sibling [fetchProposalsForDriver] exactly.
  */
-export function fetchProposalsForOrder(orderId: string): Promise<ProposalListItem[]> {
+export function fetchProposalsForOrder(orderId: string, credential: OwnerCredential): Promise<ProposalListItem[]> {
   return request<ProposalListItem[]>(`/v1/proposals?orderId=${encodeURIComponent(orderId)}`, {
+    headers: { Authorization: toBasicAuthorizationHeader(credential) },
     baseUrl: DISPATCH_BASE_URL,
   })
 }
