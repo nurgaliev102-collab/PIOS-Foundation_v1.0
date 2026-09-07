@@ -62,8 +62,11 @@ export default defineConfig({
         name: 'PIOS',
         short_name: 'PIOS',
         description: 'PIOS — Next Generation Taxi Platform',
-        theme_color: '#111827',
-        background_color: '#ffffff',
+        // Matches tokens.css's own --pios-color-accent / --pios-color-background
+        // for the dark "Премиум графит" palette (2026-09-07) -- the splash
+        // screen a PWA install shows before the app itself has painted.
+        theme_color: '#d97a2f',
+        background_color: '#1c1712',
         display: 'standalone',
         start_url: '/',
         icons: [

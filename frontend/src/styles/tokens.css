@@ -8,6 +8,15 @@
  * instruction to stop deferring and finish it). Every value below is a
  * deliberate choice, not a de-facto audit of pre-existing CSS.
  *
+ * VISUAL IDENTITY DECISION, 2026-09-07 (product owner, choosing the
+ * "Премиум графит" option from the three-palette "Мой бизнес" concept
+ * mockup shown earlier this session): the light warm palette above is
+ * superseded site-wide by a dark warm one below -- same accent hue family
+ * (amber/burnt-orange, brightened for contrast on a dark ground), same
+ * "warm, not cold-slate" reasoning, just inverted surfaces. This is a
+ * direct value swap, not a light/dark toggle -- PIOS ships one committed
+ * theme at a time, exactly as the 2026-09-05 decision did.
+ *
  * The palette is warm rather than the cold slate/blue every generic
  * dashboard defaults to — PIOS is about a personal relationship between a
  * driver and their own client, not a cold enterprise console — and the
@@ -15,9 +24,10 @@
  * BlaBlaCar's own brand color (docs/PIOS_PRODUCT_VISION.md §2 explicitly
  * names it as a reference point not to be confused with), and the brief's
  * own anti-pattern list (Section 11) already flagged this exact blue as
- * generic-SaaS. Deliberately not black (Uber), lime (Bolt), or yellow
- * (Yandex Go) either — every one of the four products the product owner
- * named as "what we are not."
+ * generic-SaaS. Deliberately not a flat near-black + neon accent either
+ * (the generic "AI dark mode" default) -- the ground is a warm dark
+ * graphite/espresso, not desaturated black, so it still reads as PIOS's
+ * own warmth rather than a generic dark theme bolted onto any product.
  *
  * Consumed by CSS Modules as `var(--pios-*)`. Nothing here is a component
  * style — components read these tokens, never hardcode a value of their
@@ -26,51 +36,57 @@
 
 :root {
   /* ---- Color: surfaces & text --------------------------------------
-     Warm paper/ink, not cold slate -- the one change that, by itself,
-     stops every screen reading as a generic admin dashboard. */
-  --pios-color-background: #faf7f2;
-  --pios-color-surface: #ffffff;
+     Warm dark graphite/espresso, not flat near-black -- the same "not a
+     generic admin dashboard" reasoning as the light palette, inverted. */
+  --pios-color-background: #1c1712;
+  --pios-color-surface: #272019;
   /* Elevation is expressed via --pios-shadow-raised (below), not a
      distinct surface color, per PIOS_DESIGN_SYSTEM.md Section 3 (Color →
      surface-elevated: "elevation via shadow, not a separate color"). */
-  --pios-color-text-primary: #211d16;
-  --pios-color-text-secondary: #6b6155;
-  --pios-color-text-muted: #9c9284;
-  --pios-color-border: #e7e0d3;
-  --pios-color-border-strong: #d2c7b4;
+  --pios-color-text-primary: #f6f1e7;
+  --pios-color-text-secondary: #b8ab97;
+  --pios-color-text-muted: #8a7d6b;
+  --pios-color-border: #3a3226;
+  --pios-color-border-strong: #4d4332;
 
   /* ---- Color: accent ---------------------------------------------------
      Warm amber/burnt-orange -- a taxi's own roof light, not a repurposed
      "primary blue" from a generic component library. One accent, used
-     flatly (no gradient, no glass), exactly as brief Section 4 asks. ---- */
-  --pios-color-accent: #b5540b;
-  --pios-color-accent-hover: #98450a;
-  --pios-color-accent-pressed: #98450a;
-  --pios-color-focus-ring: #b5540b;
+     flatly (no gradient, no glass), exactly as brief Section 4 asks.
+     Brightened relative to the light palette's accent so it still passes
+     contrast against the dark ground above. ---- */
+  --pios-color-accent: #d97a2f;
+  --pios-color-accent-hover: #c96a22;
+  --pios-color-accent-pressed: #b85f1d;
+  --pios-color-focus-ring: #d97a2f;
 
   /* ---- Color: semantic status ----------------------------------------
      Same warm bias as the neutrals above, each hue still fully distinct
-     from the accent and from each other. */
-  --pios-color-success: #3f7d4c;
-  --pios-color-success-surface: #eef6ef;
-  --pios-color-warning: #8a6d1d;
-  --pios-color-warning-surface: #f8f2e0;
-  --pios-color-error: #b23a2e;
-  --pios-color-error-surface: #fbeeec;
+     from the accent and from each other -- brightened for the dark
+     ground, surfaces darkened instead of the light palette's near-white
+     tints. */
+  --pios-color-success: #6fae7a;
+  --pios-color-success-surface: #26332a;
+  --pios-color-warning: #cba053;
+  --pios-color-warning-surface: #362d1c;
+  --pios-color-error: #d97267;
+  --pios-color-error-surface: #3a2420;
   /* --pios-color-information: derived from the accent at reduced
      strength, per PIOS_DESIGN_SYSTEM.md Section 3's own recommendation,
      so "waiting/informational" reads as a close relative of the one
      accent already on the page, not a new competing hue. */
-  --pios-color-information: #b5540b;
-  --pios-color-information-surface: #f5e9dd;
+  --pios-color-information: #d97a2f;
+  --pios-color-information-surface: #33281c;
 
   /* ---- Color: trust / recognized-relationship -------------------------
      A muted plum/wine -- deliberately not the success green (a ride
      succeeding and "this is someone you know" must never be visually
      conflated — brief Section 4) and not a shade of the accent either
-     (recognition is its own fact, not "this is the important button"). */
-  --pios-color-trust: #6b4357;
-  --pios-color-trust-surface: #f3eaee;
+     (recognition is its own fact, not "this is the important button").
+     Lightened from the light palette's plum so it still reads against
+     the dark ground. */
+  --pios-color-trust: #cf9fb8;
+  --pios-color-trust-surface: #332830;
 
   /* ---- Typography -------------------------------------------------------
      Fraunces (display) + Work Sans (everything else) -- a serif with real
@@ -130,7 +146,7 @@
      Two levels only, per docs/PIOS_DESIGN_SYSTEM.md Section 3 — a
      restrained ceiling, deliberately not a multi-layer shadow scale. */
   --pios-shadow-none: none;
-  --pios-shadow-raised: 0 4px 16px rgba(33, 29, 22, 0.12);
+  --pios-shadow-raised: 0 4px 20px rgba(0, 0, 0, 0.45);
 
   /* ---- Motion --------------------------------------------------------- */
   --pios-motion-fast: 100ms;

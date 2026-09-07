@@ -3,8 +3,9 @@
   align-items: center;
   justify-content: center;
   height: 56px;
-  background: var(--pios-color-text-primary);
-  color: var(--pios-color-surface);
+  background: var(--pios-color-surface);
+  color: var(--pios-color-text-primary);
+  border-bottom: 1px solid var(--pios-color-border);
   position: sticky;
   top: 0;
   z-index: 10;
