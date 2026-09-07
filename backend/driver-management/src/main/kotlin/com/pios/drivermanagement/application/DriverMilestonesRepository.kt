@@ -21,8 +21,18 @@ interface DriverMilestonesRepository {
      * Idempotency (never calling this twice for the same event) is
      * [AssignmentCompletedApplicationService]'s own responsibility, not
      * this repository's.
+     *
+     * [statedPriceParsed] (ADR-065, Driver Earnings from Self-Stated
+     * Prices) is this ride's own stated price, already parsed by
+     * [com.pios.drivermanagement.domain.PriceParser] — `null` for a ride
+     * with no stated price, or one that did not parse. Adds
+     * [statedPriceParsed] (or nothing, when `null`) to the driver's stored
+     * `total_stated_earnings`, and increments `unpriced_rides_count` by one
+     * exactly when [statedPriceParsed] is `null` — the same single
+     * read-modify-write this method already performs for the ride/streak
+     * counts above, not a second call.
      */
-    fun recordCompletedRide(driverId: DriverId, completedAt: Instant)
+    fun recordCompletedRide(driverId: DriverId, completedAt: Instant, statedPriceParsed: Long? = null)
 
     /**
      * Growth Loops TZ v1, Phase 2 extension: increments [driverId]'s stored

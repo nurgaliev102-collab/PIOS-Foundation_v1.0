@@ -45,7 +45,8 @@ class DriverControllerTest {
     private val handler = RetrieveDriverAvailabilityHandler(repository)
     private val availabilityService = DriverAvailabilityApplicationService(repository)
     private val createDriverService = CreateDriverApplicationService(repository)
-    private val milestonesHandler = RetrieveDriverMilestonesHandler(InMemoryDriverMilestonesRepository())
+    private val milestonesRepository = InMemoryDriverMilestonesRepository()
+    private val milestonesHandler = RetrieveDriverMilestonesHandler(milestonesRepository)
     private val secret = Base64.getEncoder().encodeToString("driver-controller-test-secret".toByteArray())
     private val sessionTokenVerifier = SessionTokenVerifier(secretBase64 = secret)
     private val controller = DriverController(handler, availabilityService, createDriverService, milestonesHandler, sessionTokenVerifier)
@@ -292,5 +293,48 @@ class DriverControllerTest {
         val body = assertNotNull(response.body)
         assertEquals(false, body.first { it.id == "mix-real" }.isTest)
         assertEquals(true, body.first { it.id == "mix-test" }.isTest)
+    }
+
+    // --- Growth Loops TZ v1, Phase 2: getMilestones ---
+
+    @Test
+    fun `getting milestones with no Authorization header is rejected`() {
+        val response = controller.getMilestones("milestones-driver-1")
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
+    fun `getting milestones with a different driver's token is rejected -- IDOR`() {
+        val response = controller.getMilestones("milestones-driver-victim", authorization = driverToken("milestones-driver-attacker"))
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+    }
+
+    @Test
+    fun `a brand-new driver with no completed rides returns zeroed milestones, including earnings`() {
+        val response = controller.getMilestones("milestones-driver-new", authorization = driverToken("milestones-driver-new"))
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        val body = assertNotNull(response.body)
+        assertEquals(0L, body.completedRidesCount)
+        assertEquals(0L, body.totalStatedEarnings)
+        assertEquals(0, body.unpricedRidesCount)
+    }
+
+    // --- ADR-065: Driver Earnings from Self-Stated Prices ---
+
+    @Test
+    fun `getting milestones for a driver with parsed and unpriced completed rides returns both totals`() {
+        milestonesRepository.recordCompletedRide(DriverId("milestones-driver-earnings"), Instant.parse("2026-08-03T09:00:00Z"), statedPriceParsed = 350L)
+        milestonesRepository.recordCompletedRide(DriverId("milestones-driver-earnings"), Instant.parse("2026-08-10T09:00:00Z"), statedPriceParsed = null)
+
+        val response = controller.getMilestones("milestones-driver-earnings", authorization = driverToken("milestones-driver-earnings"))
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        val body = assertNotNull(response.body)
+        assertEquals(2L, body.completedRidesCount)
+        assertEquals(350L, body.totalStatedEarnings)
+        assertEquals(1, body.unpricedRidesCount)
     }
 }

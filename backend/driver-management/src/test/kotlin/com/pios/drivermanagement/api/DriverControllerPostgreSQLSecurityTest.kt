@@ -8,7 +8,7 @@ import com.pios.drivermanagement.application.RetrieveDriverMilestonesHandler
 import com.pios.drivermanagement.domain.Availability
 import com.pios.drivermanagement.domain.Driver
 import com.pios.drivermanagement.domain.DriverId
-import com.pios.drivermanagement.persistence.InMemoryDriverMilestonesRepository
+import com.pios.drivermanagement.persistence.PostgreSQLDriverMilestonesRepository
 import com.pios.drivermanagement.persistence.PostgreSQLDriverRepository
 import com.pios.drivermanagement.persistence.PostgreSQLTestDatabase
 import org.springframework.http.HttpStatus
@@ -20,6 +20,7 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 
 /**
  * Task 25 (Orders Cancellation & Driver Availability Security
@@ -40,7 +41,8 @@ class DriverControllerPostgreSQLSecurityTest {
     private val handler = RetrieveDriverAvailabilityHandler(repository)
     private val availabilityService = DriverAvailabilityApplicationService(repository)
     private val createDriverService = CreateDriverApplicationService(repository)
-    private val milestonesHandler = RetrieveDriverMilestonesHandler(InMemoryDriverMilestonesRepository())
+    private val milestonesRepository = PostgreSQLDriverMilestonesRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
+    private val milestonesHandler = RetrieveDriverMilestonesHandler(milestonesRepository)
     private val secret = Base64.getEncoder().encodeToString("driver-postgres-security-test-secret".toByteArray())
     private val controller = DriverController(handler, availabilityService, createDriverService, milestonesHandler, SessionTokenVerifier(secretBase64 = secret))
 
@@ -98,5 +100,23 @@ class DriverControllerPostgreSQLSecurityTest {
 
         assertEquals(HttpStatus.OK, response.statusCode)
         assertEquals(Availability.AVAILABLE, repository.findById(DriverId(driverId))?.availability)
+    }
+
+    // --- ADR-065: Driver Earnings from Self-Stated Prices ---
+
+    @Test
+    fun `getting milestones through REST, backed by real PostgreSQL, returns the real earnings totals`() {
+        val driverId = "driver-milestones-${UUID.randomUUID()}"
+        repository.save(Driver(DriverId(driverId), Availability.UNAVAILABLE))
+        milestonesRepository.recordCompletedRide(DriverId(driverId), Instant.now(), statedPriceParsed = 350L)
+        milestonesRepository.recordCompletedRide(DriverId(driverId), Instant.now(), statedPriceParsed = null)
+
+        val response = controller.getMilestones(driverId, authorization = driverToken(driverId))
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        val body = assertNotNull(response.body)
+        assertEquals(2L, body.completedRidesCount)
+        assertEquals(350L, body.totalStatedEarnings)
+        assertEquals(1, body.unpricedRidesCount)
     }
 }

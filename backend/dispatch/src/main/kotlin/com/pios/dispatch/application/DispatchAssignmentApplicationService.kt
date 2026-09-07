@@ -9,6 +9,7 @@ import com.pios.dispatch.domain.AssignmentCreated
 import com.pios.dispatch.domain.AssignmentId
 import com.pios.dispatch.domain.AssignmentStarted
 import com.pios.dispatch.domain.OrderAssigned
+import com.pios.dispatch.domain.ProposalStatus
 import com.pios.dispatch.domain.Trip
 import com.pios.dispatch.domain.TripArrived
 import com.pios.dispatch.domain.TripCompleted
@@ -109,6 +110,25 @@ import java.util.UUID
  * `AssignmentCompletedListener` (bound to routing key
  * `assignment.completed`) keeps receiving exactly what it always has,
  * unmodified, per this task's own Order Management Rule.
+ *
+ * ## Stated price propagation (ADR-065, Decision items 1-2)
+ *
+ * [completeAssignment] additionally looks up the completed order's own
+ * `ACCEPTED` [com.pios.dispatch.domain.Proposal] via [proposalRepository]
+ * — a read between two aggregates inside this same bounded context, not a
+ * cross-module read (ADR-065's own reasoning) — and forwards its
+ * [com.pios.dispatch.domain.Proposal.statedPrice] verbatim, unparsed, as
+ * the new `payload.statedPrice` field on the legacy `AssignmentCompleted`
+ * outbox record only (never on `TripCompleted`, which ADR-065 Decision
+ * item 2 deliberately leaves unchanged). `null` when no such Proposal
+ * exists — notably the direct `POST /v1/assignments` path, which creates
+ * an Assignment with no Proposal at all. `eventVersion` stays 1: both
+ * Order Management's and Driver Management's own consumers hard-require
+ * it, and this field is additive and optional. [proposalRepository]
+ * defaults to [NoOpProposalRepository] for the same reason
+ * [outboxRepository]/[transactionRunner]/[tripRepository] do — existing
+ * tests exercising Assignment/Trip lifecycle logic unrelated to a stated
+ * price continue to work unmodified.
  */
 @Service
 class DispatchAssignmentApplicationService(
@@ -116,7 +136,8 @@ class DispatchAssignmentApplicationService(
     private val outboxRepository: OutboxRepository = NoOpOutboxRepository,
     private val transactionRunner: TransactionRunner = NoOpTransactionRunner,
     private val objectMapper: ObjectMapper = ObjectMapper(),
-    private val tripRepository: TripRepository = NoOpTripRepository
+    private val tripRepository: TripRepository = NoOpTripRepository,
+    private val proposalRepository: ProposalRepository = NoOpProposalRepository
 ) {
 
     fun handle(
@@ -268,7 +289,13 @@ class DispatchAssignmentApplicationService(
         compatEvent
     }
 
-    /** Records that the ride has finished. See [arriveAssignment]'s own KDoc for shape and rationale. */
+    /**
+     * Records that the ride has finished. See [arriveAssignment]'s own KDoc
+     * for shape and rationale. Also looks up the order's own `ACCEPTED`
+     * Proposal (ADR-065, Decision item 2) so its [statedPrice][
+     * com.pios.dispatch.domain.Proposal.statedPrice] can be forwarded,
+     * verbatim, on the `AssignmentCompleted` outbox record below.
+     */
     fun completeAssignment(command: CompleteAssignmentCommand): AssignmentCompleted = transactionRunner.run {
         val assignment = assignmentRepository.findById(command.assignmentId)
             ?: throw AssignmentNotFoundException(command.assignmentId)
@@ -277,7 +304,10 @@ class DispatchAssignmentApplicationService(
         tripRepository.save(trip)
         outboxRepository.save(outboxRecordFor(assignment.id, tripEvent))
         val compatEvent = AssignmentCompleted(orderId = tripEvent.orderId, driverId = tripEvent.driverId, occurredAt = tripEvent.occurredAt)
-        outboxRepository.save(outboxRecordFor(assignment.id, compatEvent))
+        val statedPrice = proposalRepository.findByOrder(assignment.order)
+            .firstOrNull { it.status == ProposalStatus.ACCEPTED }
+            ?.statedPrice
+        outboxRepository.save(outboxRecordFor(assignment.id, compatEvent, statedPrice))
         compatEvent
     }
 
@@ -366,14 +396,21 @@ class DispatchAssignmentApplicationService(
         )
     )
 
-    private fun outboxRecordFor(assignmentId: AssignmentId, event: AssignmentCompleted): OutboxRecord = OutboxRecord(
+    /**
+     * [statedPrice] (ADR-065, Decision items 1-2) is the order's own
+     * `ACCEPTED` Proposal's stated price, forwarded verbatim and nullable
+     * — `null` when no such Proposal exists. Not published on any other
+     * event ([TripCompleted] included) — see this class's own "Stated
+     * price propagation" KDoc.
+     */
+    private fun outboxRecordFor(assignmentId: AssignmentId, event: AssignmentCompleted, statedPrice: String?): OutboxRecord = OutboxRecord(
         aggregateId = assignmentId.value,
         eventType = "AssignmentCompleted",
         routingKey = "assignment.completed",
         payload = envelopeFor(
             eventType = "AssignmentCompleted",
             occurredAt = event.occurredAt.toString(),
-            payload = mapOf("orderId" to event.orderId.orderId, "driverId" to event.driverId.driverId)
+            payload = mapOf("orderId" to event.orderId.orderId, "driverId" to event.driverId.driverId, "statedPrice" to statedPrice)
         )
     )
 
@@ -410,9 +447,12 @@ class DispatchAssignmentApplicationService(
      * a property of the event itself); the domain's own business
      * [occurredAt]; and only the event-specific data the ratified
      * Dispatch -> Order Management contract (INTERFACE_CONTRACTS.md
-     * Section 5) already justifies, nested under `payload`.
+     * Section 5) already justifies, nested under `payload`. [payload]'s
+     * value type is nullable (rather than `String`) purely so
+     * `AssignmentCompleted`'s own `statedPrice` field (ADR-065) can be
+     * `null` — every other caller still passes only non-null values.
      */
-    private fun envelopeFor(eventType: String, occurredAt: String, payload: Map<String, String>): String =
+    private fun envelopeFor(eventType: String, occurredAt: String, payload: Map<String, String?>): String =
         objectMapper.writeValueAsString(
             mapOf(
                 "eventId" to UUID.randomUUID().toString(),

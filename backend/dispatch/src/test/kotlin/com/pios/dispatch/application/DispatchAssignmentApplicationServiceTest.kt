@@ -1,15 +1,19 @@
 package com.pios.dispatch.application
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.dispatch.domain.Assignment
 import com.pios.dispatch.domain.AssignmentStatus
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
+import com.pios.dispatch.domain.Proposal
 import com.pios.dispatch.domain.TripStatus
 import com.pios.dispatch.persistence.InMemoryAssignmentRepository
+import com.pios.dispatch.persistence.InMemoryProposalRepository
 import com.pios.dispatch.persistence.InMemoryTripRepository
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class DispatchAssignmentApplicationServiceTest {
 
@@ -161,5 +165,65 @@ class DispatchAssignmentApplicationServiceTest {
         service.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
 
         assertEquals(AssignmentStatus.CREATED, repository.findById(created.assignment.id)?.status)
+    }
+
+    // --- ADR-065: Driver Earnings from Self-Stated Prices ---
+
+    @Test
+    fun `completing an assignment forwards the order's own ACCEPTED proposal's statedPrice on AssignmentCompleted`() {
+        val proposalRepository = InMemoryProposalRepository()
+        val recordingOutboxRepository = RecordingOutboxRepository()
+        val priceOrder = OrderReference("order-price-1")
+        val priceDriver = DriverReference("driver-price-1")
+        val proposalCreated = Proposal.propose(priceOrder, priceDriver)
+        proposalCreated.proposal.accept(statedPrice = "350")
+        proposalRepository.save(proposalCreated.proposal)
+        val serviceWithProposals = DispatchAssignmentApplicationService(
+            assignmentRepository = InMemoryAssignmentRepository(),
+            outboxRepository = recordingOutboxRepository,
+            tripRepository = InMemoryTripRepository(),
+            proposalRepository = proposalRepository
+        )
+        val created = serviceWithProposals.handle(AssignOrderCommand(priceOrder, priceDriver))
+        serviceWithProposals.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
+        serviceWithProposals.startAssignment(StartAssignmentCommand(created.assignment.id))
+
+        serviceWithProposals.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
+
+        val record = recordingOutboxRepository.records.single { it.eventType == "AssignmentCompleted" }
+        val payload = ObjectMapper().readTree(record.payload).get("payload")
+        assertEquals("350", payload.get("statedPrice").asText())
+        assertEquals(1, ObjectMapper().readTree(record.payload).get("eventVersion").asInt())
+    }
+
+    @Test
+    fun `completing an assignment with no ACCEPTED proposal forwards a null statedPrice on AssignmentCompleted`() {
+        val recordingOutboxRepository = RecordingOutboxRepository()
+        val serviceWithNoProposals = DispatchAssignmentApplicationService(
+            assignmentRepository = InMemoryAssignmentRepository(),
+            outboxRepository = recordingOutboxRepository,
+            tripRepository = InMemoryTripRepository()
+        )
+        val created = serviceWithNoProposals.handle(AssignOrderCommand(OrderReference("order-price-2"), DriverReference("driver-price-2")))
+        serviceWithNoProposals.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
+        serviceWithNoProposals.startAssignment(StartAssignmentCommand(created.assignment.id))
+
+        serviceWithNoProposals.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
+
+        val record = recordingOutboxRepository.records.single { it.eventType == "AssignmentCompleted" }
+        val payload = ObjectMapper().readTree(record.payload).get("payload")
+        assertTrue(payload.get("statedPrice").isNull)
+    }
+
+    /** Mirrors `DispatchAssignmentApplicationServiceRideProgressConvergenceTest`'s own identical fake. */
+    private class RecordingOutboxRepository : OutboxRepository {
+        val records = mutableListOf<OutboxRecord>()
+        override fun save(record: OutboxRecord): OutboxRecord {
+            records.add(record)
+            return record.copy(id = records.size.toLong())
+        }
+        override fun findUnpublished(): List<OutboxRecord> = records
+        override fun markPublished(id: Long) = Unit
+        override fun countUnpublished(): OutboxBacklog = OutboxBacklog(pending = records.size.toLong(), oldestPendingCreatedAt = null)
     }
 }

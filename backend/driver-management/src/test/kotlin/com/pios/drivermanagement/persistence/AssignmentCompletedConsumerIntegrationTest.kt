@@ -32,6 +32,7 @@ class AssignmentCompletedConsumerIntegrationTest {
     private val driverMilestonesRepository = PostgreSQLDriverMilestonesRepository(JdbcTemplate(dataSource))
     private val orderPassengerRepository = PostgreSQLOrderPassengerRepository(JdbcTemplate(dataSource))
     private val driverClientsRepository = PostgreSQLDriverClientsRepository(JdbcTemplate(dataSource))
+    private val driverRideStatedPricesRepository = PostgreSQLDriverRideStatedPricesRepository(JdbcTemplate(dataSource))
     private val orderSubmittedRepository = PostgreSQLOrderSubmittedRepository(JdbcTemplate(dataSource))
     private val transactionRunner = SpringTransactionRunner(TransactionTemplate(DataSourceTransactionManager(dataSource)))
     private val applicationService = AssignmentCompletedApplicationService(
@@ -39,6 +40,7 @@ class AssignmentCompletedConsumerIntegrationTest {
         driverMilestonesRepository,
         orderPassengerRepository,
         driverClientsRepository,
+        driverRideStatedPricesRepository,
         transactionRunner
     )
     private val orderSubmittedApplicationService =
@@ -160,5 +162,46 @@ class AssignmentCompletedConsumerIntegrationTest {
 
         awaitUntilNotNull { driverMilestonesRepository.findByDriverId(DriverId(driverId))?.takeIf { it.completedRidesCount == 1L } }
         assertEquals(0, driverMilestonesRepository.findByDriverId(DriverId(driverId))?.repeatClientsCount)
+    }
+
+    // --- ADR-065: Driver Earnings from Self-Stated Prices, end to end ---
+
+    @Test
+    fun `a real AssignmentCompleted carrying a digits-only statedPrice grows the referenced driver's real earnings in PostgreSQL`() {
+        val driverId = "assignment-completed-it-price-${UUID.randomUUID()}"
+        seedDriver(driverId)
+
+        publisher.publishAssignmentCompleted(driverId = driverId, statedPrice = "350")
+
+        awaitUntilNotNull { driverMilestonesRepository.findByDriverId(DriverId(driverId))?.takeIf { it.completedRidesCount == 1L } }
+        val milestones = driverMilestonesRepository.findByDriverId(DriverId(driverId))
+        assertEquals(350L, milestones?.totalStatedEarnings)
+        assertEquals(0, milestones?.unpricedRidesCount)
+    }
+
+    @Test
+    fun `a real AssignmentCompleted carrying a non-numeric statedPrice does not grow earnings and counts as unpriced`() {
+        val driverId = "assignment-completed-it-unpriced-${UUID.randomUUID()}"
+        seedDriver(driverId)
+
+        publisher.publishAssignmentCompleted(driverId = driverId, statedPrice = "договоримся")
+
+        awaitUntilNotNull { driverMilestonesRepository.findByDriverId(DriverId(driverId))?.takeIf { it.completedRidesCount == 1L } }
+        val milestones = driverMilestonesRepository.findByDriverId(DriverId(driverId))
+        assertEquals(0L, milestones?.totalStatedEarnings)
+        assertEquals(1, milestones?.unpricedRidesCount)
+    }
+
+    @Test
+    fun `a real AssignmentCompleted with no statedPrice at all still completes the ride, counted as unpriced`() {
+        val driverId = "assignment-completed-it-no-price-${UUID.randomUUID()}"
+        seedDriver(driverId)
+
+        publisher.publishAssignmentCompleted(driverId = driverId)
+
+        awaitUntilNotNull { driverMilestonesRepository.findByDriverId(DriverId(driverId))?.takeIf { it.completedRidesCount == 1L } }
+        val milestones = driverMilestonesRepository.findByDriverId(DriverId(driverId))
+        assertEquals(0L, milestones?.totalStatedEarnings)
+        assertEquals(1, milestones?.unpricedRidesCount)
     }
 }

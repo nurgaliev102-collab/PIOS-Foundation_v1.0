@@ -17,8 +17,16 @@ import java.time.Instant
  * exactly this kind of cross-module correlation — Dispatch's own First
  * Refusal feature already reads it the same way; no new event contract).
  *
+ * [totalStatedEarnings] and [unpricedRidesCount] (ADR-065, Driver Earnings
+ * from Self-Stated Prices) are this driver's own derived earnings figures:
+ * the sum of every completed ride's stated price that parses per
+ * [com.pios.drivermanagement.domain.PriceParser]'s digits-only rule
+ * (Decision item 4), and how many completed rides did not. Both count only
+ * rides completed from this ADR's ship date forward — no historical
+ * backfill (Decision item 7).
+ *
  * A plain data holder, not an aggregate: nothing here enforces invariants
- * beyond the three counts being non-negative, and
+ * beyond the counts being non-negative, and
  * [PostgreSQLDriverMilestonesRepository] owns the read-modify-write of
  * these fields entirely — this type exists only to give that repository's
  * return value a name.
@@ -28,11 +36,15 @@ data class DriverMilestones(
     val completedRidesCount: Long,
     val currentStreakWeeks: Int,
     val lastCompletedAt: Instant?,
-    val repeatClientsCount: Int = 0
+    val repeatClientsCount: Int = 0,
+    val totalStatedEarnings: Long = 0,
+    val unpricedRidesCount: Int = 0
 ) {
     init {
         require(completedRidesCount >= 0) { "completedRidesCount must not be negative" }
         require(currentStreakWeeks >= 0) { "currentStreakWeeks must not be negative" }
         require(repeatClientsCount >= 0) { "repeatClientsCount must not be negative" }
+        require(totalStatedEarnings >= 0) { "totalStatedEarnings must not be negative" }
+        require(unpricedRidesCount >= 0) { "unpricedRidesCount must not be negative" }
     }
 }

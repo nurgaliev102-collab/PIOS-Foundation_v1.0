@@ -1,6 +1,7 @@
 package com.pios.drivermanagement.application
 
 import com.pios.drivermanagement.domain.DriverId
+import com.pios.drivermanagement.domain.PriceParser
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 
@@ -32,6 +33,20 @@ import org.springframework.stereotype.Service
  * Runs inside one [transactionRunner] boundary so an uncaught exception
  * also rolls back the eventId's own idempotency mark — a genuinely failed
  * attempt is never mistaken for an already-handled duplicate on retry.
+ *
+ * ## Driver earnings from self-stated prices (ADR-065)
+ *
+ * [command]'s own optional `statedPrice` — Dispatch's own forwarded,
+ * unparsed utterance — is parsed here, by [PriceParser], per Decision item
+ * 4's confirmed digits-only rule; Dispatch itself parses nothing (`ADR-042`
+ * R4.2, unchanged). The parsed amount (or `null`) is accumulated into
+ * [driverMilestonesRepository]'s own earnings total / unpriced-ride count
+ * in the same call that already records the completed ride, and both the
+ * verbatim and parsed values are additionally recorded per ride via
+ * [driverRideStatedPricesRepository] — all inside this method's own single
+ * [transactionRunner] boundary, so a redelivered event never double-counts
+ * earnings, by exactly the mechanism already proven for
+ * `completedRidesCount`.
  */
 @Service
 class AssignmentCompletedApplicationService(
@@ -39,6 +54,7 @@ class AssignmentCompletedApplicationService(
     private val driverMilestonesRepository: DriverMilestonesRepository,
     private val orderPassengerRepository: OrderPassengerRepository,
     private val driverClientsRepository: DriverClientsRepository,
+    private val driverRideStatedPricesRepository: DriverRideStatedPricesRepository,
     private val transactionRunner: TransactionRunner = NoOpTransactionRunner
 ) {
     private val logger = LoggerFactory.getLogger(AssignmentCompletedApplicationService::class.java)
@@ -47,7 +63,9 @@ class AssignmentCompletedApplicationService(
         val isNewEvent = assignmentCompletedRepository.markProcessed(command.eventId)
         if (isNewEvent) {
             val driverId = DriverId(command.driverId)
-            driverMilestonesRepository.recordCompletedRide(driverId, command.occurredAt)
+            val statedPriceParsed = PriceParser.parse(command.statedPrice)
+            driverMilestonesRepository.recordCompletedRide(driverId, command.occurredAt, statedPriceParsed)
+            driverRideStatedPricesRepository.record(command.eventId, driverId, command.statedPrice, statedPriceParsed)
 
             val passengerReference = orderPassengerRepository.findPassengerReference(command.orderId)
             if (passengerReference != null) {

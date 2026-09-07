@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed — awaiting product-owner confirmation of Decision item 4 (the parsing rule) and Decision item 7 (no backfill).**
+**Accepted — implemented.** Decision item 4 (the parsing rule, exactly as written) and Decision item 7 (no backfill) were both confirmed by the product owner on 2026-09-07. Implemented the same day: Dispatch forwards `statedPrice` on `AssignmentCompleted`; Driver Management parses via `PriceParser` and extends `GET /v1/drivers/{driverId}/milestones` with `totalStatedEarnings`/`unpricedRidesCount`; frontend renders the new tile once the field is a number. See References for the exact commits.
 
 **Decision Date:** 2026-09-07
 

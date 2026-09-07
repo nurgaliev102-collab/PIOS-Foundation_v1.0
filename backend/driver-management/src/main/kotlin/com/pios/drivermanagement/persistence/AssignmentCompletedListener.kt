@@ -22,6 +22,12 @@ import org.springframework.stereotype.Component
  * [AssignmentCompletedApplicationService] can look up the passenger
  * already recorded against it by [OrderSubmittedListener] — never to reach
  * into Order Management's own domain.
+ *
+ * `payload.statedPrice` (ADR-065, Driver Earnings from Self-Stated Prices)
+ * is extracted the same way, but — unlike `driverId`/`orderId` — is
+ * genuinely optional: absent (an event published before this ADR shipped)
+ * or blank both become `null`, never a `require` failure. This event must
+ * never dead-letter merely because a stated price is missing.
  */
 @Component
 class AssignmentCompletedListener(
@@ -64,12 +70,23 @@ class AssignmentCompletedListener(
         val occurredAtText = envelope.get("occurredAt")?.asText()
         require(!occurredAtText.isNullOrBlank()) { "Missing occurredAt" }
 
+        // ADR-065: optional and never a validation failure -- absent (an
+        // event published before this ADR shipped) or blank both become
+        // null, exactly like Driver Management's own no-Proposal case.
+        val statedPriceNode = data.get("statedPrice")
+        val statedPrice = if (statedPriceNode == null || statedPriceNode.isNull) {
+            null
+        } else {
+            statedPriceNode.asText().takeIf { it.isNotBlank() }
+        }
+
         applicationService.handle(
             AssignmentCompletedUpdateCommand(
                 eventId = eventId,
                 driverId = driverId,
                 orderId = orderId,
-                occurredAt = Instant.parse(occurredAtText)
+                occurredAt = Instant.parse(occurredAtText),
+                statedPrice = statedPrice
             )
         )
     }

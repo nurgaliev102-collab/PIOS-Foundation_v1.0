@@ -27,7 +27,8 @@ internal class AssignmentCompletedMessagePublisher(connectionFactory: Connection
         occurredAt: Instant = Instant.now(),
         eventVersion: Int = 1,
         eventType: String = "AssignmentCompleted",
-        routingKey: String = RabbitMQConsumerTopologyConfiguration.ASSIGNMENT_COMPLETED_ROUTING_KEY
+        routingKey: String = RabbitMQConsumerTopologyConfiguration.ASSIGNMENT_COMPLETED_ROUTING_KEY,
+        statedPrice: String? = null
     ) {
         val envelope = objectMapper.writeValueAsString(
             mapOf(
@@ -37,7 +38,8 @@ internal class AssignmentCompletedMessagePublisher(connectionFactory: Connection
                 "occurredAt" to occurredAt.toString(),
                 "payload" to mapOf(
                     "orderId" to orderReference,
-                    "driverId" to driverId
+                    "driverId" to driverId,
+                    "statedPrice" to statedPrice
                 )
             )
         )

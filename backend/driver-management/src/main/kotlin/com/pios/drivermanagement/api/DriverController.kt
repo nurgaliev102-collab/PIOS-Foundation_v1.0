@@ -153,7 +153,9 @@ class DriverController(
                     milestones.driverId.value,
                     milestones.completedRidesCount,
                     milestones.currentStreakWeeks,
-                    milestones.repeatClientsCount
+                    milestones.repeatClientsCount,
+                    milestones.totalStatedEarnings,
+                    milestones.unpricedRidesCount
                 )
             )
         } catch (ex: IllegalArgumentException) {

@@ -4,6 +4,7 @@ import com.pios.drivermanagement.domain.DriverId
 import com.pios.drivermanagement.persistence.InMemoryAssignmentCompletedRepository
 import com.pios.drivermanagement.persistence.InMemoryDriverClientsRepository
 import com.pios.drivermanagement.persistence.InMemoryDriverMilestonesRepository
+import com.pios.drivermanagement.persistence.InMemoryDriverRideStatedPricesRepository
 import com.pios.drivermanagement.persistence.InMemoryOrderPassengerRepository
 import java.time.Instant
 import kotlin.test.Test
@@ -16,15 +17,17 @@ class AssignmentCompletedApplicationServiceTest {
     private val driverMilestonesRepository = InMemoryDriverMilestonesRepository()
     private val orderPassengerRepository = InMemoryOrderPassengerRepository()
     private val driverClientsRepository = InMemoryDriverClientsRepository()
+    private val driverRideStatedPricesRepository = InMemoryDriverRideStatedPricesRepository()
     private val service = AssignmentCompletedApplicationService(
         assignmentCompletedRepository,
         driverMilestonesRepository,
         orderPassengerRepository,
-        driverClientsRepository
+        driverClientsRepository,
+        driverRideStatedPricesRepository
     )
 
-    private fun command(eventId: String, driverId: String, orderId: String, occurredAt: String) =
-        AssignmentCompletedUpdateCommand(eventId, driverId, orderId, Instant.parse(occurredAt))
+    private fun command(eventId: String, driverId: String, orderId: String, occurredAt: String, statedPrice: String? = null) =
+        AssignmentCompletedUpdateCommand(eventId, driverId, orderId, Instant.parse(occurredAt), statedPrice)
 
     @Test
     fun `handling a new AssignmentCompleted increments the driver's completed ride count`() {
@@ -138,5 +141,70 @@ class AssignmentCompletedApplicationServiceTest {
 
         assertEquals(1, driverMilestonesRepository.findByDriverId(DriverId("driver-11a"))?.repeatClientsCount)
         assertEquals(1, driverMilestonesRepository.findByDriverId(DriverId("driver-11b"))?.repeatClientsCount)
+    }
+
+    // --- ADR-065: Driver Earnings from Self-Stated Prices ---
+
+    @Test
+    fun `a digits-only stated price is parsed and added to the driver's total earnings`() {
+        service.handle(command("event-12", "driver-12", "order-12", "2026-08-03T09:00:00Z", statedPrice = "350"))
+
+        val milestones = driverMilestonesRepository.findByDriverId(DriverId("driver-12"))
+
+        assertEquals(350L, milestones?.totalStatedEarnings)
+        assertEquals(0, milestones?.unpricedRidesCount)
+    }
+
+    @Test
+    fun `two completed rides with digits-only prices sum into the driver's total earnings`() {
+        service.handle(command("event-13a", "driver-13", "order-13a", "2026-08-03T09:00:00Z", statedPrice = "350"))
+        service.handle(command("event-13b", "driver-13", "order-13b", "2026-08-10T09:00:00Z", statedPrice = "400"))
+
+        val milestones = driverMilestonesRepository.findByDriverId(DriverId("driver-13"))
+
+        assertEquals(750L, milestones?.totalStatedEarnings)
+        assertEquals(0, milestones?.unpricedRidesCount)
+    }
+
+    @Test
+    fun `a non-numeric stated price does not contribute to earnings and is counted as unpriced`() {
+        service.handle(command("event-14", "driver-14", "order-14", "2026-08-03T09:00:00Z", statedPrice = "договоримся"))
+
+        val milestones = driverMilestonesRepository.findByDriverId(DriverId("driver-14"))
+
+        assertEquals(0L, milestones?.totalStatedEarnings)
+        assertEquals(1, milestones?.unpricedRidesCount)
+    }
+
+    @Test
+    fun `a completed ride with no stated price at all is counted as unpriced, never a failure`() {
+        service.handle(command("event-15", "driver-15", "order-15", "2026-08-03T09:00:00Z", statedPrice = null))
+
+        val milestones = driverMilestonesRepository.findByDriverId(DriverId("driver-15"))
+
+        assertEquals(1L, milestones?.completedRidesCount)
+        assertEquals(0L, milestones?.totalStatedEarnings)
+        assertEquals(1, milestones?.unpricedRidesCount)
+    }
+
+    @Test
+    fun `redelivering the same eventId does not double-count earnings`() {
+        val cmd = command("event-16", "driver-16", "order-16", "2026-08-03T09:00:00Z", statedPrice = "350")
+
+        service.handle(cmd)
+        service.handle(cmd)
+
+        assertEquals(350L, driverMilestonesRepository.findByDriverId(DriverId("driver-16"))?.totalStatedEarnings)
+    }
+
+    @Test
+    fun `both the verbatim and parsed stated price are recorded per ride`() {
+        service.handle(command("event-17", "driver-17", "order-17", "2026-08-03T09:00:00Z", statedPrice = "350 руб"))
+
+        val record = driverRideStatedPricesRepository.findByEventId("event-17")
+
+        assertEquals(DriverId("driver-17"), record?.driverId)
+        assertEquals("350 руб", record?.statedPriceRaw)
+        assertNull(record?.statedPriceParsed)
     }
 }

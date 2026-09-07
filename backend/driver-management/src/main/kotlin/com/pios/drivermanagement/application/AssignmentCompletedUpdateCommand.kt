@@ -24,10 +24,21 @@ import java.time.Instant
  * against — [AssignmentCompletedApplicationService] uses it purely to look
  * that passenger back up locally, never to reach into Order Management's
  * own domain.
+ *
+ * [statedPrice] (ADR-065, Driver Earnings from Self-Stated Prices) is
+ * Dispatch's own `payload.statedPrice` — the order's `ACCEPTED` Proposal's
+ * stated price, forwarded verbatim and unparsed. `null` for an event
+ * published before this ADR shipped, a blank value, or the no-Proposal
+ * path (Dispatch's own `POST /v1/assignments`) — never a validation
+ * failure at the transport boundary
+ * ([com.pios.drivermanagement.persistence.AssignmentCompletedListener]'s
+ * own KDoc). [AssignmentCompletedApplicationService] is the one that
+ * interprets it, via [com.pios.drivermanagement.domain.PriceParser].
  */
 data class AssignmentCompletedUpdateCommand(
     val eventId: String,
     val driverId: String,
     val orderId: String,
-    val occurredAt: Instant
+    val occurredAt: Instant,
+    val statedPrice: String? = null
 )

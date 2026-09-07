@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap
 class InMemoryDriverMilestonesRepository : DriverMilestonesRepository {
     private val store = ConcurrentHashMap<DriverId, DriverMilestones>()
 
-    override fun recordCompletedRide(driverId: DriverId, completedAt: Instant) {
+    override fun recordCompletedRide(driverId: DriverId, completedAt: Instant, statedPriceParsed: Long?) {
         val existing = store[driverId]
         val newStreak = RideStreakCalculator.nextStreak(
             previousStreak = existing?.currentStreakWeeks ?: 0,
@@ -31,7 +31,9 @@ class InMemoryDriverMilestonesRepository : DriverMilestonesRepository {
             completedRidesCount = (existing?.completedRidesCount ?: 0) + 1,
             currentStreakWeeks = newStreak,
             lastCompletedAt = completedAt,
-            repeatClientsCount = existing?.repeatClientsCount ?: 0
+            repeatClientsCount = existing?.repeatClientsCount ?: 0,
+            totalStatedEarnings = (existing?.totalStatedEarnings ?: 0) + (statedPriceParsed ?: 0),
+            unpricedRidesCount = (existing?.unpricedRidesCount ?: 0) + (if (statedPriceParsed == null) 1 else 0)
         )
     }
 
