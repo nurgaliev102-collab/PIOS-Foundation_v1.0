@@ -13,6 +13,7 @@ import com.pios.dispatch.application.ProposeDriverCommand
 import com.pios.dispatch.application.ProposePriceCommand
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
+import com.pios.dispatch.domain.PassengerReference
 import com.pios.dispatch.domain.Proposal
 import com.pios.dispatch.domain.ProposalId
 import com.pios.dispatch.domain.ProposalStatus
@@ -94,11 +95,23 @@ import org.springframework.web.bind.annotation.RestController
  * to any method. See each method's own KDoc for the exact check; see
  * `docs/PIOS_TAXI_TASK_20_PROPOSAL_SECURITY_AUDIT.md` and
  * `docs/PIOS_TAXI_TASK_21_PROPOSAL_SECURITY_REMEDIATION_REPORT.md` for
- * the full audit and remediation record, including what this change
- * deliberately does not attempt to close (verifying that an authenticated
- * passenger actually owns the order they are proposing on — `Proposal`
- * carries no `passengerReference`, and closing that gap is a named,
- * separate architectural decision, not part of this remediation).
+ * the full audit and remediation record. This task deliberately did not
+ * verify that an authenticated passenger actually owns the order they are
+ * proposing on -- `Proposal` carried no `passengerReference` at the time,
+ * and closing that gap was named as a separate architectural decision, not
+ * part of this remediation.
+ *
+ * ## Proposal Participant Authorization (ADR-066, P0 remediation)
+ *
+ * That named gap is closed here. `Proposal` now carries `passengerReference`
+ * (`domain/Proposal.kt`'s own KDoc), and `createProposal`/`confirmPrice`/
+ * `declinePrice`/`listProposals`'s own `?orderId=` branch/`getProposal`
+ * each verify it. See each method's own KDoc for the exact check;
+ * see `docs/ADR/ADR-066-Proposal-Participant-Authorization.md` for the full
+ * decision, including the one residual it knowingly leaves open (Decision
+ * 10: an authenticated passenger can still create a proposal on another
+ * passenger's own `orderId`, under their own identity -- a nuisance, not a
+ * disclosure, named as a future architectural follow-up, not solved here).
  */
 @RestController
 @RequestMapping("/v1/proposals")
@@ -110,6 +123,24 @@ class ProposalController(
     private val ownerCredentialGate: OwnerCredentialGate
 ) {
 
+    /**
+     * ## Proposal Participant Authorization (ADR-066, P0 remediation, closes the last part of Task 20's own named gap)
+     *
+     * Anonymous creation is still not permitted (Task 21). Beyond that,
+     * this method now requires [request]'s own `passengerReference`:
+     * absent/blank is HTTP 400 before any further check; for a `Bearer`
+     * caller it must equal the verified token's own `sub` (403 on
+     * mismatch — no proposal may ever be created bearing a different
+     * person's identity); for the owner/coordinator `Basic` credential no
+     * `sub` comparison applies (the owner has none, ADR-044 Decision 6) --
+     * `Coordinator.tsx` already reads `OrderResponse.origin` for the order
+     * it is proposing on and passes that value straight through. Naming
+     * which `driverId` remains unrestricted, exactly as before (Task 20's
+     * own residual, deliberately not addressed by this ADR either — see
+     * ADR-066 Decision 10 for the one gap this leaves: an authenticated
+     * passenger can still create a proposal on another passenger's own
+     * `orderId`, under their own identity, never under a false one).
+     */
     @PostMapping
     fun createProposal(
         @RequestBody request: ProposeDriverRequest,
@@ -118,21 +149,19 @@ class ProposalController(
         return try {
             val order = OrderReference(request.orderId)
             val driver = DriverReference(request.driverId)
-            // Task 21 (Proposal API Security Remediation): anonymous
-            // creation is no longer permitted -- any authenticated caller
-            // (any passenger's own verified session token, `sub` alone,
-            // no further check) or the owner/coordinator credential is
-            // sufficient. Deliberately does NOT verify the token's `sub`
-            // against the order's own passenger, and deliberately does NOT
-            // restrict which `driverId` may be named -- both are Task 20's
-            // own named, out-of-scope residual gap (Proposal carries no
-            // `passengerReference`; naming any driver is this product's
-            // own existing, legitimate behavior for both real callers).
-            val authorized = sessionTokenVerifier.verify(authorization) != null || ownerCredentialGate.verify(authorization)
-            if (!authorized) {
+            val verified = sessionTokenVerifier.verify(authorization)
+            if (verified == null && !ownerCredentialGate.verify(authorization)) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
             }
-            val created = proposalApplicationService.handle(ProposeDriverCommand(order, driver, request.isTest))
+            if (request.passengerReference.isNullOrBlank()) {
+                return ResponseEntity.badRequest().build()
+            }
+            if (verified != null && request.passengerReference != verified.sub) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+            }
+            val created = proposalApplicationService.handle(
+                ProposeDriverCommand(order, driver, request.isTest, PassengerReference(request.passengerReference))
+            )
             ResponseEntity.status(HttpStatus.CREATED).body(created.proposal.toResponse())
         } catch (ex: IllegalArgumentException) {
             ResponseEntity.badRequest().build()
@@ -264,13 +293,21 @@ class ProposalController(
      * Confirms the price already stated on this proposal ([proposePrice])
      * -- the passenger's own agreeing act (Product Owner instruction,
      * 2026-09-05) -- then creates the Assignment it precedes, via
-     * [ProposalAssignmentOrchestrationService.confirmPrice]. Same
-     * authorization bar as [createProposal]: any authenticated caller
-     * (a verified session token, `sub` alone, or the owner/coordinator
-     * credential) is sufficient -- deliberately does not verify the
-     * caller is the specific passenger who placed this order, the exact
-     * same named, out-of-scope residual gap [createProposal]'s own KDoc
-     * already discloses (`Proposal` carries no `passengerReference`).
+     * [ProposalAssignmentOrchestrationService.confirmPrice].
+     *
+     * ## Proposal Participant Authorization (ADR-066, P0 remediation)
+     *
+     * Closes what was this endpoint's own largest gap: any authenticated
+     * account could confirm or decline any other passenger's price.
+     * Identity check, in this order: 401 with no valid credential; then
+     * 404 if the proposal is unknown (read directly, before delegating,
+     * mirroring [acceptProposal]'s own shape); then 403 unless the caller
+     * is the owner/coordinator `Basic` credential (no `sub` to compare, the
+     * same trust anchor [lapseProposal] already uses) or a `Bearer` token
+     * whose `sub` equals [com.pios.dispatch.domain.Proposal.passengerReference].
+     * A proposal with no `passengerReference` (a row from before ADR-066
+     * deployed) fails closed -- 403 for every `Bearer` caller, never
+     * treated as "anyone may act."
      */
     @PostMapping("/{proposalId}/confirm-price")
     fun confirmPrice(
@@ -279,9 +316,14 @@ class ProposalController(
     ): ResponseEntity<ProposalResponse> {
         return try {
             val id = ProposalId(proposalId)
-            val authorized = sessionTokenVerifier.verify(authorization) != null || ownerCredentialGate.verify(authorization)
-            if (!authorized) {
+            val verified = sessionTokenVerifier.verify(authorization)
+            val isOwner = verified == null && ownerCredentialGate.verify(authorization)
+            if (verified == null && !isOwner) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            }
+            val proposal = proposalRepository.findById(id) ?: return ResponseEntity.notFound().build()
+            if (verified != null && proposal.passengerReference?.passengerId != verified.sub) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
             }
             val outcome = proposalAssignmentOrchestrationService.confirmPrice(ConfirmPriceCommand(id))
             ResponseEntity.ok(outcome.proposal.toResponse())
@@ -299,7 +341,7 @@ class ProposalController(
      * -- the passenger's own refusing act (Product Owner instruction,
      * 2026-09-05: the request simply closes, no renegotiation, no
      * automatic reroute to another driver). Same authorization bar as
-     * [confirmPrice]'s own — see that method's own KDoc.
+     * [confirmPrice]'s own — see that method's own KDoc (ADR-066).
      */
     @PostMapping("/{proposalId}/decline-price")
     fun declinePrice(
@@ -308,9 +350,14 @@ class ProposalController(
     ): ResponseEntity<ProposalResponse> {
         return try {
             val id = ProposalId(proposalId)
-            val authorized = sessionTokenVerifier.verify(authorization) != null || ownerCredentialGate.verify(authorization)
-            if (!authorized) {
+            val verified = sessionTokenVerifier.verify(authorization)
+            val isOwner = verified == null && ownerCredentialGate.verify(authorization)
+            if (verified == null && !isOwner) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            }
+            val proposal = proposalRepository.findById(id) ?: return ResponseEntity.notFound().build()
+            if (verified != null && proposal.passengerReference?.passengerId != verified.sub) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
             }
             val event = proposalApplicationService.declinePriceProposal(DeclinePriceCommand(id))
             ResponseEntity.ok(
@@ -387,14 +434,41 @@ class ProposalController(
         }
     }
 
+    /**
+     * ## Proposal Participant Authorization (ADR-066, P0 remediation -- [PO DECISION 2], accepted)
+     *
+     * Was fully unauthenticated -- anyone holding a `proposalId` could read
+     * the order↔driver binding and the stated price. Now: 401 without a
+     * valid credential (`Basic` owner or `Bearer`, checked in that order,
+     * mirroring [listProposals]'s own `?driverId=` branch); 404 if unknown;
+     * for a `Bearer` caller, 403 unless the token names either this
+     * proposal's own passenger or its own driver.
+     */
     @GetMapping("/{proposalId}")
-    fun getProposal(@PathVariable proposalId: String): ResponseEntity<ProposalResponse> =
-        try {
-            val proposal = proposalRepository.findById(ProposalId(proposalId))
-            if (proposal != null) ResponseEntity.ok(proposal.toResponse()) else ResponseEntity.notFound().build()
+    fun getProposal(
+        @PathVariable proposalId: String,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<ProposalResponse> {
+        return try {
+            val id = ProposalId(proposalId)
+            if (authorization != null && authorization.startsWith("Basic ")) {
+                if (!ownerCredentialGate.verify(authorization)) {
+                    return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+                }
+                val proposal = proposalRepository.findById(id) ?: return ResponseEntity.notFound().build()
+                return ResponseEntity.ok(proposal.toResponse())
+            }
+            val verified = sessionTokenVerifier.verify(authorization)
+                ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            val proposal = proposalRepository.findById(id) ?: return ResponseEntity.notFound().build()
+            if (proposal.passengerReference?.passengerId != verified.sub && proposal.driver.driverId != verified.drv) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+            }
+            ResponseEntity.ok(proposal.toResponse())
         } catch (ex: IllegalArgumentException) {
             ResponseEntity.badRequest().build()
         }
+    }
 
     /**
      * List Proposals for Order (`?orderId=...`, since Sprint
@@ -425,10 +499,17 @@ class ProposalController(
      * gains no new capability, mirroring ADR-060 Decision 5's identical
      * reasoning for `GET /v1/orders`.
      *
-     * `?orderId=` is deliberately left exactly as unauthenticated as
-     * before (ADR-060 Decision 4: it is an enumeration *sink*, not a
-     * *source* — locking it needs a `passengerReference` on `Proposal`,
-     * not authorized by this change).
+     * ## Authorization on `?orderId=` (ADR-066, P0 remediation)
+     *
+     * No longer unauthenticated -- `?orderId=` was ADR-060 Decision 4's own
+     * named blocker ("locking it needs a `passengerReference` on
+     * `Proposal`"), closed by this ADR. `Basic` owner credential returns
+     * every proposal for that order, unchanged from before. A `Bearer`
+     * caller now requires a valid token (401 otherwise) and receives only
+     * proposals where the token names either the proposal's own passenger
+     * or its own driver -- non-matching rows are silently omitted, never
+     * 403, so a list of an order with no proposals visible to this caller
+     * is indistinguishable from one with none at all (no existence oracle).
      */
     @GetMapping
     fun listProposals(
@@ -438,14 +519,29 @@ class ProposalController(
     ): ResponseEntity<List<ProposalResponse>> =
         try {
             when {
-                orderId != null && driverId == null ->
-                    ResponseEntity.ok(proposalRepository.findByOrder(OrderReference(orderId)).map { it.toResponse() })
+                orderId != null && driverId == null -> listProposalsForOrder(authorization, orderId)
                 driverId != null && orderId == null -> listProposalsForDriver(authorization, driverId)
                 else -> ResponseEntity.badRequest().build()
             }
         } catch (ex: IllegalArgumentException) {
             ResponseEntity.badRequest().build()
         }
+
+    private fun listProposalsForOrder(authorization: String?, orderId: String): ResponseEntity<List<ProposalResponse>> {
+        if (authorization != null && authorization.startsWith("Basic ")) {
+            if (!ownerCredentialGate.verify(authorization)) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            }
+            return ResponseEntity.ok(proposalRepository.findByOrder(OrderReference(orderId)).map { it.toResponse() })
+        }
+        val verified = sessionTokenVerifier.verify(authorization)
+            ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+        return ResponseEntity.ok(
+            proposalRepository.findByOrder(OrderReference(orderId))
+                .filter { it.passengerReference?.passengerId == verified.sub || it.driver.driverId == verified.drv }
+                .map { it.toResponse() }
+        )
+    }
 
     private fun listProposalsForDriver(authorization: String?, driverId: String): ResponseEntity<List<ProposalResponse>> {
         if (authorization != null && authorization.startsWith("Basic ")) {

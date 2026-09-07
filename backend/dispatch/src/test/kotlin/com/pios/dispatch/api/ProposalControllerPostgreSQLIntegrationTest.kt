@@ -77,6 +77,17 @@ import kotlin.test.assertTrue
  * relationships it always did, just under identifiers unique to this one
  * run, so leftover rows from any prior run -- this file's own historical
  * ones included -- can never again collide with a fresh one.
+ *
+ * ADR-066 (Proposal Participant Authorization): `createProposal` now
+ * requires `passengerReference` in the body, matching the Bearer caller's
+ * own `sub`; `getProposal` and `listProposals`'s own `?orderId=` branch now
+ * require a credential too. [passengerIdentity] replaces the old
+ * [passengerToken] helper -- it mints a fresh, unique `sub` per call (this
+ * file's own established isolation convention, see the class KDoc above)
+ * and returns it alongside the matching `Authorization` header, so every
+ * call site can supply both the header and the request body's
+ * `passengerReference` from the one true value, never two independently
+ * generated ones that would silently mismatch.
  */
 class ProposalControllerPostgreSQLIntegrationTest {
 
@@ -132,7 +143,11 @@ class ProposalControllerPostgreSQLIntegrationTest {
 
     private fun driverToken(driverId: String): String = bearer(issueToken(sub = "$driverId-identity", drv = driverId))
 
-    private fun passengerToken(): String = bearer(issueToken(sub = "postgres-vertical-passenger-${UUID.randomUUID()}"))
+    /** ADR-066: a fresh passenger identity per call -- `first` is the `Authorization` header, `second` the matching `passengerReference` (the same `sub`), so [ProposeDriverRequest] and the header can never silently diverge. */
+    private fun passengerIdentity(): Pair<String, String> {
+        val sub = "postgres-vertical-passenger-${UUID.randomUUID()}"
+        return bearer(issueToken(sub = sub)) to sub
+    }
 
     private fun ownerAuth(): String =
         "Basic " + Base64.getEncoder().encodeToString("owner:$ownerPassword".toByteArray())
@@ -152,15 +167,16 @@ class ProposalControllerPostgreSQLIntegrationTest {
     fun `creating a proposal through REST persists it to PostgreSQL, loadable by id`() {
         val order = uniqueOrderId("1")
         val driver = uniqueDriverId("1")
+        val (auth, passengerRef) = passengerIdentity()
         val created = controller.createProposal(
-            ProposeDriverRequest(order, driver),
-            authorization = passengerToken()
+            ProposeDriverRequest(order, driver, passengerReference = passengerRef),
+            authorization = auth
         )
 
         assertEquals(HttpStatus.CREATED, created.statusCode)
         val body = assertNotNull(created.body)
 
-        val loaded = controller.getProposal(body.proposalId)
+        val loaded = controller.getProposal(body.proposalId, authorization = auth)
 
         assertEquals(HttpStatus.OK, loaded.statusCode)
         assertEquals("OPEN", loaded.body?.status)
@@ -180,14 +196,16 @@ class ProposalControllerPostgreSQLIntegrationTest {
     @Test
     fun `creating a second proposal through REST for an order with an open proposal already in PostgreSQL is rejected`() {
         val order = uniqueOrderId("2")
+        val (auth1, ref1) = passengerIdentity()
         controller.createProposal(
-            ProposeDriverRequest(order, uniqueDriverId("1")),
-            authorization = passengerToken()
+            ProposeDriverRequest(order, uniqueDriverId("1"), passengerReference = ref1),
+            authorization = auth1
         )
 
+        val (auth2, ref2) = passengerIdentity()
         val second = controller.createProposal(
-            ProposeDriverRequest(order, uniqueDriverId("2")),
-            authorization = passengerToken()
+            ProposeDriverRequest(order, uniqueDriverId("2"), passengerReference = ref2),
+            authorization = auth2
         )
 
         assertEquals(HttpStatus.CONFLICT, second.statusCode)
@@ -196,40 +214,43 @@ class ProposalControllerPostgreSQLIntegrationTest {
     @Test
     fun `accepting a proposal through REST persists ACCEPTED to PostgreSQL`() {
         val driver = uniqueDriverId("1")
+        val (auth, passengerRef) = passengerIdentity()
         val created = controller.createProposal(
-            ProposeDriverRequest(uniqueOrderId("3"), driver),
-            authorization = passengerToken()
+            ProposeDriverRequest(uniqueOrderId("3"), driver, passengerReference = passengerRef),
+            authorization = auth
         ).body!!
 
         val accepted = controller.acceptProposal(created.proposalId, authorization = driverToken(driver))
 
         assertEquals(HttpStatus.OK, accepted.statusCode)
         assertEquals("ACCEPTED", accepted.body?.status)
-        assertEquals("ACCEPTED", controller.getProposal(created.proposalId).body?.status)
+        assertEquals("ACCEPTED", controller.getProposal(created.proposalId, authorization = auth).body?.status)
     }
 
     @Test
     fun `accepting a proposal through REST as a different driver, backed by PostgreSQL, is rejected`() {
         val driver1 = uniqueDriverId("1")
         val driver2 = uniqueDriverId("2")
+        val (auth, passengerRef) = passengerIdentity()
         val created = controller.createProposal(
-            ProposeDriverRequest(uniqueOrderId("3-idor"), driver1),
-            authorization = passengerToken()
+            ProposeDriverRequest(uniqueOrderId("3-idor"), driver1, passengerReference = passengerRef),
+            authorization = auth
         ).body!!
 
         val response = controller.acceptProposal(created.proposalId, authorization = driverToken(driver2))
 
         assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
-        assertEquals("OPEN", controller.getProposal(created.proposalId).body?.status)
+        assertEquals("OPEN", controller.getProposal(created.proposalId, authorization = auth).body?.status)
     }
 
     @Test
     fun `accepting a proposal through REST also persists a real Assignment to PostgreSQL`() {
         val order = OrderReference(uniqueOrderId("3b"))
         val driver = uniqueDriverId("1")
+        val (auth, passengerRef) = passengerIdentity()
         val created = controller.createProposal(
-            ProposeDriverRequest(order.orderId, driver),
-            authorization = passengerToken()
+            ProposeDriverRequest(order.orderId, driver, passengerReference = passengerRef),
+            authorization = auth
         ).body!!
 
         controller.acceptProposal(created.proposalId, authorization = driverToken(driver))
@@ -243,9 +264,10 @@ class ProposalControllerPostgreSQLIntegrationTest {
     fun `accepting an already-accepted proposal through REST does not create a second Assignment in PostgreSQL`() {
         val order = OrderReference(uniqueOrderId("3c"))
         val driver = uniqueDriverId("1")
+        val (auth, passengerRef) = passengerIdentity()
         val created = controller.createProposal(
-            ProposeDriverRequest(order.orderId, driver),
-            authorization = passengerToken()
+            ProposeDriverRequest(order.orderId, driver, passengerReference = passengerRef),
+            authorization = auth
         ).body!!
         controller.acceptProposal(created.proposalId, authorization = driverToken(driver))
 
@@ -262,9 +284,10 @@ class ProposalControllerPostgreSQLIntegrationTest {
         assignmentRepository.save(
             Assignment.create(order, DriverReference(uniqueDriverId("preexisting"))).assignment
         )
+        val (auth, passengerRef) = passengerIdentity()
         val created = controller.createProposal(
-            ProposeDriverRequest(order.orderId, driver),
-            authorization = passengerToken()
+            ProposeDriverRequest(order.orderId, driver, passengerReference = passengerRef),
+            authorization = auth
         ).body!!
 
         val response = controller.acceptProposal(created.proposalId, authorization = driverToken(driver))
@@ -276,58 +299,62 @@ class ProposalControllerPostgreSQLIntegrationTest {
     @Test
     fun `declining a proposal through REST persists DECLINED to PostgreSQL`() {
         val driver = uniqueDriverId("1")
+        val (auth, passengerRef) = passengerIdentity()
         val created = controller.createProposal(
-            ProposeDriverRequest(uniqueOrderId("4"), driver),
-            authorization = passengerToken()
+            ProposeDriverRequest(uniqueOrderId("4"), driver, passengerReference = passengerRef),
+            authorization = auth
         ).body!!
 
         val declined = controller.declineProposal(created.proposalId, authorization = driverToken(driver))
 
         assertEquals(HttpStatus.OK, declined.statusCode)
         assertEquals("DECLINED", declined.body?.status)
-        assertEquals("DECLINED", controller.getProposal(created.proposalId).body?.status)
+        assertEquals("DECLINED", controller.getProposal(created.proposalId, authorization = auth).body?.status)
     }
 
     @Test
     fun `declining a proposal through REST as a different driver, backed by PostgreSQL, is rejected`() {
         val driver1 = uniqueDriverId("1")
         val driver2 = uniqueDriverId("2")
+        val (auth, passengerRef) = passengerIdentity()
         val created = controller.createProposal(
-            ProposeDriverRequest(uniqueOrderId("4-idor"), driver1),
-            authorization = passengerToken()
+            ProposeDriverRequest(uniqueOrderId("4-idor"), driver1, passengerReference = passengerRef),
+            authorization = auth
         ).body!!
 
         val response = controller.declineProposal(created.proposalId, authorization = driverToken(driver2))
 
         assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
-        assertEquals("OPEN", controller.getProposal(created.proposalId).body?.status)
+        assertEquals("OPEN", controller.getProposal(created.proposalId, authorization = auth).body?.status)
     }
 
     @Test
     fun `lapsing a proposal through REST persists LAPSED to PostgreSQL`() {
+        val (auth, passengerRef) = passengerIdentity()
         val created = controller.createProposal(
-            ProposeDriverRequest(uniqueOrderId("5"), uniqueDriverId("1")),
-            authorization = passengerToken()
+            ProposeDriverRequest(uniqueOrderId("5"), uniqueDriverId("1"), passengerReference = passengerRef),
+            authorization = auth
         ).body!!
 
         val lapsed = controller.lapseProposal(created.proposalId, authorization = ownerAuth())
 
         assertEquals(HttpStatus.OK, lapsed.statusCode)
         assertEquals("LAPSED", lapsed.body?.status)
-        assertEquals("LAPSED", controller.getProposal(created.proposalId).body?.status)
+        assertEquals("LAPSED", controller.getProposal(created.proposalId, authorization = auth).body?.status)
     }
 
     @Test
     fun `lapsing a proposal through REST with no Authorization header is rejected`() {
+        val (auth, passengerRef) = passengerIdentity()
         val created = controller.createProposal(
-            ProposeDriverRequest(uniqueOrderId("5-anon"), uniqueDriverId("1")),
-            authorization = passengerToken()
+            ProposeDriverRequest(uniqueOrderId("5-anon"), uniqueDriverId("1"), passengerReference = passengerRef),
+            authorization = auth
         ).body!!
 
         val response = controller.lapseProposal(created.proposalId)
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
-        assertEquals("OPEN", controller.getProposal(created.proposalId).body?.status)
+        assertEquals("OPEN", controller.getProposal(created.proposalId, authorization = auth).body?.status)
     }
 
     @Test
@@ -335,29 +362,32 @@ class ProposalControllerPostgreSQLIntegrationTest {
         val order = uniqueOrderId("6")
         val driver1 = uniqueDriverId("1")
         val driver2 = uniqueDriverId("2")
+        val (auth1, ref1) = passengerIdentity()
         val first = controller.createProposal(
-            ProposeDriverRequest(order, driver1),
-            authorization = passengerToken()
+            ProposeDriverRequest(order, driver1, passengerReference = ref1),
+            authorization = auth1
         ).body!!
         controller.declineProposal(first.proposalId, authorization = driverToken(driver1))
 
+        val (auth2, ref2) = passengerIdentity()
         val second = controller.createProposal(
-            ProposeDriverRequest(order, driver2),
-            authorization = passengerToken()
+            ProposeDriverRequest(order, driver2, passengerReference = ref2),
+            authorization = auth2
         )
 
         assertEquals(HttpStatus.CREATED, second.statusCode)
     }
 
     @Test
-    fun `listing proposals for an order through REST reflects PostgreSQL state`() {
+    fun `listing proposals for an order through REST reflects PostgreSQL state, to the owner credential`() {
         val order = uniqueOrderId("7")
+        val (auth, passengerRef) = passengerIdentity()
         controller.createProposal(
-            ProposeDriverRequest(order, uniqueDriverId("1")),
-            authorization = passengerToken()
+            ProposeDriverRequest(order, uniqueDriverId("1"), passengerReference = passengerRef),
+            authorization = auth
         )
 
-        val listed = controller.listProposals(orderId = order, driverId = null)
+        val listed = controller.listProposals(authorization = ownerAuth(), orderId = order, driverId = null)
 
         assertEquals(HttpStatus.OK, listed.statusCode)
         assertEquals(1, listed.body?.size)
@@ -365,9 +395,53 @@ class ProposalControllerPostgreSQLIntegrationTest {
     }
 
     @Test
+    fun `listing proposals for an order through REST, as its own passenger, reflects PostgreSQL state`() {
+        val order = uniqueOrderId("7p")
+        val (auth, passengerRef) = passengerIdentity()
+        controller.createProposal(
+            ProposeDriverRequest(order, uniqueDriverId("1"), passengerReference = passengerRef),
+            authorization = auth
+        )
+
+        val listed = controller.listProposals(authorization = auth, orderId = order, driverId = null)
+
+        assertEquals(HttpStatus.OK, listed.statusCode)
+        assertEquals(1, listed.body?.size)
+    }
+
+    @Test
+    fun `listing proposals for an order with no Authorization header returns 401 -- no longer unauthenticated`() {
+        val order = uniqueOrderId("7-anon")
+        val (auth, passengerRef) = passengerIdentity()
+        controller.createProposal(
+            ProposeDriverRequest(order, uniqueDriverId("1"), passengerReference = passengerRef),
+            authorization = auth
+        )
+
+        val listed = controller.listProposals(orderId = order, driverId = null)
+
+        assertEquals(HttpStatus.UNAUTHORIZED, listed.statusCode)
+    }
+
+    @Test
     fun `loading a proposal id never created in PostgreSQL returns 404 through REST`() {
-        val response = controller.getProposal("postgres-vertical-never-created-${UUID.randomUUID()}")
+        val (auth, _) = passengerIdentity()
+
+        val response = controller.getProposal("postgres-vertical-never-created-${UUID.randomUUID()}", authorization = auth)
 
         assertEquals(HttpStatus.NOT_FOUND, response.statusCode)
+    }
+
+    @Test
+    fun `loading a proposal with no Authorization header returns 401 through REST`() {
+        val (auth, passengerRef) = passengerIdentity()
+        val created = controller.createProposal(
+            ProposeDriverRequest(uniqueOrderId("8-anon"), uniqueDriverId("1"), passengerReference = passengerRef),
+            authorization = auth
+        ).body!!
+
+        val response = controller.getProposal(created.proposalId)
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
     }
 }

@@ -1,0 +1,11 @@
+-- ADR-066 (Proposal Participant Authorization): additive, nullable
+-- reference alongside existing state, never replacing it. Every proposal
+-- row that exists before this migration has NULL in this column
+-- permanently -- no backfill is possible or attempted, since Dispatch has
+-- no way to learn which passenger a historical proposal belonged to
+-- without a cross-module read the same ADR rejects (Decision 3). A NULL
+-- row fails closed under the new authorization checks (ADR-066 Decision
+-- 8), it is never treated as "anyone authenticated may act."
+-- Precedent: V7__proposal_timestamps.sql (this same table),
+-- V8__add_order_pickup_address.sql (order-management).
+ALTER TABLE proposals ADD COLUMN passenger_reference TEXT NULL;

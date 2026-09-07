@@ -64,6 +64,29 @@ import java.time.Instant
  * un-widened lookup would throw `NoSuchMethodException` at the first real
  * database read, not at compile time.
  *
+ * **ADR-066 binding constraint, added on top of the above.** [Proposal]'s
+ * private constructor gained a sixth parameter,
+ * [Proposal.passengerReference] (`PassengerReference?`). ADR-066 Decision 9
+ * assumed a nullable inline value class boxes at the JVM level (the way it
+ * would for a primitive-backed one, since a primitive cannot itself
+ * represent `null`). **Verified empirically for this case (`javap` on the
+ * compiled class) and found otherwise**: since [PassengerReference]'s own
+ * underlying type is already `String` — a reference type that already
+ * represents `null` natively — Kotlin erases `PassengerReference?` to
+ * plain `java.lang.String` here too, identically to the non-null inline
+ * classes above, not to a boxed `PassengerReference`. The reflective
+ * lookup is widened to `(String, String, String, Instant, Boolean,
+ * String)` — six parameters, the sixth still `String::class.java` — and
+ * [reconstruct] passes the raw, possibly-null string straight through with
+ * no `PassengerReference(...)` wrapping at the reflection call site (the
+ * Kotlin-level wrapping happens on the *read* side, inside [Proposal]
+ * itself, not here). Recorded here so a future reader does not "fix" this
+ * back to `PassengerReference::class.java` on the assumption in ADR-066's
+ * own text — that assumption is superseded by this verified fact, and this
+ * is the correction record for it (`CLAUDE.md`: "Never Delete
+ * Documentation" applies to a superseded technical claim the same as a
+ * superseded product decision).
+ *
  * ## `stated_price` (ADR-042, Stated Ride Price Minimal Model)
  *
  * The row is inserted at *propose* time — before any price exists — and
@@ -78,6 +101,17 @@ import java.time.Instant
  * value through [Proposal.accept]'s own `statedPrice` parameter in the
  * `ACCEPTED` branch, mirroring [Proposal.accept]'s own `at`-parameter
  * precedent on `Assignment`.
+ *
+ * ## `passenger_reference` (ADR-066, Proposal Participant Authorization)
+ *
+ * Fixed at *propose* time, like `created_at` -- never renegotiated as the
+ * proposal resolves. It therefore appears in the `INSERT` column list and
+ * `VALUES` only, deliberately **not** in the `DO UPDATE SET` clause: an
+ * upsert on this row is always a later status transition ([reconstruct]'s
+ * own `when` branches), never a re-proposal, so there is never a
+ * legitimate new value to write on conflict, and including it there would
+ * silently let a conflicting write overwrite who the proposal was created
+ * for.
  */
 @Repository
 class PostgreSQLProposalRepository(
@@ -85,13 +119,13 @@ class PostgreSQLProposalRepository(
 ) : ProposalRepository {
 
     private val selectColumns =
-        "id, order_reference, driver_reference, status, stated_price, stated_eta_minutes, created_at, responded_at, is_test"
+        "id, order_reference, driver_reference, status, stated_price, stated_eta_minutes, created_at, responded_at, is_test, passenger_reference"
 
     override fun save(proposal: Proposal) {
         jdbcTemplate.update(
             """
-            INSERT INTO proposals (id, order_reference, driver_reference, status, stated_price, stated_eta_minutes, created_at, responded_at, is_test)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO proposals (id, order_reference, driver_reference, status, stated_price, stated_eta_minutes, created_at, responded_at, is_test, passenger_reference)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 status = EXCLUDED.status,
                 stated_price = EXCLUDED.stated_price,
@@ -106,7 +140,8 @@ class PostgreSQLProposalRepository(
             proposal.statedEtaMinutes,
             proposal.createdAt?.let { Timestamp.from(it) },
             proposal.respondedAt?.let { Timestamp.from(it) },
-            proposal.isTest
+            proposal.isTest,
+            proposal.passengerReference?.passengerId
         )
     }
 
@@ -141,12 +176,24 @@ class PostgreSQLProposalRepository(
         )
 
     private fun reconstruct(rs: ResultSet): Proposal {
+        // ADR-066 Decision 9 assumed `passengerReference` (`PassengerReference?`)
+        // would box at the JVM level, requiring `PassengerReference::class.java`
+        // here. Verified empirically (`javap` on the compiled class) to be
+        // false for this case: since `PassengerReference` wraps `String` --
+        // already nullable at the JVM level -- Kotlin erases the nullable
+        // inline class straight to `String`, exactly like the non-null
+        // `id`/`order_reference`/`driver_reference` slots above. The sixth
+        // reflective type is therefore `String::class.java`, and the raw,
+        // possibly-null string is passed through unwrapped -- see this
+        // class's own KDoc "ADR-066 binding constraint" section for the
+        // full correction record.
         val constructor = Proposal::class.java.getDeclaredConstructor(
             String::class.java,
             String::class.java,
             String::class.java,
             Instant::class.java,
-            Boolean::class.java
+            Boolean::class.java,
+            String::class.java
         )
         constructor.isAccessible = true
         val proposal = constructor.newInstance(
@@ -154,7 +201,8 @@ class PostgreSQLProposalRepository(
             rs.getString("order_reference"),
             rs.getString("driver_reference"),
             rs.getTimestamp("created_at")?.toInstant(),
-            rs.getBoolean("is_test")
+            rs.getBoolean("is_test"),
+            rs.getString("passenger_reference")
         )
         val status = ProposalStatus.valueOf(rs.getString("status"))
         val statedPrice = rs.getString("stated_price")

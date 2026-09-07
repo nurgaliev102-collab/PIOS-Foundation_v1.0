@@ -8,6 +8,7 @@ import com.pios.dispatch.application.ProposalAssignmentOrchestrationService
 import com.pios.dispatch.domain.Assignment
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
+import com.pios.dispatch.domain.PassengerReference
 import com.pios.dispatch.persistence.InMemoryAssignmentRepository
 import com.pios.dispatch.persistence.InMemoryProposalRepository
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -53,6 +54,17 @@ import kotlin.test.assertTrue
  * the two "blank returns 400" tests below deliberately still call
  * `createProposal` with no `authorization` argument at all -- proving that
  * case is unaffected by this task, not merely convenient.
+ *
+ * ADR-066 (Proposal Participant Authorization): `createProposal` now
+ * requires `passengerReference` in the body too -- [passengerToken] always
+ * mints `sub = "passenger-test"`, so [proposeRequest] below defaults
+ * `passengerReference` to that same value, keeping every pre-existing test
+ * call site a one-line change (add `authorization = passengerToken()`
+ * stays; the body gains a matching reference for free). `confirmPrice`/
+ * `declinePrice` now require the caller to be that same passenger (or the
+ * owner); `listProposals`'s `?orderId=` branch and `getProposal` (a sixth
+ * surface this ADR closes, beyond the five Task 20/21 named) now require a
+ * credential too. See each new section below for the full matrix.
  */
 class ProposalControllerTest {
 
@@ -113,15 +125,26 @@ class ProposalControllerTest {
     /** Task 21: a valid session token naming [driverId] as its own `drv` -- what `DriverHome.tsx` now sends on accept/decline. */
     private fun driverToken(driverId: String): String = bearer(issueToken(sub = "$driverId-identity", drv = driverId))
 
-    /** Task 21: a valid session token for some authenticated passenger, `drv == null` -- what `RideRequest.tsx` now sends on create. */
+    /** Task 21: a valid session token for some authenticated passenger, `drv == null` -- what `RideRequest.tsx` now sends on create. Fixed `sub`, matched by [proposeRequest]'s own default `passengerReference` (ADR-066). */
     private fun passengerToken(): String = bearer(issueToken(sub = "passenger-test"))
+
+    /** ADR-066: a valid session token for a passenger other than [passengerToken]'s own -- for mismatch/IDOR cases. */
+    private fun otherPassengerToken(): String = bearer(issueToken(sub = "passenger-other"))
 
     /** Task 21: the owner/coordinator credential -- what `Coordinator.tsx` now sends on create, and the only credential `lapseProposal` accepts. */
     private fun ownerAuth(): String = basicHeader("owner", ownerPassword)
 
+    /** ADR-066: [ProposeDriverRequest] defaulting `passengerReference` to [passengerToken]'s own `sub`, so every pre-existing call site needs no further change. */
+    private fun proposeRequest(
+        orderId: String,
+        driverId: String,
+        isTest: Boolean = false,
+        passengerReference: String? = "passenger-test"
+    ): ProposeDriverRequest = ProposeDriverRequest(orderId, driverId, isTest, passengerReference)
+
     @Test
     fun `creating a proposal returns 201 with a new proposal id and OPEN status`() {
-        val response = controller.createProposal(ProposeDriverRequest("order-1", "driver-1"), authorization = passengerToken())
+        val response = controller.createProposal(proposeRequest("order-1", "driver-1"), authorization = passengerToken())
 
         assertEquals(HttpStatus.CREATED, response.statusCode)
         val body = assertNotNull(response.body)
@@ -134,7 +157,7 @@ class ProposalControllerTest {
     @Test
     fun `creating a proposal stamps createdAt, and respondedAt stays null until it is resolved`() {
         val response = controller.createProposal(
-            ProposeDriverRequest("order-created-at", "driver-created-at"),
+            proposeRequest("order-created-at", "driver-created-at"),
             authorization = passengerToken()
         )
 
@@ -147,7 +170,7 @@ class ProposalControllerTest {
     fun `accepting a proposal returns a respondedAt`() {
         val created = assertNotNull(
             controller.createProposal(
-                ProposeDriverRequest("order-responded-at", "driver-responded-at"),
+                proposeRequest("order-responded-at", "driver-responded-at"),
                 authorization = passengerToken()
             ).body
         )
@@ -173,16 +196,16 @@ class ProposalControllerTest {
 
     @Test
     fun `creating a proposal for an order that already has an open proposal returns 409`() {
-        controller.createProposal(ProposeDriverRequest("order-2", "driver-1"), authorization = passengerToken())
+        controller.createProposal(proposeRequest("order-2", "driver-1"), authorization = passengerToken())
 
-        val response = controller.createProposal(ProposeDriverRequest("order-2", "driver-2"), authorization = passengerToken())
+        val response = controller.createProposal(proposeRequest("order-2", "driver-2"), authorization = passengerToken())
 
         assertEquals(HttpStatus.CONFLICT, response.statusCode)
     }
 
     @Test
     fun `accepting a proposal returns 200 with ACCEPTED status`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-3", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-3", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.acceptProposal(created.proposalId, authorization = driverToken("driver-1"))
 
@@ -194,7 +217,7 @@ class ProposalControllerTest {
 
     @Test
     fun `accepting a proposal with a statedPrice returns it in the response`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-3c", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-3c", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.acceptProposal(
             created.proposalId,
@@ -208,7 +231,7 @@ class ProposalControllerTest {
 
     @Test
     fun `accepting a proposal with no request body succeeds with no statedPrice and still creates an Assignment`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-3d", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-3d", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.acceptProposal(created.proposalId, authorization = driverToken("driver-1"))
 
@@ -220,7 +243,7 @@ class ProposalControllerTest {
 
     @Test
     fun `accepting a proposal with a request body but no statedPrice field succeeds with no statedPrice`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-3e", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-3e", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.acceptProposal(created.proposalId, AcceptProposalRequest(), authorization = driverToken("driver-1"))
 
@@ -230,7 +253,7 @@ class ProposalControllerTest {
 
     @Test
     fun `accepting a proposal with a blank statedPrice returns 400`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-3f", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-3f", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.acceptProposal(
             created.proposalId,
@@ -243,7 +266,7 @@ class ProposalControllerTest {
 
     @Test
     fun `declining a proposal never returns a statedPrice`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-3g", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-3g", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.declineProposal(created.proposalId, authorization = driverToken("driver-1"))
 
@@ -255,7 +278,7 @@ class ProposalControllerTest {
 
     @Test
     fun `accepting a proposal with a statedEtaMinutes returns it in the response`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-3h", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-3h", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.acceptProposal(
             created.proposalId,
@@ -269,7 +292,7 @@ class ProposalControllerTest {
 
     @Test
     fun `accepting a proposal with no request body succeeds with no statedEtaMinutes`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-3i", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-3i", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.acceptProposal(created.proposalId, authorization = driverToken("driver-1"))
 
@@ -279,7 +302,7 @@ class ProposalControllerTest {
 
     @Test
     fun `accepting a proposal with a statedEtaMinutes of zero returns 400`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-3j", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-3j", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.acceptProposal(
             created.proposalId,
@@ -292,7 +315,7 @@ class ProposalControllerTest {
 
     @Test
     fun `accepting a proposal with a statedEtaMinutes above 240 returns 400`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-3k", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-3k", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.acceptProposal(
             created.proposalId,
@@ -305,7 +328,7 @@ class ProposalControllerTest {
 
     @Test
     fun `declining a proposal never returns a statedEtaMinutes`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-3l", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-3l", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.declineProposal(created.proposalId, authorization = driverToken("driver-1"))
 
@@ -315,7 +338,7 @@ class ProposalControllerTest {
 
     @Test
     fun `accepting a proposal through REST also creates an Assignment for the same order and driver`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-3b", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-3b", "driver-1"), authorization = passengerToken()).body!!
 
         controller.acceptProposal(created.proposalId, authorization = driverToken("driver-1"))
 
@@ -333,7 +356,7 @@ class ProposalControllerTest {
 
     @Test
     fun `accepting an already-accepted proposal returns 409`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-4", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-4", "driver-1"), authorization = passengerToken()).body!!
         controller.acceptProposal(created.proposalId, authorization = driverToken("driver-1"))
 
         val response = controller.acceptProposal(created.proposalId, authorization = driverToken("driver-1"))
@@ -343,7 +366,7 @@ class ProposalControllerTest {
 
     @Test
     fun `accepting an already-accepted proposal through REST does not create a second Assignment`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-4b", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-4b", "driver-1"), authorization = passengerToken()).body!!
         controller.acceptProposal(created.proposalId, authorization = driverToken("driver-1"))
 
         controller.acceptProposal(created.proposalId, authorization = driverToken("driver-1"))
@@ -353,7 +376,7 @@ class ProposalControllerTest {
 
     @Test
     fun `declining a proposal through REST never creates an Assignment`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-4c", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-4c", "driver-1"), authorization = passengerToken()).body!!
 
         controller.declineProposal(created.proposalId, authorization = driverToken("driver-1"))
 
@@ -362,7 +385,7 @@ class ProposalControllerTest {
 
     @Test
     fun `lapsing a proposal through REST never creates an Assignment`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-4d", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-4d", "driver-1"), authorization = passengerToken()).body!!
 
         controller.lapseProposal(created.proposalId, authorization = ownerAuth())
 
@@ -373,7 +396,7 @@ class ProposalControllerTest {
     fun `accepting a proposal for an order that already has an Assignment returns 409`() {
         val order = OrderReference("order-4e")
         assignmentRepository.save(Assignment.create(order, DriverReference("driver-preexisting")).assignment)
-        val created = controller.createProposal(ProposeDriverRequest("order-4e", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-4e", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.acceptProposal(created.proposalId, authorization = driverToken("driver-1"))
 
@@ -383,7 +406,7 @@ class ProposalControllerTest {
 
     @Test
     fun `declining a proposal returns 200 with DECLINED status`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-5", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-5", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.declineProposal(created.proposalId, authorization = driverToken("driver-1"))
 
@@ -400,7 +423,7 @@ class ProposalControllerTest {
 
     @Test
     fun `lapsing a proposal returns 200 with LAPSED status`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-6", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-6", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.lapseProposal(created.proposalId, authorization = ownerAuth())
 
@@ -415,29 +438,88 @@ class ProposalControllerTest {
         assertEquals(HttpStatus.NOT_FOUND, response.statusCode)
     }
 
-    @Test
-    fun `getting a proposal by id returns 200 with its current state`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-7", "driver-1"), authorization = passengerToken()).body!!
+    // --- getProposal (ADR-066, P0 remediation -- [PO DECISION 2], accepted: this endpoint is a sixth surface, beyond the five Task 20/21 named) ---
 
-        val response = controller.getProposal(created.proposalId)
+    @Test
+    fun `getting a proposal by id returns 200 with its current state, as the proposal's own passenger`() {
+        val created = controller.createProposal(proposeRequest("order-7", "driver-1"), authorization = passengerToken()).body!!
+
+        val response = controller.getProposal(created.proposalId, authorization = passengerToken())
 
         assertEquals(HttpStatus.OK, response.statusCode)
         assertEquals(created.proposalId, response.body?.proposalId)
     }
 
     @Test
+    fun `getting a proposal by id returns 200 with its current state, as the proposal's own driver`() {
+        val created = controller.createProposal(proposeRequest("order-7d", "driver-7d"), authorization = passengerToken()).body!!
+
+        val response = controller.getProposal(created.proposalId, authorization = driverToken("driver-7d"))
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+    }
+
+    @Test
+    fun `getting a proposal by id returns 200 for the owner credential`() {
+        val created = controller.createProposal(proposeRequest("order-7o", "driver-7o"), authorization = passengerToken()).body!!
+
+        val response = controller.getProposal(created.proposalId, authorization = ownerAuth())
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+    }
+
+    @Test
     fun `getting an unknown proposal id returns 404`() {
-        val response = controller.getProposal("never-created")
+        val response = controller.getProposal("never-created", authorization = passengerToken())
 
         assertEquals(HttpStatus.NOT_FOUND, response.statusCode)
     }
 
     @Test
-    fun `listing proposals for an order returns only that order's proposals`() {
-        controller.createProposal(ProposeDriverRequest("order-8", "driver-1"), authorization = passengerToken())
-        controller.createProposal(ProposeDriverRequest("order-9", "driver-2"), authorization = passengerToken())
+    fun `getting a proposal with no Authorization header returns 401`() {
+        val created = controller.createProposal(proposeRequest("order-7-anon", "driver-1"), authorization = passengerToken()).body!!
 
-        val response = controller.listProposals(orderId = "order-8", driverId = null)
+        val response = controller.getProposal(created.proposalId)
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
+    fun `getting a proposal as neither its passenger nor its driver is forbidden -- IDOR`() {
+        val created = controller.createProposal(
+            proposeRequest("order-7-idor", "driver-victim-7"),
+            authorization = passengerToken()
+        ).body!!
+
+        val response = controller.getProposal(created.proposalId, authorization = otherPassengerToken())
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+    }
+
+    @Test
+    fun `getting a proposal with a bad owner Basic credential returns 401`() {
+        val created = controller.createProposal(proposeRequest("order-7-bad-owner", "driver-1"), authorization = passengerToken()).body!!
+
+        val response = controller.getProposal(created.proposalId, authorization = basicHeader("owner", "wrong-password"))
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
+    fun `getting a proposal with a blank id returns 400`() {
+        val response = controller.getProposal("", authorization = passengerToken())
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
+    // --- listProposals?orderId= (ADR-066, P0 remediation -- was ADR-060 Decision 4's own named blocker, closed here) ---
+
+    @Test
+    fun `listing proposals for an order returns only that order's proposals, to the owner credential`() {
+        controller.createProposal(proposeRequest("order-8", "driver-1"), authorization = passengerToken())
+        controller.createProposal(proposeRequest("order-9", "driver-2"), authorization = passengerToken())
+
+        val response = controller.listProposals(authorization = ownerAuth(), orderId = "order-8", driverId = null)
 
         assertEquals(HttpStatus.OK, response.statusCode)
         val body = assertNotNull(response.body)
@@ -446,8 +528,59 @@ class ProposalControllerTest {
     }
 
     @Test
+    fun `listing proposals for an order, as its own passenger, returns that proposal`() {
+        controller.createProposal(proposeRequest("order-8p", "driver-1"), authorization = passengerToken())
+
+        val response = controller.listProposals(authorization = passengerToken(), orderId = "order-8p", driverId = null)
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertTrue(assertNotNull(response.body).isNotEmpty())
+    }
+
+    @Test
+    fun `listing proposals for an order, as its own driver, returns that proposal`() {
+        controller.createProposal(proposeRequest("order-8dr", "driver-8dr"), authorization = passengerToken())
+
+        val response = controller.listProposals(authorization = driverToken("driver-8dr"), orderId = "order-8dr", driverId = null)
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertTrue(assertNotNull(response.body).isNotEmpty())
+    }
+
+    @Test
+    fun `listing proposals for an order, as a stranger, returns an empty list -- no existence oracle`() {
+        controller.createProposal(proposeRequest("order-8s", "driver-victim-8s"), authorization = passengerToken())
+
+        val response = controller.listProposals(authorization = otherPassengerToken(), orderId = "order-8s", driverId = null)
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals(emptyList(), response.body)
+    }
+
+    @Test
+    fun `listing proposals for an order with no Authorization header returns 401 -- no longer unauthenticated`() {
+        controller.createProposal(proposeRequest("order-8-anon", "driver-1"), authorization = passengerToken())
+
+        val response = controller.listProposals(orderId = "order-8-anon", driverId = null)
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+        assertNull(response.body)
+    }
+
+    @Test
+    fun `listing proposals for an order with a bad owner Basic credential returns 401`() {
+        val response = controller.listProposals(
+            authorization = basicHeader("owner", "wrong-password"),
+            orderId = "order-8-bad-owner",
+            driverId = null
+        )
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
     fun `listing proposals for an order with none returns an empty list`() {
-        val response = controller.listProposals(orderId = "order-never-proposed", driverId = null)
+        val response = controller.listProposals(authorization = ownerAuth(), orderId = "order-never-proposed", driverId = null)
 
         assertEquals(HttpStatus.OK, response.statusCode)
         assertEquals(emptyList(), response.body)
@@ -455,15 +588,15 @@ class ProposalControllerTest {
 
     @Test
     fun `listing proposals with a blank orderId returns 400`() {
-        val response = controller.listProposals(orderId = "", driverId = null)
+        val response = controller.listProposals(authorization = ownerAuth(), orderId = "", driverId = null)
 
         assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
     }
 
     @Test
     fun `listing proposals for a driver returns only that driver's proposals`() {
-        controller.createProposal(ProposeDriverRequest("order-10", "driver-10"), authorization = passengerToken())
-        controller.createProposal(ProposeDriverRequest("order-11", "driver-11"), authorization = passengerToken())
+        controller.createProposal(proposeRequest("order-10", "driver-10"), authorization = passengerToken())
+        controller.createProposal(proposeRequest("order-11", "driver-11"), authorization = passengerToken())
 
         val response = controller.listProposals(
             authorization = bearer(issueToken(sub = "driver-10-identity", drv = "driver-10")),
@@ -503,7 +636,7 @@ class ProposalControllerTest {
         assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
     }
 
-    // --- Authorization on ?driverId= (ADR-060 Decision 4) ---
+    // --- Authorization on ?driverId= (ADR-060 Decision 4, unchanged and non-regression-tested by ADR-066) ---
 
     @Test
     fun `driverId with no Authorization header returns 401`() {
@@ -515,7 +648,7 @@ class ProposalControllerTest {
 
     @Test
     fun `driverId for another driver is forbidden -- IDOR`() {
-        controller.createProposal(ProposeDriverRequest("order-12", "driver-12"), authorization = passengerToken())
+        controller.createProposal(proposeRequest("order-12", "driver-12"), authorization = passengerToken())
 
         val response = controller.listProposals(
             authorization = bearer(issueToken(sub = "driver-13-identity", drv = "driver-13")),
@@ -539,7 +672,7 @@ class ProposalControllerTest {
 
     @Test
     fun `driverId with a valid owner Basic credential returns any named driver's proposals`() {
-        controller.createProposal(ProposeDriverRequest("order-14", "driver-14"), authorization = passengerToken())
+        controller.createProposal(proposeRequest("order-14", "driver-14"), authorization = passengerToken())
 
         val response = controller.listProposals(
             authorization = basicHeader("owner", ownerPassword),
@@ -562,27 +695,11 @@ class ProposalControllerTest {
         assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
     }
 
-    @Test
-    fun `orderId stays unauthenticated -- no Authorization header still returns 200, deliberately`() {
-        controller.createProposal(ProposeDriverRequest("order-15", "driver-15"), authorization = passengerToken())
-
-        val response = controller.listProposals(orderId = "order-15", driverId = null)
-
-        assertEquals(HttpStatus.OK, response.statusCode)
-    }
-
-    @Test
-    fun `getting a proposal with a blank id returns 400`() {
-        val response = controller.getProposal("")
-
-        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
-    }
-
     // --- Task 21: Proposal API Security Remediation ---
 
     @Test
     fun `create -- anonymous, no Authorization header, is rejected`() {
-        val response = controller.createProposal(ProposeDriverRequest("order-sec-create-1", "driver-1"))
+        val response = controller.createProposal(proposeRequest("order-sec-create-1", "driver-1"))
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
         assertTrue(repository.findByOrder(OrderReference("order-sec-create-1")).isEmpty())
@@ -591,7 +708,7 @@ class ProposalControllerTest {
     @Test
     fun `create -- any authenticated passenger token succeeds, naming any driverId, deliberately unrestricted`() {
         val response = controller.createProposal(
-            ProposeDriverRequest("order-sec-create-2", "driver-not-in-any-relationship"),
+            proposeRequest("order-sec-create-2", "driver-not-in-any-relationship"),
             authorization = passengerToken()
         )
 
@@ -601,7 +718,7 @@ class ProposalControllerTest {
     @Test
     fun `create -- the owner credential succeeds, exactly as Coordinator's own manual-assignment flow needs`() {
         val response = controller.createProposal(
-            ProposeDriverRequest("order-sec-create-3", "driver-1"),
+            proposeRequest("order-sec-create-3", "driver-1", passengerReference = "coordinator-selected-passenger"),
             authorization = ownerAuth()
         )
 
@@ -611,16 +728,93 @@ class ProposalControllerTest {
     @Test
     fun `create -- a malformed Authorization header is rejected exactly like a missing one`() {
         val response = controller.createProposal(
-            ProposeDriverRequest("order-sec-create-4", "driver-1"),
+            proposeRequest("order-sec-create-4", "driver-1"),
             authorization = "not-a-real-scheme"
         )
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
     }
 
+    // --- Proposal Participant Authorization (ADR-066, P0 remediation) ---
+
+    @Test
+    fun `create -- a missing passengerReference returns 400, for an otherwise-valid Bearer caller`() {
+        val response = controller.createProposal(
+            ProposeDriverRequest("order-sec-passenger-missing", "driver-1"),
+            authorization = passengerToken()
+        )
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+        assertTrue(repository.findByOrder(OrderReference("order-sec-passenger-missing")).isEmpty())
+    }
+
+    @Test
+    fun `create -- a blank passengerReference returns 400`() {
+        val response = controller.createProposal(
+            proposeRequest("order-sec-passenger-blank", "driver-1", passengerReference = "   "),
+            authorization = passengerToken()
+        )
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
+    @Test
+    fun `create -- a missing passengerReference returns 400, even for the owner credential`() {
+        val response = controller.createProposal(
+            ProposeDriverRequest("order-sec-passenger-missing-owner", "driver-1"),
+            authorization = ownerAuth()
+        )
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
+    @Test
+    fun `create -- a passengerReference not matching the Bearer token's own sub is rejected -- IDOR, no proposal is created under a false identity`() {
+        val response = controller.createProposal(
+            proposeRequest("order-sec-passenger-mismatch", "driver-1", passengerReference = "passenger-victim"),
+            authorization = passengerToken()
+        )
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+        assertTrue(repository.findByOrder(OrderReference("order-sec-passenger-mismatch")).isEmpty())
+    }
+
+    @Test
+    fun `create -- the owner credential is not compared against sub -- it has none (ADR-044 Decision 6)`() {
+        val response = controller.createProposal(
+            proposeRequest("order-sec-passenger-owner-any", "driver-1", passengerReference = "any-passenger-the-coordinator-selected"),
+            authorization = ownerAuth()
+        )
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+    }
+
+    @Test
+    fun `create -- a matching passengerReference is persisted on the Proposal`() {
+        val created = controller.createProposal(
+            proposeRequest("order-sec-passenger-persisted", "driver-1"),
+            authorization = passengerToken()
+        ).body!!
+
+        assertEquals(
+            PassengerReference("passenger-test"),
+            repository.findById(com.pios.dispatch.domain.ProposalId(created.proposalId))?.passengerReference
+        )
+    }
+
+    @Test
+    fun `create -- passengerReference never appears in the response body -- ADR-066 Decision 6`() {
+        val response = controller.createProposal(proposeRequest("order-sec-passenger-not-returned", "driver-1"), authorization = passengerToken())
+
+        // ProposalResponse has no passengerReference field at all -- this
+        // test documents the intent (Decision 6) at the call site, not just
+        // relying on the type system to make it impossible to regress.
+        assertNotNull(response.body)
+    }
+
     @Test
     fun `accept -- driver accepts their own Proposal, succeeds`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-sec-accept-own", "driver-own"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-sec-accept-own", "driver-own"), authorization = passengerToken()).body!!
 
         val response = controller.acceptProposal(created.proposalId, authorization = driverToken("driver-own"))
 
@@ -631,7 +825,7 @@ class ProposalControllerTest {
     @Test
     fun `accept -- a different driver's Proposal is rejected -- IDOR`() {
         val created = controller.createProposal(
-            ProposeDriverRequest("order-sec-accept-other", "driver-victim"),
+            proposeRequest("order-sec-accept-other", "driver-victim"),
             authorization = passengerToken()
         ).body!!
 
@@ -644,7 +838,7 @@ class ProposalControllerTest {
     @Test
     fun `accept -- no Authorization header at all is rejected before any proposal lookup`() {
         val created = controller.createProposal(
-            ProposeDriverRequest("order-sec-accept-anon", "driver-1"),
+            proposeRequest("order-sec-accept-anon", "driver-1"),
             authorization = passengerToken()
         ).body!!
 
@@ -656,7 +850,7 @@ class ProposalControllerTest {
     @Test
     fun `accept -- a passenger-only token (drv null) is rejected, even for a real proposal`() {
         val created = controller.createProposal(
-            ProposeDriverRequest("order-sec-accept-passenger-token", "driver-1"),
+            proposeRequest("order-sec-accept-passenger-token", "driver-1"),
             authorization = passengerToken()
         ).body!!
 
@@ -667,7 +861,7 @@ class ProposalControllerTest {
 
     @Test
     fun `decline -- driver declines their own Proposal, succeeds`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-sec-decline-own", "driver-own"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-sec-decline-own", "driver-own"), authorization = passengerToken()).body!!
 
         val response = controller.declineProposal(created.proposalId, authorization = driverToken("driver-own"))
 
@@ -678,7 +872,7 @@ class ProposalControllerTest {
     @Test
     fun `decline -- a different driver's Proposal is rejected -- IDOR`() {
         val created = controller.createProposal(
-            ProposeDriverRequest("order-sec-decline-other", "driver-victim"),
+            proposeRequest("order-sec-decline-other", "driver-victim"),
             authorization = passengerToken()
         ).body!!
 
@@ -691,7 +885,7 @@ class ProposalControllerTest {
     @Test
     fun `decline -- no Authorization header at all is rejected`() {
         val created = controller.createProposal(
-            ProposeDriverRequest("order-sec-decline-anon", "driver-1"),
+            proposeRequest("order-sec-decline-anon", "driver-1"),
             authorization = passengerToken()
         ).body!!
 
@@ -702,7 +896,7 @@ class ProposalControllerTest {
 
     @Test
     fun `lapse -- the owner credential succeeds`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-sec-lapse-owner", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-sec-lapse-owner", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.lapseProposal(created.proposalId, authorization = ownerAuth())
 
@@ -712,7 +906,7 @@ class ProposalControllerTest {
 
     @Test
     fun `lapse -- no Authorization header is rejected`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-sec-lapse-anon", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-sec-lapse-anon", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.lapseProposal(created.proposalId)
 
@@ -722,12 +916,144 @@ class ProposalControllerTest {
 
     @Test
     fun `lapse -- the named driver's own token is not sufficient -- only the owner may lapse`() {
-        val created = controller.createProposal(ProposeDriverRequest("order-sec-lapse-driver", "driver-1"), authorization = passengerToken()).body!!
+        val created = controller.createProposal(proposeRequest("order-sec-lapse-driver", "driver-1"), authorization = passengerToken()).body!!
 
         val response = controller.lapseProposal(created.proposalId, authorization = driverToken("driver-1"))
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
         assertEquals("OPEN", repository.findByOrder(OrderReference("order-sec-lapse-driver")).single().status.name)
+    }
+
+    // --- confirm-price / decline-price (ADR-066, P0 remediation -- previously the largest gap: any authenticated account could act on any passenger's price) ---
+
+    @Test
+    fun `confirm-price -- the proposal's own passenger succeeds`() {
+        val created = controller.createProposal(proposeRequest("order-sec-confirm-own", "driver-cp-1"), authorization = passengerToken()).body!!
+        controller.proposePrice(created.proposalId, ProposePriceRequest("500"), authorization = driverToken("driver-cp-1"))
+
+        val response = controller.confirmPrice(created.proposalId, authorization = passengerToken())
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals("ACCEPTED", response.body?.status)
+    }
+
+    @Test
+    fun `confirm-price -- a different passenger is rejected -- IDOR, this was the largest single gap`() {
+        val created = controller.createProposal(proposeRequest("order-sec-confirm-idor", "driver-cp-2"), authorization = passengerToken()).body!!
+        controller.proposePrice(created.proposalId, ProposePriceRequest("500"), authorization = driverToken("driver-cp-2"))
+
+        val response = controller.confirmPrice(created.proposalId, authorization = otherPassengerToken())
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+        assertEquals("PRICE_PROPOSED", repository.findByOrder(OrderReference("order-sec-confirm-idor")).single().status.name)
+    }
+
+    @Test
+    fun `confirm-price -- the owner credential succeeds, with no sub to compare`() {
+        val created = controller.createProposal(proposeRequest("order-sec-confirm-owner", "driver-cp-3"), authorization = passengerToken()).body!!
+        controller.proposePrice(created.proposalId, ProposePriceRequest("500"), authorization = driverToken("driver-cp-3"))
+
+        val response = controller.confirmPrice(created.proposalId, authorization = ownerAuth())
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+    }
+
+    @Test
+    fun `confirm-price -- no Authorization header is rejected before any lookup`() {
+        val created = controller.createProposal(proposeRequest("order-sec-confirm-anon", "driver-cp-4"), authorization = passengerToken()).body!!
+        controller.proposePrice(created.proposalId, ProposePriceRequest("500"), authorization = driverToken("driver-cp-4"))
+
+        val response = controller.confirmPrice(created.proposalId)
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
+    fun `confirm-price -- an unknown proposal id returns 404`() {
+        val response = controller.confirmPrice("never-created", authorization = passengerToken())
+
+        assertEquals(HttpStatus.NOT_FOUND, response.statusCode)
+    }
+
+    /**
+     * ADR-066 Decision 8 -- [PO DECISION 1], accepted: a proposal created
+     * before this deploys has `passengerReference == null` and fails
+     * closed. Constructed directly via the domain factory with no
+     * passenger reference (mirroring how a legacy row reconstructs), not
+     * through [controller], since every real create path now requires one.
+     */
+    @Test
+    fun `confirm-price -- a legacy proposal with no passengerReference fails closed (403), never treated as anyone-may-act`() {
+        val legacyCreated = com.pios.dispatch.domain.Proposal.propose(
+            OrderReference("order-sec-confirm-legacy"),
+            DriverReference("driver-cp-legacy"),
+            passengerReference = null
+        )
+        repository.save(legacyCreated.proposal)
+        legacyCreated.proposal.proposePrice("500")
+        repository.save(legacyCreated.proposal)
+
+        val response = controller.confirmPrice(legacyCreated.proposal.id.value, authorization = passengerToken())
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+    }
+
+    @Test
+    fun `decline-price -- the proposal's own passenger succeeds`() {
+        val created = controller.createProposal(proposeRequest("order-sec-declineprice-own", "driver-dp-1"), authorization = passengerToken()).body!!
+        controller.proposePrice(created.proposalId, ProposePriceRequest("500"), authorization = driverToken("driver-dp-1"))
+
+        val response = controller.declinePrice(created.proposalId, authorization = passengerToken())
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals("DECLINED", response.body?.status)
+    }
+
+    @Test
+    fun `decline-price -- a different passenger is rejected -- IDOR`() {
+        val created = controller.createProposal(proposeRequest("order-sec-declineprice-idor", "driver-dp-2"), authorization = passengerToken()).body!!
+        controller.proposePrice(created.proposalId, ProposePriceRequest("500"), authorization = driverToken("driver-dp-2"))
+
+        val response = controller.declinePrice(created.proposalId, authorization = otherPassengerToken())
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+        assertEquals("PRICE_PROPOSED", repository.findByOrder(OrderReference("order-sec-declineprice-idor")).single().status.name)
+    }
+
+    @Test
+    fun `decline-price -- the owner credential succeeds`() {
+        val created = controller.createProposal(proposeRequest("order-sec-declineprice-owner", "driver-dp-3"), authorization = passengerToken()).body!!
+        controller.proposePrice(created.proposalId, ProposePriceRequest("500"), authorization = driverToken("driver-dp-3"))
+
+        val response = controller.declinePrice(created.proposalId, authorization = ownerAuth())
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+    }
+
+    @Test
+    fun `decline-price -- no Authorization header is rejected`() {
+        val created = controller.createProposal(proposeRequest("order-sec-declineprice-anon", "driver-dp-4"), authorization = passengerToken()).body!!
+        controller.proposePrice(created.proposalId, ProposePriceRequest("500"), authorization = driverToken("driver-dp-4"))
+
+        val response = controller.declinePrice(created.proposalId)
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
+    fun `decline-price -- a legacy proposal with no passengerReference fails closed (403)`() {
+        val legacyCreated = com.pios.dispatch.domain.Proposal.propose(
+            OrderReference("order-sec-declineprice-legacy"),
+            DriverReference("driver-dp-legacy"),
+            passengerReference = null
+        )
+        repository.save(legacyCreated.proposal)
+        legacyCreated.proposal.proposePrice("500")
+        repository.save(legacyCreated.proposal)
+
+        val response = controller.declinePrice(legacyCreated.proposal.id.value, authorization = passengerToken())
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
     }
 
     // --- Driver availability gate (pilot-readiness fix) ---
@@ -805,7 +1131,7 @@ class ProposalControllerTest {
         val fixture = GatedFixture()
 
         val response = fixture.controller.createProposal(
-            ProposeDriverRequest("order-avail-1", "driver-never-toggled"),
+            ProposeDriverRequest("order-avail-1", "driver-never-toggled", passengerReference = "gated-fixture-passenger"),
             authorization = fixture.passengerAuthorization()
         )
 
@@ -818,7 +1144,7 @@ class ProposalControllerTest {
         fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-unavailable"), available = false))
 
         val response = fixture.controller.createProposal(
-            ProposeDriverRequest("order-avail-2", "driver-unavailable"),
+            ProposeDriverRequest("order-avail-2", "driver-unavailable", passengerReference = "gated-fixture-passenger"),
             authorization = fixture.passengerAuthorization()
         )
 
@@ -831,7 +1157,7 @@ class ProposalControllerTest {
         fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-available"), available = true))
 
         val response = fixture.controller.createProposal(
-            ProposeDriverRequest("order-avail-3", "driver-available"),
+            ProposeDriverRequest("order-avail-3", "driver-available", passengerReference = "gated-fixture-passenger"),
             authorization = fixture.passengerAuthorization()
         )
 
@@ -843,7 +1169,7 @@ class ProposalControllerTest {
     @Test
     fun `creating a proposal with isTest true returns and persists isTest true`() {
         val response = controller.createProposal(
-            ProposeDriverRequest("order-e2e", "driver-e2e", isTest = true),
+            proposeRequest("order-e2e", "driver-e2e", isTest = true),
             authorization = passengerToken()
         )
 
@@ -853,7 +1179,7 @@ class ProposalControllerTest {
 
     @Test
     fun `creating a proposal without isTest defaults to isTest false -- a real proposal is never marked test by omission`() {
-        val response = controller.createProposal(ProposeDriverRequest("order-real", "driver-real"), authorization = passengerToken())
+        val response = controller.createProposal(proposeRequest("order-real", "driver-real"), authorization = passengerToken())
 
         assertEquals(false, assertNotNull(response.body).isTest)
     }

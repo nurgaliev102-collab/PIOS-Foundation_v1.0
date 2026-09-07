@@ -135,7 +135,8 @@ class ProposalApplicationService(
             order = command.order,
             driver = command.driver,
             existingProposals = existingProposals,
-            isTest = command.isTest
+            isTest = command.isTest,
+            passengerReference = command.passengerReference
         )
         proposalRepository.save(created.proposal)
         created

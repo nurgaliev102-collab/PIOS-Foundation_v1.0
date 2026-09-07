@@ -14,20 +14,26 @@ import org.springframework.stereotype.Service
  *
  * ## Why this is a new, separate service, not a change to [ProposalApplicationService.handle]
  *
- * `ProposalApplicationService.handle`/`ProposeDriverCommand` carry no
- * passenger identity at all today — every real caller
- * (`ProposalController.createProposal`, `Coordinator.tsx`,
- * `RideRequest.tsx`'s own direct-propose flow) supplies only
+ * At the time this service was introduced (Task 14), `ProposalApplicationService.handle`/
+ * `ProposeDriverCommand` carried no passenger identity at all — every real
+ * caller (`ProposalController.createProposal`, `Coordinator.tsx`,
+ * `RideRequest.tsx`'s own direct-propose flow) supplied only
  * `{orderId, driverId}`. Determining "does this order's passenger have a
- * primary driver" structurally requires a `PassengerReference` no
- * existing entry point provides. Task 14's own instructions forbid
- * modifying existing Proposal REST endpoints and forbid Coordinator/
- * frontend changes — so this service is additive: a new, separate,
- * optional entry point a *future* routing task can invoke once it has
- * both a `PassengerReference` and an `OrderReference` on hand (from
- * `OrderSubmitted`, or from wherever the future task decides to source
- * it — not decided here). [ProposalApplicationService.handle] and
- * `ProposalController`'s own existing endpoints are completely unchanged.
+ * primary driver" structurally required a `PassengerReference` no existing
+ * entry point provided. Task 14's own instructions forbade modifying
+ * existing Proposal REST endpoints and forbade Coordinator/frontend
+ * changes — so this service was additive: a new, separate, optional entry
+ * point a *future* routing task could invoke once it had both a
+ * `PassengerReference` and an `OrderReference` on hand. **ADR-066 (Proposal
+ * Participant Authorization) is that future addition**: `ProposeDriverCommand`
+ * now carries an optional `passengerReference`, and this service is its
+ * strongest source — see [attempt]'s own call site below. This reasoning
+ * paragraph is retained, corrected rather than deleted (`CLAUDE.md`: "Never
+ * Delete Documentation"), so a future reader understands why this remained
+ * a separate service even after the field it once lacked was added: nothing
+ * about *why* First Refusal is its own service depended on
+ * `ProposeDriverCommand` staying identity-free forever, only on Task 14's
+ * own then-current constraints, which this later ADR lawfully supersedes.
  *
  * ## Reuses [ProposalApplicationService.handle]'s own existing availability gate
  *
@@ -140,7 +146,12 @@ class FirstRefusalApplicationService(
 
         return try {
             val created = proposalApplicationService.handle(
-                ProposeDriverCommand(order = order, driver = primary.primaryDriverId, isTest = isTest)
+                ProposeDriverCommand(
+                    order = order,
+                    driver = primary.primaryDriverId,
+                    isTest = isTest,
+                    passengerReference = passengerReference
+                )
             )
             FirstRefusalOutcome.Proposed(created.proposal)
         } catch (ex: IllegalStateException) {

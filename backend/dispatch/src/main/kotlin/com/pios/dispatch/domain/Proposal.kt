@@ -46,13 +46,29 @@ import java.util.UUID
  * information (reference-not-ownership, ADR-005/009/019) and structurally
  * cannot read it — it is only ever the caller's own explicit declaration
  * at proposal-creation time.
+ *
+ * [passengerReference] (ADR-066, Proposal Participant Authorization) is
+ * this order's authenticated passenger, per the same reference-only
+ * convention [PassengerReference] already established for First Refusal
+ * (ADR-062) — a bare identifier only, never a name, phone, or address. A
+ * genuine constructor parameter, like [createdAt], since it is fixed at
+ * construction and independent of [status]: it is who this proposal was
+ * created for, not a fact that changes as the proposal resolves. `null`
+ * only for a proposal reconstructed from a row persisted before
+ * `V15__proposal_passenger_reference.sql` existed — never an ordinary
+ * permitted state for a newly created proposal, since [propose] and every
+ * real caller of it now supply one
+ * ([com.pios.dispatch.persistence.PostgreSQLProposalRepository]'s own
+ * reflective constructor lookup is widened to match, per that class's own
+ * KDoc on this constructor being reflectively invoked).
  */
 class Proposal private constructor(
     val id: ProposalId,
     val order: OrderReference,
     val driver: DriverReference,
     val createdAt: Instant? = null,
-    val isTest: Boolean = false
+    val isTest: Boolean = false,
+    val passengerReference: PassengerReference? = null
 ) {
     var status: ProposalStatus = ProposalStatus.OPEN
         private set
@@ -320,7 +336,8 @@ class Proposal private constructor(
             order: OrderReference,
             driver: DriverReference,
             existingProposals: Collection<Proposal> = emptyList(),
-            isTest: Boolean = false
+            isTest: Boolean = false,
+            passengerReference: PassengerReference? = null
         ): ProposalCreated {
             check(existingProposals.none { it.order == order && it.status == ProposalStatus.OPEN }) {
                 "Order ${order.orderId} already has an open proposal"
@@ -330,7 +347,8 @@ class Proposal private constructor(
                 order = order,
                 driver = driver,
                 createdAt = Instant.now(),
-                isTest = isTest
+                isTest = isTest,
+                passengerReference = passengerReference
             )
             val event = OrderProposed(orderId = order, driverId = driver)
             return ProposalCreated(proposal = proposal, event = event)
