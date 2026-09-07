@@ -126,6 +126,55 @@
   text-align: center;
 }
 
+/* Product owner request, 2026-09-07: "Мой бизнес" as three tabs
+   (Обзор/Клиенты/Маршруты) instead of one long scroll -- an underline
+   tab bar, matching the concept mockup's own treatment. */
+.tabBar {
+  display: flex;
+  gap: var(--pios-space-5);
+  border-bottom: 1px solid var(--pios-color-border);
+}
+
+.tabButton {
+  display: flex;
+  align-items: center;
+  gap: var(--pios-space-1);
+  padding: var(--pios-space-2) 0 var(--pios-space-3);
+  margin-bottom: -1px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--pios-color-text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.tabButtonActive {
+  color: var(--pios-color-accent);
+  border-bottom-color: var(--pios-color-accent);
+}
+
+.tabBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--pios-color-surface);
+  background: var(--pios-color-accent);
+  border-radius: var(--pios-radius-full);
+}
+
+.tabPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
 /* H6 ("Driver Growth Snapshot") -- same card shape `AvailabilityStatus`
    (a design-system `Card`) already uses just above it, so this reads as
    one more fact about today, not a separate widget bolted on. */

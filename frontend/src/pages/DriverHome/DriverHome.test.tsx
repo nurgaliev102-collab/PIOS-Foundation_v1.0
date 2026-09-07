@@ -427,6 +427,9 @@ describe('DriverHome', () => {
 
     await screen.findByText('Мой бизнес')
     expect(screen.getByText('Как это работает')).toBeInTheDocument()
+    // Business tabs (product owner request, 2026-09-07): the install card
+    // lives under "Клиенты", not "Обзор" (the default tab).
+    await userEvent.click(screen.getByRole('tab', { name: 'Клиенты' }))
     expect(screen.getByText('PIOS всегда под рукой')).toBeInTheDocument()
     expect(screen.getByText('Добавьте PIOS на экран телефона.')).toBeInTheDocument()
   })
@@ -440,6 +443,7 @@ describe('DriverHome', () => {
 
     renderDriverHome()
     await screen.findByText('Мой бизнес')
+    await userEvent.click(screen.getByRole('tab', { name: 'Клиенты' }))
 
     await userEvent.click(screen.getAllByRole('button', { name: 'Установить PIOS' })[0])
     expect(await screen.findByRole('button', { name: 'Закрыть' })).toBeInTheDocument()

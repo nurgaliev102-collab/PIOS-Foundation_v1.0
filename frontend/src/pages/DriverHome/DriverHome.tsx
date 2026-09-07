@@ -186,11 +186,15 @@ interface ConnectionListItem {
   createdAt: string
 }
 
-/** Growth Loops TZ v1, Phase 2 (docs/PIOS_GROWTH_LOOPS_TZ_V1.md Section 2): `GET /v1/drivers/:id/milestones`'s own response shape. */
+/** Growth Loops TZ v1, Phase 2 (docs/PIOS_GROWTH_LOOPS_TZ_V1.md Section 2): `GET /v1/drivers/:id/milestones`'s own response shape.
+ * `totalStatedEarnings`/`unpricedRidesCount` (ADR-065) are optional -- undefined until the backend ships them, in
+ * which case the earnings tile simply does not render rather than showing a fabricated zero. */
 interface DriverMilestonesInfo {
   completedRidesCount: number
   currentStreakWeeks: number
   repeatClientsCount: number
+  totalStatedEarnings?: number
+  unpricedRidesCount?: number
 }
 
 /**
@@ -440,6 +444,13 @@ export function DriverHome() {
   const [orderDetails, setOrderDetails] = useState<Record<string, OrderListItem>>({})
   const [connections, setConnections] = useState<ConnectionListItem[]>([])
   const [milestones, setMilestones] = useState<DriverMilestonesInfo | null>(null)
+  // Product owner request, 2026-09-07: "Мой бизнес" as three separate
+  // screens (Обзор/Клиенты/Маршруты), not one long scroll -- see the
+  // BUSINESS_TABS section below for what deliberately stayed outside the
+  // tabs and why. Defaults to "overview", matching the mockup's own
+  // default tab; never auto-switches on its own, so a driver who has
+  // navigated to another tab is never yanked back to it mid-shift.
+  const [activeBusinessTab, setActiveBusinessTab] = useState<'overview' | 'clients' | 'routes'>('overview')
   // ADR-040 (Assignment Ride Lifecycle): keyed by orderId, one entry per
   // ACCEPTED proposal that already has an Assignment — an OPEN proposal
   // has none yet, so never appears here.
@@ -1177,6 +1188,14 @@ export function DriverHome() {
   // own item 5. No history screen exists yet to move it to; it simply
   // stops appearing here.
   const visibleProposals = proposals.filter((p) => assignments[p.orderId]?.status !== 'COMPLETED')
+  // Product owner request, 2026-09-07 (business tabs): a badge on the
+  // "Маршруты" tab so a driver on "Обзор"/"Клиенты" still notices a ride
+  // waiting on them -- OPEN (needs Accept/Decline) or ACCEPTED (needs
+  // Прибыл/Начать/Завершить). Mirrors this same set exactly, just counted
+  // rather than rendered.
+  const routesNeedingAttentionCount = visibleProposals.filter(
+    (p) => p.status === 'OPEN' || p.status === 'ACCEPTED',
+  ).length
 
   return (
     <div className={styles.screen}>
@@ -1396,22 +1415,63 @@ export function DriverHome() {
 
         {status === 'ready' && driver && (
           <>
-            {/* H6 ("Driver Growth Snapshot"): one honest number per tile,
+            {/* Product owner request, 2026-09-07: "Мой бизнес" as three
+                separate screens (Обзор/Клиенты/Маршруты), not one long
+                scroll, matching the tab set from the concept mockup shown
+                earlier. Deliberately NOT wrapping "Ваши заказы" above --
+                docs/PIOS_DRIVER_HOME_UX_AUDIT.md Section 4/9/11 put open/
+                active orders directly under AvailabilityStatus specifically
+                so "what do I do right now" is never hidden behind a click;
+                folding that into a tab a driver might not be looking at
+                would reverse a deliberate safety property. The "Маршруты"
+                tab badge below still surfaces when something there needs
+                attention, so a driver on another tab is not blindsided. */}
+            <div className={styles.tabBar} role="tablist" aria-label="Мой бизнес">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeBusinessTab === 'overview'}
+                className={`${styles.tabButton} ${activeBusinessTab === 'overview' ? styles.tabButtonActive : ''}`}
+                onClick={() => setActiveBusinessTab('overview')}
+              >
+                Обзор
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeBusinessTab === 'clients'}
+                className={`${styles.tabButton} ${activeBusinessTab === 'clients' ? styles.tabButtonActive : ''}`}
+                onClick={() => setActiveBusinessTab('clients')}
+              >
+                Клиенты
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeBusinessTab === 'routes'}
+                className={`${styles.tabButton} ${activeBusinessTab === 'routes' ? styles.tabButtonActive : ''}`}
+                onClick={() => setActiveBusinessTab('routes')}
+              >
+                Маршруты
+                {routesNeedingAttentionCount > 0 && (
+                  <span className={styles.tabBadge}>{routesNeedingAttentionCount}</span>
+                )}
+              </button>
+            </div>
+
+            {activeBusinessTab === 'overview' && (
+            /* H6 ("Driver Growth Snapshot"): one honest number per tile,
                 deliberately -- see PIOS_PRODUCT_HYPOTHESES.md's own note on
                 what this Sprint does not do (no congratulatory wording, no
-                hiding a zero). Visual-only redesign (product owner request,
-                2026-09-07): a stat-tile grid instead of plain rows, colored
-                by the same semantic tokens PIOS_DESIGN_SYSTEM.md already
-                defines (trust for "Постоянных клиентов" — its own token
-                comment names this exact case: "recognized relationship").
-                No new data, no new business rule -- the four numbers below
-                are the same ones the old row layout already rendered.
-                "Новых клиентов" (fixed genitive plural), not a declined
-                phrase that changes with the count -- same convention
-                TodayCard.tsx already uses ("Заказов создано"), which avoids
-                Russian's noun declension by number entirely rather than
-                getting it subtly wrong. */}
-            <section className={styles.growthCard}>
+                hiding a zero). Stat-tile grid, colored by the same semantic
+                tokens PIOS_DESIGN_SYSTEM.md already defines (trust for
+                "Постоянных клиентов" — its own token comment names this
+                exact case: "recognized relationship"). "Новых клиентов"
+                (fixed genitive plural), not a declined phrase that changes
+                with the count -- same convention TodayCard.tsx already uses
+                ("Заказов создано"), which avoids Russian's noun declension
+                by number entirely rather than getting it subtly wrong. */
+            <section className={styles.growthCard} role="tabpanel">
               <p className={styles.growthTitle}>Сегодня</p>
               <div className={styles.growthGrid}>
                 {/* Growth Loops TZ v1, Phase 2 (docs/PIOS_GROWTH_LOOPS_TZ_V1.md
@@ -1468,8 +1528,8 @@ export function DriverHome() {
                     have ever connected through this driver's own personal
                     link. `connections` is already fetched in full for the
                     tile above; this is its lifetime length, no backend
-                    change. Wide summary strip, not a fifth square tile --
-                    it's a lifetime total, not one more "today" fact. */}
+                    change. Wide summary strip, not a square tile -- it's a
+                    lifetime total, not one more "today" fact. */}
                 <div className={`${styles.growthTile} ${styles.growthTileWide}`}>
                   <span className={styles.growthIcon} aria-hidden="true">
                     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
@@ -1481,58 +1541,111 @@ export function DriverHome() {
                   <span className={styles.growthLabel}>Всего пришло по вашей ссылке</span>
                   <span className={styles.growthCount}>{connections.length}</span>
                 </div>
+                {/* ADR-065 (Driver Earnings from Self-Stated Prices):
+                    renders only once the backend actually returns a number
+                    -- undefined (today, before that ships) means "not
+                    shown", never a fabricated ₽0. `unpricedRidesCount` is
+                    surfaced alongside so the figure never silently
+                    under-reports which rides it does not cover. */}
+                {typeof milestones?.totalStatedEarnings === 'number' && (
+                  <div className={`${styles.growthTile} ${styles.growthTileWide}`}>
+                    <span className={styles.growthIcon} aria-hidden="true">
+                      <svg
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M6.5 4h4.5a3 3 0 0 1 0 6h-4.5" />
+                        <path d="M6.5 4v12" />
+                        <path d="M5 9.5h6" />
+                        <path d="M5 12.5h6" />
+                      </svg>
+                    </span>
+                    <span className={styles.growthLabel}>
+                      Заработано по вашим ценам
+                      {(milestones.unpricedRidesCount ?? 0) > 0 &&
+                        ` · ещё ${milestones.unpricedRidesCount} поездок без цены`}
+                    </span>
+                    <span className={styles.growthCount}>{milestones.totalStatedEarnings} ₽</span>
+                  </div>
+                )}
               </div>
             </section>
-
-            <DriverCard
-              driverCode={driver.id}
-              displayName={driver.displayName}
-              availability={driver.availability}
-              hideCode
-            />
-            <QRCard
-              invitationLink={invitationProvider.linkFor(driver.id)}
-              linkTo={`/i/${driver.id}`}
-              onCopy={handleCopy}
-              onShare={handleShare}
-              feedback={feedback}
-            />
-            <p className={styles.hint}>Отправьте эту ссылку клиенту — он сможет заказать поездку прямо у вас.</p>
-
-            {/* PIOS Install v1 (Product Owner exception): a separate,
-                additive card -- never replaces "Как это работает" above,
-                which stays the onboarding-replay control. Hidden once PIOS
-                is already running installed (`isStandalone()`) -- nothing
-                to offer a driver who already has it. */}
-            {!isStandalone() && (
-              <section className={styles.installCard}>
-                <p className={styles.growthTitle}>PIOS всегда под рукой</p>
-                <p className={styles.installCardText}>Добавьте PIOS на экран телефона.</p>
-                <ActionButton label="Установить PIOS" variant="secondary" onClick={() => setShowInstall(true)} />
-              </section>
             )}
 
-            {/* Sprint "My Business + Circle of Trust", journey item 8 --
-                "Мои пассажиры", not "Пассажиры PIOS" (Section 14 of the
-                brief): these are this driver's own connections
-                (`GET /v1/connections?driverId=...`, already loaded above
-                for the "Сегодня" card), named where a past order already
-                revealed a name, otherwise honestly labelled as not yet
-                named rather than guessed. */}
-            {connections.length > 0 && (
-              <section className={styles.growthCard}>
-                <p className={styles.growthTitle}>Мои пассажиры</p>
-                <div className={styles.passengerList}>
-                  {connections.map((connection) => {
-                    const name = passengerNamesByReference(orderDetails)[connection.passengerReference]
-                    return (
-                      <span key={connection.passengerReference} className={styles.passengerListItem}>
-                        {name ?? 'Пассажир по вашей ссылке'}
-                      </span>
-                    )
-                  })}
-                </div>
-              </section>
+            {activeBusinessTab === 'clients' && (
+            <div className={styles.tabPanel} role="tabpanel">
+              <DriverCard
+                driverCode={driver.id}
+                displayName={driver.displayName}
+                availability={driver.availability}
+                hideCode
+              />
+              <QRCard
+                invitationLink={invitationProvider.linkFor(driver.id)}
+                linkTo={`/i/${driver.id}`}
+                onCopy={handleCopy}
+                onShare={handleShare}
+                feedback={feedback}
+              />
+              <p className={styles.hint}>Отправьте эту ссылку клиенту — он сможет заказать поездку прямо у вас.</p>
+
+              {/* PIOS Install v1 (Product Owner exception): a separate,
+                  additive card -- never replaces "Как это работает" above,
+                  which stays the onboarding-replay control. Hidden once PIOS
+                  is already running installed (`isStandalone()`) -- nothing
+                  to offer a driver who already has it. */}
+              {!isStandalone() && (
+                <section className={styles.installCard}>
+                  <p className={styles.growthTitle}>PIOS всегда под рукой</p>
+                  <p className={styles.installCardText}>Добавьте PIOS на экран телефона.</p>
+                  <ActionButton label="Установить PIOS" variant="secondary" onClick={() => setShowInstall(true)} />
+                </section>
+              )}
+
+              {/* Sprint "My Business + Circle of Trust", journey item 8 --
+                  "Мои пассажиры", not "Пассажиры PIOS" (Section 14 of the
+                  brief): these are this driver's own connections
+                  (`GET /v1/connections?driverId=...`, already loaded above
+                  for the "Сегодня" tab), named where a past order already
+                  revealed a name, otherwise honestly labelled as not yet
+                  named rather than guessed. */}
+              {connections.length > 0 && (
+                <section className={styles.growthCard}>
+                  <p className={styles.growthTitle}>Мои пассажиры</p>
+                  <div className={styles.passengerList}>
+                    {connections.map((connection) => {
+                      const name = passengerNamesByReference(orderDetails)[connection.passengerReference]
+                      return (
+                        <span key={connection.passengerReference} className={styles.passengerListItem}>
+                          {name ?? 'Пассажир по вашей ссылке'}
+                        </span>
+                      )
+                    })}
+                  </div>
+                </section>
+              )}
+            </div>
+            )}
+
+            {activeBusinessTab === 'routes' && (
+            /* No separate route-history data source exists yet -- a
+                completed ride already stops appearing in "Ваши заказы"
+                above (ADR-040's own "экран освобождается") with nowhere
+                else it goes today. Honest placeholder, not a duplicate of
+                the list above: same "disclosed gap" convention this file
+                already uses elsewhere rather than fabricating a history
+                view the data cannot support. */
+            <section className={styles.growthCard} role="tabpanel">
+              <p className={styles.growthTitle}>Маршруты</p>
+              <p className={styles.hint}>
+                История поездок появится здесь позже. Заказы, которые ждут вашего ответа или уже приняты — в разделе
+                «Ваши заказы» выше.
+              </p>
+            </section>
             )}
           </>
         )}
