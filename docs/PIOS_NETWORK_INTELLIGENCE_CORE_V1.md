@@ -10,7 +10,9 @@ The core user promise is:
 
 ## Product rule
 
-Do not treat the phonebook as the network. The phonebook is an input source. A PIOS relationship is created only by an explicit user action or a qualifying PIOS interaction.
+Do not treat the phonebook as the network. The phonebook is an input source. A PIOS Relationship is created only by explicit user recognition, an accepted connection/invitation, or a product flow that explicitly asks the user to save/recognize the person for future interaction.
+
+A transaction or interaction is historical evidence; it does not automatically create a permanent Relationship.
 
 Do not fabricate professional attributes. Every inferred attribute must carry provenance and confidence.
 
@@ -21,7 +23,7 @@ Do not fabricate professional attributes. Every inferred attribute must carry pr
 - Relationship: user-recognized relationship; multidimensional, not a linear state machine.
 - Capability: what a person can do/offer; many per person.
 - Need: what the user needs now.
-- Opportunity: a candidate produced from Need + Capability + Context + Availability + Relationship.
+- Opportunity: a candidate produced from Need + Capability + Context + Availability + Eligibility + Evidence; Relationship may affect relevance/preference when present.
 - History: derived from factual interactions/transactions; not mutable relationship state.
 - Source: where a fact came from.
 - Confidence: confirmed / likely / unknown.
@@ -40,7 +42,7 @@ Do not fabricate professional attributes. Every inferred attribute must carry pr
 
 Import contact records and normalize names, phones, email, organization, title, notes, URLs and available profile identifiers. Deduplicate by normalized phone/email first; name-only matches are suggestions, not automatic merges.
 
-Create Person candidates without automatically creating relationships.
+Create Person candidates without automatically creating Relationships.
 
 ### Progressive enrichment
 
@@ -69,6 +71,8 @@ For a Need such as `Мне нужен сварщик` search in this order:
 3. People in the user's extended network who may satisfy the need.
 4. PIOS opportunity/marketplace search only when the personal network is insufficient.
 
+Network-first is a preference for relevance and continuity, not a requirement to exhaustively scan every contact before returning useful results.
+
 Never silently mix confidence levels.
 
 ## Second-degree discovery
@@ -78,6 +82,8 @@ If no direct candidate exists, search relationships of recognized people for a s
 `User -> Known Person -> Introduced/known Person -> Capability`
 
 The system should offer an introduction/request action rather than implying an existing direct relationship.
+
+Do not expose another user's private address book, hidden relationships, phone numbers, or protected profile data merely because a path exists.
 
 ## Person card
 
