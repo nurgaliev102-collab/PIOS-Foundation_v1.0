@@ -72,12 +72,15 @@ Architecture Decision Records. Every change to an architectural decision is reco
 | [ADR-042](ADR/ADR-042-Stated-Ride-Price-Minimal-Model.md) | Stated Ride Price — Minimal MVP Model and Ownership Boundary | Proposed (one Product Owner input outstanding) |
 | [ADR-062](ADR/ADR-062-Primary-Driver-First-Refusal-Passenger-Experience-Dispatch-Contract.md) | Primary Driver / First Refusal — Passenger Experience → Dispatch Contract | **Accepted** |
 | [ADR-063](ADR/ADR-063-Trip-as-a-New-Dispatch-Owned-Aggregate.md) | Trip as a New Dispatch-Owned Aggregate, Distinct from Assignment | **Accepted** |
+| [ADR-067](ADR/ADR-067-PIOS-Core-Bounded-Context-Slice-01.md) | PIOS Core Bounded Context — Slice 01 (Participant History Projection) | **Ratified** |
 
 Note (Sprint 1 — Foundation Stabilization): this table is also missing ADR-027 through ADR-034, which exist as real files under `docs/ADR/` but were never added here — a pre-existing indexing gap found during this sprint's own documentation-sync work, left uncorrected here since it is outside this sprint's authorized scope; recorded for Sprint 2.
 
 Note (Sprint 4): the gap recorded above was never closed, and has since widened — ADR-038, ADR-039, ADR-040 and ADR-041 also exist as real files under `docs/ADR/` without a row here. Sprint 4 added the ADR-042 row above rather than rebuilding the whole index, which would exceed this sprint's own authorized scope. The files themselves, not this table, remain authoritative.
 
 Note (Task 10B — Architecture Ratification & Document Reconciliation, 2026-09-03): the gap above was never closed either, and now also includes ADR-043 through ADR-061 — all real files under `docs/ADR/`, none indexed here. This task added only the two rows it directly ratified (ADR-062, ADR-063), following the same narrow-scope precedent the two notes above already set, rather than rebuilding the whole index. The files themselves, not this table, remain authoritative.
+
+Note (ADR-067 ratification, 2026-09-10): the gap above still stands (ADR-043–061, ADR-064–066 remain unindexed). This task added only the single ADR-067 row it directly ratified, following the same narrow-scope precedent, and did not rebuild the index. The ADR files themselves, not this table, remain authoritative.
 
 ## Domain
 
