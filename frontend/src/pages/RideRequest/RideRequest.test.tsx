@@ -50,6 +50,7 @@ function renderAt(driverCode: string) {
       <Routes>
         <Route path="/i/:driverCode/request" element={<RideRequest />} />
         <Route path="/i/:driverCode" element={<div>passenger-landing-screen</div>} />
+        <Route path="/me" element={<div>my-drivers-screen</div>} />
       </Routes>
     </MemoryRouter>
   )
@@ -551,6 +552,37 @@ describe('RideRequest', () => {
     renderAt('driver-1')
 
     expect(await screen.findByRole('button', { name: 'Заказать ещё раз' })).toBeInTheDocument()
+  })
+
+  // Product audit (2026-09-12): "Мои водители" (/me) is PIOS's own
+  // designated repeat-a-ride path but had no link to it anywhere in the
+  // app -- offered only alongside "Заказать ещё раз", at the same terminal
+  // states, for the same reasoning.
+  it('offers "Мои водители" when the ride completed, and it navigates to /me', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }])
+
+    renderAt('driver-1')
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Мои водители' }))
+
+    expect(await screen.findByText('my-drivers-screen')).toBeInTheDocument()
+  })
+
+  it('does not offer "Мои водители" while the ride is accepted but not yet completed', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
+
+    renderAt('driver-1')
+
+    await screen.findByText(/принял ваш заказ/)
+    expect(screen.queryByRole('button', { name: 'Мои водители' })).not.toBeInTheDocument()
   })
 
   it('does not offer "Заказать ещё раз" while still waiting for the driver', async () => {

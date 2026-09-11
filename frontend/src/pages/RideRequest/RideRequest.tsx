@@ -1359,6 +1359,28 @@ export function RideRequest() {
                     <Button label="Заказать ещё раз" variant="primary" onClick={handleOrderAgain} />
                   </div>
                 )}
+                {/* Product audit (2026-09-12): "Мои водители" (/me) is this
+                    product's own designated repeat-a-ride path
+                    (MyDrivers.tsx's own KDoc) but had no link to it
+                    anywhere in the app -- a returning passenger, right at
+                    the exact moment their first ride finished and "what
+                    now" matters most, had no way to discover it existed.
+                    Placed only here (not the shared, prop-less Header,
+                    which DriverHome.tsx also renders -- a passenger-only
+                    link there would wrongly surface on a driver's own
+                    screen), and only alongside the other terminal-state
+                    actions above, for the same reason [handleOrderAgain]
+                    is gated the same way: a ride still open or in progress
+                    must not distract with "see your other drivers" while
+                    this one is the only thing that matters right now. */}
+                {(rideStatus === 'DECLINED' ||
+                  rideStatus === 'LAPSED' ||
+                  rideStatus === 'WITHDRAWN' ||
+                  rideStatus === 'COMPLETED') && (
+                  <button type="button" className={styles.textAction} onClick={() => navigate('/me')}>
+                    Мои водители
+                  </button>
+                )}
               </>
             )}
           </div>
