@@ -18,7 +18,7 @@ import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
 import { getDisplayName } from '../../persistence/localDisplayName'
 import { clearCurrentOrderId, getCurrentOrderId, saveCurrentOrderId } from '../../persistence/localCurrentOrder'
-import { request } from '../../api/apiClient'
+import { request, resolveBackendBaseUrl } from '../../api/apiClient'
 import styles from './RideRequest.module.css'
 
 // ADR-038/ADR-039/ADR-055: same module-level provider instance `PassengerLanding.tsx` already uses.
@@ -27,7 +27,13 @@ const identityProvider = new BackendIdentityProvider()
 // Order Management's own local port (INTERFACE_CONTRACTS.md) — distinct
 // from apiClientConfig's default (Driver Management's port), since this
 // is the second backend module this frontend now genuinely calls.
-const ORDER_MANAGEMENT_BASE_URL = import.meta.env.VITE_ORDER_MANAGEMENT_BASE_URL ?? 'http://localhost:8083'
+//
+// Product audit (2026-09-11): resolved via [resolveBackendBaseUrl] -- a
+// real remote passenger's own browser must reach this through
+// `server/serve.mjs`'s own same-origin reverse proxy, never through a
+// `localhost:8083` that only ever meant "this device," not the pilot host.
+// See that function's own KDoc (`api/apiClient.ts`) for the full reasoning.
+const ORDER_MANAGEMENT_BASE_URL = resolveBackendBaseUrl(import.meta.env.VITE_ORDER_MANAGEMENT_BASE_URL, 'http://localhost:8083')
 
 // Dispatch's own local port (INTERFACE_CONTRACTS.md) — Sprint 7B (Personal
 // Network Flow MVP): once the order exists, this page proposes it directly
@@ -35,13 +41,13 @@ const ORDER_MANAGEMENT_BASE_URL = import.meta.env.VITE_ORDER_MANAGEMENT_BASE_URL
 // Dispatch's already-existing `POST /v1/proposals` exactly as
 // `Coordinator.tsx` already does for the general queue -- no Coordinator
 // step for this, invited-passenger path.
-const DISPATCH_BASE_URL = import.meta.env.VITE_DISPATCH_BASE_URL ?? 'http://localhost:8084'
+const DISPATCH_BASE_URL = resolveBackendBaseUrl(import.meta.env.VITE_DISPATCH_BASE_URL, 'http://localhost:8084')
 
 // Passenger Experience's own local port (INTERFACE_CONTRACTS.md) — Sprint
 // "My Business + Circle of Trust" (ADR-054): this page now also calls that
 // module directly, to read this passenger's own circle of trust before
 // asking which driver today's ride goes to.
-const PASSENGER_EXPERIENCE_BASE_URL = import.meta.env.VITE_PASSENGER_EXPERIENCE_BASE_URL ?? 'http://localhost:8082'
+const PASSENGER_EXPERIENCE_BASE_URL = resolveBackendBaseUrl(import.meta.env.VITE_PASSENGER_EXPERIENCE_BASE_URL, 'http://localhost:8082')
 
 type Step = 'loading' | 'not-found' | 'error' | 'circle' | 'form' | 'confirmed'
 type ProposalStatus = 'proposing' | 'proposed' | 'error'

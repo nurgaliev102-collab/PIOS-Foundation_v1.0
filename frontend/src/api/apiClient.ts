@@ -15,7 +15,43 @@
  * `VITE_API_BASE_URL` once more than one backend module is involved.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8081'
+/**
+ * The single origin-resolution rule every per-module backend base URL in
+ * this frontend must follow. First established for Identity alone
+ * (`BackendIdentityProvider.ts`'s own `IDENTITY_BASE_URL`, ADR-038/ADR-055);
+ * extracted here once a product audit (2026-09-11) found the identical
+ * unconditional-`http://localhost:PORT` fallback duplicated, unfixed, in
+ * every *other* module's own base URL constant (`RideRequest.tsx`,
+ * `DriverHome.tsx`, `PassengerLanding.tsx`, and this file's own
+ * [API_BASE_URL]) — a real product gap, not a style issue: a genuine
+ * remote passenger or driver's own device has nothing listening on
+ * `localhost:808X`; only a browser running on the backend's own host ever
+ * reached the real API by coincidence.
+ *
+ * In a real browser: always same-origin (`''`). `server/serve.mjs`'s own
+ * `BACKEND_ROUTES` (`server/backendRoutes.mjs`) already reverse-proxies
+ * every path this frontend calls to the correct backend module server-side
+ * — exactly the mechanism a real remote device needs, since its own
+ * `localhost` is itself, never the pilot host. `vite preview`'s own
+ * `preview.proxy` (`vite.config.ts`) shares the identical route table, so
+ * this also works unchanged under `npm run preview`.
+ *
+ * Outside a browser (tests, SSR-style tooling): [envValue] if set, else
+ * [localDefault] — `npm run dev` (vite's dev server) has no equivalent
+ * proxy configured, so it also falls through to this branch's own
+ * `import.meta.env` / literal-default behavior, unchanged from before this
+ * function existed (matches [IDENTITY_BASE_URL]'s own pre-existing,
+ * already-shipped behavior exactly — this is that same logic, only now
+ * shared instead of duplicated).
+ */
+export function resolveBackendBaseUrl(envValue: string | undefined, localDefault: string): string {
+  if (typeof window !== 'undefined' && typeof window.location !== 'undefined') {
+    return ''
+  }
+  return envValue ?? localDefault
+}
+
+const API_BASE_URL = resolveBackendBaseUrl(import.meta.env.VITE_API_BASE_URL, 'http://localhost:8081')
 
 export interface ApiClientConfig {
   baseUrl: string

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, request } from './apiClient'
+import { ApiError, request, resolveBackendBaseUrl } from './apiClient'
 
 // Sprint "My Business + Circle of Trust" (ADR-054): `DELETE
 // /v1/connections/{id}` is this project's first 204 No Content response.
@@ -49,5 +49,37 @@ describe('request', () => {
 
     await expect(request('/v1/example')).rejects.toBeInstanceOf(ApiError)
     expect(textSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+// Product audit (2026-09-11): a real remote passenger/driver's own device
+// has nothing listening on `localhost:PORT` -- every per-module base URL
+// in this frontend (RideRequest.tsx, DriverHome.tsx, PassengerLanding.tsx,
+// this file's own API_BASE_URL) used to fall back to an absolute
+// `http://localhost:PORT`, unconditionally, which only ever worked by
+// coincidence for a browser physically running on the backend's own host.
+// This is the one place that resolution rule is decided; every call site
+// above just supplies its own env var name and its own local-only default.
+describe('resolveBackendBaseUrl', () => {
+  it('resolves to same-origin ("") in a real browser, regardless of the env value or default supplied', () => {
+    // vitest's own jsdom environment provides a real `window`/`window.location`
+    // by default -- this test runs in exactly the context a real deployed
+    // page does, no stubbing needed for the "is a browser" branch itself.
+    expect(resolveBackendBaseUrl('https://example.com', 'http://localhost:9999')).toBe('')
+    expect(resolveBackendBaseUrl(undefined, 'http://localhost:9999')).toBe('')
+  })
+
+  it('falls back to the env value, then the local default, outside a browser (e.g. non-DOM tooling)', () => {
+    const originalWindow = globalThis.window
+    // @ts-expect-error -- deliberately simulating a non-browser global scope for this one test.
+    delete globalThis.window
+    try {
+      expect(resolveBackendBaseUrl('https://configured.example.com', 'http://localhost:9999')).toBe(
+        'https://configured.example.com'
+      )
+      expect(resolveBackendBaseUrl(undefined, 'http://localhost:9999')).toBe('http://localhost:9999')
+    } finally {
+      globalThis.window = originalWindow
+    }
   })
 })

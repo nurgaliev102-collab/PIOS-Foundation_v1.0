@@ -14,7 +14,7 @@ import { Card } from '../../components/Card'
 import { Text } from '../../components/Text'
 import { Input, Select } from '../../components/Input'
 import { StatusMessage } from '../../components/StatusMessage'
-import { ApiError, request } from '../../api/apiClient'
+import { ApiError, request, resolveBackendBaseUrl } from '../../api/apiClient'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
 import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
 import { LocalInvitationProvider } from '../../identity/InvitationProvider'
@@ -52,19 +52,25 @@ const PROPOSALS_POLL_INTERVAL_MS = 3000
 // `Coordinator.tsx` (Sprint FR-004): this page now also calls Dispatch
 // directly, in addition to Driver Management (Sprint IMPLEMENTATION-005,
 // Driver Proposal MVP).
-const DISPATCH_BASE_URL = import.meta.env.VITE_DISPATCH_BASE_URL ?? 'http://localhost:8084'
+//
+// Product audit (2026-09-11): resolved via [resolveBackendBaseUrl] -- see
+// that function's own KDoc (`api/apiClient.ts`). A real driver's own phone
+// must reach this through `server/serve.mjs`'s same-origin reverse proxy,
+// not a `localhost:8084` that only ever meant the machine running this
+// browser, not the pilot host.
+const DISPATCH_BASE_URL = resolveBackendBaseUrl(import.meta.env.VITE_DISPATCH_BASE_URL, 'http://localhost:8084')
 
 // Order Management's own local port (INTERFACE_CONTRACTS.md) — same
 // constant as `Coordinator.tsx`/`RideRequest.tsx` (Sprint 3B: MVR Pilot
 // Enablement -- Optional Destination): this page now also calls Order
 // Management directly, to read each open proposal's own order destination.
-const ORDER_MANAGEMENT_BASE_URL = import.meta.env.VITE_ORDER_MANAGEMENT_BASE_URL ?? 'http://localhost:8083'
+const ORDER_MANAGEMENT_BASE_URL = resolveBackendBaseUrl(import.meta.env.VITE_ORDER_MANAGEMENT_BASE_URL, 'http://localhost:8083')
 
 // Passenger Experience's own local port (INTERFACE_CONTRACTS.md) — same
 // constant as `PassengerLanding.tsx` (Sprint "Driver Growth Snapshot", H6):
 // this page now also calls that module directly, to read how many
 // passengers connected through this driver's own invitation link.
-const PASSENGER_EXPERIENCE_BASE_URL = import.meta.env.VITE_PASSENGER_EXPERIENCE_BASE_URL ?? 'http://localhost:8082'
+const PASSENGER_EXPERIENCE_BASE_URL = resolveBackendBaseUrl(import.meta.env.VITE_PASSENGER_EXPERIENCE_BASE_URL, 'http://localhost:8082')
 
 const MAX_NAME_LENGTH = 50
 

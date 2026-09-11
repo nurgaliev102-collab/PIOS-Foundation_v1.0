@@ -14,7 +14,7 @@ import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
 import { normalizePhone, isValidPhone, PHONE_FORMAT_HINT } from '../../identity/phoneFormat'
 import { saveDisplayName } from '../../persistence/localDisplayName'
-import { ApiError, request } from '../../api/apiClient'
+import { ApiError, request, resolveBackendBaseUrl } from '../../api/apiClient'
 import { PassengerOnboarding } from './PassengerOnboarding'
 import { hasSeenPassengerOnboarding, markPassengerOnboardingSeen } from '../../persistence/localOnboardingSeen'
 import { InstallPIOS, isStandalone } from '../../features/install'
@@ -35,7 +35,13 @@ const MIN_PASSWORD_LENGTH = 8
 // 7B (Personal Network Flow MVP): this page now also calls that module
 // directly, to record that this passenger reached PIOS through this
 // driver's own invitation link.
-const PASSENGER_EXPERIENCE_BASE_URL = import.meta.env.VITE_PASSENGER_EXPERIENCE_BASE_URL ?? 'http://localhost:8082'
+//
+// Product audit (2026-09-11): resolved via [resolveBackendBaseUrl] -- see
+// that function's own KDoc (`api/apiClient.ts`). A real passenger's own
+// phone must reach this through `server/serve.mjs`'s same-origin reverse
+// proxy, not a `localhost:8082` that only ever meant the machine running
+// this browser, not the pilot host.
+const PASSENGER_EXPERIENCE_BASE_URL = resolveBackendBaseUrl(import.meta.env.VITE_PASSENGER_EXPERIENCE_BASE_URL, 'http://localhost:8082')
 
 type Step = 'loading' | 'not-found' | 'error' | 'invited' | 'auth' | 'confirmed' | 'confirm-add'
 type AuthMode = 'register' | 'login'
