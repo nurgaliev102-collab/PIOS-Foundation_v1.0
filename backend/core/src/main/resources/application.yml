@@ -6,7 +6,22 @@ spring:
     # connects to. Never any Taxi module's database. No cross-database FK,
     # no shared table. Exactly one datasource url, and it is this one.
     url: jdbc:postgresql://127.0.0.1:5432/pios_core
-    username: postgres
+    # Deliberately NOT `postgres` (unlike the other six modules' own
+    # application.yml, which predate this review). PIOS Core Slice 01
+    # Production Safety Gate (2026-09-11) found that the shared `postgres`
+    # superuser is far more privilege than Slice 01 needs (INSERT/SELECT on
+    # its own three tables only) and, on this instance's pg_hba.conf
+    # (`trust` for every role on loopback), is also the only thing standing
+    # between a misconfigured datasource.url and Flyway silently creating
+    # Core's tables inside a Taxi module's database. `pios_core_app` must be
+    # created before first deployment as the OWNER of `pios_core` only —
+    # NOT a superuser, no grant on any other database — mirroring exactly
+    # how `pios_core_qa` was scoped to `pios_core_test` for QA (see
+    # docs/PIOS_CORE_SLICE_01_QA_ENVIRONMENT_PLAN.md §3). This file does not
+    # create that role; it is a required, one-time, additive operator step
+    # (analogous to §3's QA cluster provisioning) before `pios-core` is
+    # ever started against this datasource.
+    username: pios_core_app
     password:
   flyway:
     enabled: true
