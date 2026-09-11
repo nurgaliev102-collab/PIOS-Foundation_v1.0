@@ -52,7 +52,11 @@ A module's RabbitMQ-touching tests fail at connection time (a clear AMQP `ACCESS
 
 ## Convention for any future RabbitMQ-using module
 
-Any new backend module that needs a real-broker RabbitMQ integration test must follow the same shape: its own `RabbitMQTestConnection.kt`, connecting to the same `pios-test` vhost with the same `pios_test` user, no configuration override. Copy an existing module's file as the starting point (e.g. `driver-management`'s) rather than inventing a new pattern. Test topology (exchange/queue/routing-key names) may keep reusing production's own constants exactly as today — the vhost boundary, not a naming convention, is what makes this safe.
+Any new backend module that needs a real-broker RabbitMQ integration test must follow the same shape: its own `RabbitMQTestConnection.kt`, connecting to the `pios-test` vhost with the `pios_test` user. Test topology (exchange/queue/routing-key names) may keep reusing production's own constants exactly as today — the vhost boundary, not a naming convention, is what makes this safe.
+
+### `core` (PIOS Core — Slice 01, ADR-067) — fail-closed configurable variant
+
+`core` keeps the `pios-test` vhost / `pios_test` user as its **default** namespace, but reaches it through `backend/core/src/test/kotlin/com/pios/core/qa/CoreQaEndpoints`, which runs `CoreQaSafetyGate` before building the connection factory. ADR-067 § QA / Production Gate item 4 (amended 2026-09-11) requires *"QA execution MUST fail closed if the test process can address a production RabbitMQ namespace"* — so the Gate rejects a resolved vhost of `/` (or blank, or `%2F`), the `guest` user, the pilot VPS host, and an absent/invalid host or port. The vhost/user/host/port are overridable per `-Dpios.core.qa.rabbitmq.*` / `PIOS_CORE_QA_RABBITMQ_*` (for a fully separate QA broker), but **no override can select a production value** — the Gate makes those invalid. Every FAIL branch has a unit test (`CoreQaSafetyGateTest`). This is stricter than a hard-coded `RabbitMQTestConnection.kt`: a hard-coded constant is still `/` one careless edit away, whereas the Gate refuses it.
 
 ## What this fix does not cover
 

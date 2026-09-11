@@ -20,6 +20,7 @@ Each module's `PostgreSQLTestDatabase.kt` now points at a **separate, isolated d
 | `order-management` | `pios_order_management` | `pios_order_management_test` |
 | `dispatch` | `pios_dispatch` | `pios_dispatch_test` |
 | `network-management` | `pios_network_management` | `pios_network_management_test` |
+| `core` | `pios_core` (not yet deployed anywhere) | `pios_core_test` — on a **separate cluster/port**, fail-closed configurable, never the production instance (see note below) |
 
 **The URL is hardcoded, exactly as before — deliberately not made configurable through an environment variable, system property, or `application-test.yml`.** A configuration knob would only reintroduce a way to point tests at production by misconfiguration (the exact failure mode this fix exists to remove). If a future need arises for tests to run against a different host (e.g., a CI runner), that is a separate, deliberate decision for whoever adds CI — not a default this convention should offer today.
 
@@ -37,6 +38,17 @@ CREATE DATABASE pios_order_management_test;
 CREATE DATABASE pios_dispatch_test;
 CREATE DATABASE pios_network_management_test;
 ```
+
+`pios_core_test` is **not** in this list on purpose — it does **not** belong on the production PostgreSQL instance. It is created on Core's own separate QA cluster (see the `core` note below and `docs/PIOS_CORE_SLICE_01_QA_ENVIRONMENT_PLAN.md`).
+
+`core` (PIOS Core — Slice 01, ADR-067) uses a **fail-closed configurable** variant of this convention rather than a hard-coded URL — because ADR-067 § QA / Production Gate item 4 was amended on 2026-09-11 to require *"QA execution MUST fail closed if the test process can address a production PostgreSQL endpoint"*, and the QA PostgreSQL for Core does not live on the production instance:
+
+- The connection target is supplied only through **test-only system properties** (`-Dpios.core.qa.postgres.url` / `.username` / `.password`) or the matching `PIOS_CORE_QA_POSTGRES_*` environment variables — **never** `application.yml` or `application-test.yml` (the YAML-override concern this document raises is answered instead by the Safety Gate below).
+- `backend/core/src/test/kotlin/com/pios/core/qa/CoreQaSafetyGate` runs **before any connection**: it rejects an absent configuration, an unparseable URL, a URL without an explicit port, any **production PostgreSQL endpoint** (`127.0.0.1:5432` / `localhost:5432` / IPv6 forms — the single production instance on HOME-PC — and `62.217.176.214`), any **production database name** (including `pios_core` itself and every other module's `_test`/`_qa`), a database name that is not exactly `pios_core_test`, the `postgres` superuser, and an **empty password** (the production instance's `trust`-auth tell). Every FAIL branch has a unit test (`CoreQaSafetyGateTest`).
+- The QA PostgreSQL for Core is therefore a **distinct PostgreSQL cluster on a distinct port** (e.g. `127.0.0.1:5433`) serving only `pios_core_test`, reached by a dedicated non-superuser role (`pios_core_qa`) with a password. It does **not** share the production instance. Provisioning: `docs/PIOS_CORE_SLICE_01_QA_ENVIRONMENT_PLAN.md`.
+- Because the Gate makes every production value invalid, `./gradlew :core:test` is safe on HOME-PC: with no QA configuration it runs the unit tests and fails every integration test closed, connecting to nothing.
+
+The other modules keep the hard-coded `pios_<module>_test` URL described above — this variant is Core-specific and does not change them.
 
 A module's tests fail at the `PostgreSQLTestDatabase.dataSource` initializer (a clear connection error, not a silent fallback) if its own `_test` database does not exist yet — this is intentional; there is no default that would let a test run "succeed" by accident against something else.
 
