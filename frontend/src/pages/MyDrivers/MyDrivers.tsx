@@ -9,7 +9,7 @@ import { LoadingState } from '../../components/LoadingState'
 import { ErrorState } from '../../components/ErrorState'
 import { DriverTrustIndicator } from '../../components/DriverTrustIndicator'
 import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
-import { request } from '../../api/apiClient'
+import { request, resolveBackendBaseUrl } from '../../api/apiClient'
 import styles from './MyDrivers.module.css'
 
 // ADR-038/ADR-039/ADR-055: same singleton pattern DriverHome.tsx/PassengerLanding.tsx
@@ -19,7 +19,18 @@ const identityProvider = new BackendIdentityProvider()
 // Passenger Experience's own local port (INTERFACE_CONTRACTS.md) -- same
 // constant PassengerLanding.tsx/RideRequest.tsx already use for
 // `/v1/connections`.
-const PASSENGER_EXPERIENCE_BASE_URL = import.meta.env.VITE_PASSENGER_EXPERIENCE_BASE_URL ?? 'http://localhost:8082'
+//
+// Product audit (2026-09-11/12): resolved via [resolveBackendBaseUrl] --
+// see that function's own KDoc (`api/apiClient.ts`). This screen is PIOS's
+// own designated "repeat a transaction" path (this file's own KDoc,
+// docs/PIOS_PRODUCT_VISION.md §6/§8) -- deliberately left out of that first
+// fix's scope (RideRequest/DriverHome/PassengerLanding only) as a named,
+// out-of-scope finding; closed now that finding the next real
+// complete-or-repeat gap is this task's own explicit target. A real
+// returning passenger's own phone has nothing listening on
+// `localhost:8082` -- this screen's connections list never loaded for one,
+// same root cause, same fix.
+const PASSENGER_EXPERIENCE_BASE_URL = resolveBackendBaseUrl(import.meta.env.VITE_PASSENGER_EXPERIENCE_BASE_URL, 'http://localhost:8082')
 
 interface ConnectionItem {
   connectionId: string
