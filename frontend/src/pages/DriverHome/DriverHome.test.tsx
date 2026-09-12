@@ -494,6 +494,39 @@ describe('DriverHome', () => {
     expect(todayRow).toHaveTextContent('1')
   })
 
+  // --- Per-client share action (product audit follow-up, 2026-09-12) ---
+  // "Мои пассажиры" used to be read-only text with no action. This reuses
+  // the exact same personal invite link the QR card above already shares
+  // (`invitationProvider.linkFor(driver.id)`) -- no new invitation
+  // mechanism, no passenger-specific URL. `navigator.share` is undefined in
+  // jsdom, so `handleShare` takes its own documented clipboard fallback.
+
+  it('shares this driver\'s own invite link directly from a client row in "Мои пассажиры"', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals
+    mockedRequest.mockResolvedValueOnce([
+      { passengerReference: 'passenger-1', createdAt: '2026-07-01T10:00:00Z' },
+    ]) // GET /v1/connections
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0, repeatClientsCount: 0 }) // GET /v1/drivers/driver-1/milestones
+
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Бизнес' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Клиенты' }))
+    await screen.findByText('Пассажир по вашей ссылке')
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Поделиться ссылкой с пассажиром по вашей ссылке' })
+    )
+
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/i/driver-1`)
+    expect(await screen.findByText('Ссылка скопирована')).toBeInTheDocument()
+  })
+
   // --- PIOS Install v1 (Product Owner exception) ---
 
   it('shows the "PIOS всегда под рукой" install card alongside, never instead of, "Как это работает"', async () => {

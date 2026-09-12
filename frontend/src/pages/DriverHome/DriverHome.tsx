@@ -1739,7 +1739,27 @@ export function DriverHome() {
                   (`GET /v1/connections?driverId=...`, already loaded above
                   for the "Сегодня" tab), named where a past order already
                   revealed a name, otherwise honestly labelled as not yet
-                  named rather than guessed. */}
+                  named rather than guessed.
+
+                  Product audit follow-up (2026-09-12): this list used to be
+                  read-only text -- a driver with an established client had
+                  no in-product action toward them at all, unlike the
+                  passenger's own mirrored "Мои водители" list (already
+                  fixed) which offers "Заказать поездку". No new invitation
+                  system is introduced here: `handleShare`/`handleCopy`
+                  already share this exact driver's one personal link
+                  (`invitationProvider.linkFor(driver.id)`) from the QR card
+                  just above. Reusing it here is deliberate and correct, not
+                  a shortcut -- `PassengerLanding.tsx`'s own
+                  `checkCircleThenAdvance` already resolves this same link
+                  differently per recipient: an already-connected passenger
+                  (exactly who appears in this list) is redirected straight
+                  to `/request` with no re-registration, while a stranger
+                  still sees the normal invite flow. So "share this link
+                  with this specific client" is already a correct,
+                  existing PIOS path to reach them -- no passenger-specific
+                  URL parameter exists or is needed in the current
+                  Connection model, and none is added here. */}
               {connections.length > 0 && (
                 <section className={styles.growthCard}>
                   <p className={styles.growthTitle}>Мои пассажиры</p>
@@ -1747,9 +1767,17 @@ export function DriverHome() {
                     {connections.map((connection) => {
                       const name = passengerNamesByReference(orderDetails)[connection.passengerReference]
                       return (
-                        <span key={connection.passengerReference} className={styles.passengerListItem}>
-                          {name ?? 'Пассажир по вашей ссылке'}
-                        </span>
+                        <div key={connection.passengerReference} className={styles.passengerListItem}>
+                          <span>{name ?? 'Пассажир по вашей ссылке'}</span>
+                          <button
+                            type="button"
+                            className={styles.passengerShareAction}
+                            aria-label={`Поделиться ссылкой с ${name ?? 'пассажиром по вашей ссылке'}`}
+                            onClick={() => void handleShare()}
+                          >
+                            Поделиться
+                          </button>
+                        </div>
                       )
                     })}
                   </div>
