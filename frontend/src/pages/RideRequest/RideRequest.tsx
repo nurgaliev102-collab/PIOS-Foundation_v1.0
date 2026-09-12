@@ -16,6 +16,7 @@ import { RideStatus } from '../../components/RideStatus'
 import { getInvitationByDriverCode } from '../PassengerLanding/invitationSource'
 import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
+import { LocalInvitationProvider } from '../../identity/InvitationProvider'
 import { getDisplayName } from '../../persistence/localDisplayName'
 import { clearCurrentOrderId, getCurrentOrderId, saveCurrentOrderId } from '../../persistence/localCurrentOrder'
 import { request, resolveBackendBaseUrl } from '../../api/apiClient'
@@ -23,6 +24,16 @@ import styles from './RideRequest.module.css'
 
 // ADR-038/ADR-039/ADR-055: same module-level provider instance `PassengerLanding.tsx` already uses.
 const identityProvider = new BackendIdentityProvider()
+
+// Product audit follow-up (2026-09-12): the same provider `DriverHome.tsx`
+// already instantiates module-level for its own QR card / per-client share
+// action -- no new invitation mechanism, this screen just becomes a second
+// caller of the one that already exists.
+const invitationProvider = new LocalInvitationProvider()
+
+// Same duration DriverHome.tsx's own `FEEDBACK_DURATION_MS` already uses
+// for an identical copy/share confirmation.
+const SHARE_FEEDBACK_DURATION_MS = 2000
 
 // Order Management's own local port (INTERFACE_CONTRACTS.md) — distinct
 // from apiClientConfig's default (Driver Management's port), since this
@@ -321,6 +332,13 @@ export function RideRequest() {
   // screen's [DriverTrustIndicator] can show it (Task 7: no longer also
   // repeated inside [rideStatusLabel]'s status sentence).
   const [driverName, setDriverName] = useState<string | null>(null)
+  // Referral funnel friction audit (2026-09-12): same source
+  // ([loadInvitation]'s own `InvitationInfo`, see that interface's own
+  // KDoc) as [driverName] above -- kept separately so the plain order
+  // form (the one path every 0-or-1-relationship referral actually takes,
+  // circle step skipped entirely) can finally show it before submission,
+  // not only after.
+  const [driverAvailability, setDriverAvailability] = useState<'AVAILABLE' | 'UNAVAILABLE' | null>(null)
   const [circle, setCircle] = useState<EnrichedCircleMember[]>([])
   const [circleError, setCircleError] = useState(false)
   const [primaryChangeTarget, setPrimaryChangeTarget] = useState<string | null>(null)
@@ -372,6 +390,11 @@ export function RideRequest() {
   // own way to stop waiting on an order no driver has accepted yet -- see
   // [handleCancelOrder]'s own KDoc.
   const [cancelStatus, setCancelStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
+  // Product audit follow-up (2026-09-12): [handleShareWithFriend]'s own
+  // copy/share confirmation -- same transient-feedback shape as
+  // DriverHome.tsx's own [feedback]/[feedbackTimeout].
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null)
+  const shareFeedbackTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // Sprint 6 (Passenger Entry-Path Failure Handling): pulled out of the
   // effect (mirrors DriverHome.tsx's own loadDriver) so the same fetch can
@@ -392,6 +415,7 @@ export function RideRequest() {
         return
       }
       setDriverName(result.invitation.driverName)
+      setDriverAvailability(result.invitation.availability)
       // First-pilot feedback: a passenger who reloads this page must land
       // back on their current order, not a blank form — same driver, same
       // browser, an order already placed through `localCurrentOrder.ts`.
@@ -924,6 +948,44 @@ export function RideRequest() {
   }
 
   /**
+   * Product audit follow-up (2026-09-12): every existing invite/growth
+   * mechanism in this codebase (`DriverHome.tsx`'s QR card, and its own
+   * newly-added per-client share action) is driver-initiated only -- a
+   * passenger who just had a genuinely good, COMPLETED ride had no
+   * in-product way to recommend this same driver to a friend, despite
+   * word-of-mouth being the vision's own named growth mechanism
+   * (`docs/PIOS_PRODUCT_VISION.md` §16: "The link/QR is the first
+   * mechanism for building a provider's own network"). No new invitation
+   * system: this shares the exact same `/i/:driverCode` link
+   * (`invitationProvider.linkFor`) a friend would reach this same driver
+   * through directly -- identical mechanism, just handed to the other
+   * side of the relationship for the first time.
+   */
+  async function handleShareWithFriend() {
+    if (!driverCode) {
+      return
+    }
+    try {
+      await invitationProvider.share(invitationProvider.linkFor(driverCode))
+      if (!navigator.share) {
+        showShareFeedback('Ссылка скопирована')
+      }
+    } catch (error) {
+      // A user-cancelled share (AbortError) is not a failure -- same
+      // tolerance DriverHome.tsx's own handleShare already established.
+      if (error instanceof Error && error.name !== 'AbortError') {
+        showShareFeedback('Не удалось поделиться')
+      }
+    }
+  }
+
+  function showShareFeedback(message: string) {
+    setShareFeedback(message)
+    clearTimeout(shareFeedbackTimeout.current)
+    shareFeedbackTimeout.current = setTimeout(() => setShareFeedback(null), SHARE_FEEDBACK_DURATION_MS)
+  }
+
+  /**
    * Rule 12/13 (`PRODUCT_DECISION_CIRCLE_OF_TRUST.md`): choosing a driver
    * for *this* ride only ever changes which driver this specific order goes
    * to -- never who is primary. Picking the driver whose own link this page
@@ -1147,6 +1209,30 @@ export function RideRequest() {
           <div className={styles.formStack}>
             <Heading level={1}>Заказать поездку</Heading>
 
+            {/* Referral funnel friction audit (2026-09-12): this exact
+                step is where a brand-new referral (0 or 1 relationship,
+                the circle-of-trust step above skipped entirely) used to
+                fill out and submit a real order with zero visibility into
+                whether this one specific driver was even online -- the
+                backend's own [availability] was fetched by [loadInvitation]
+                and silently discarded before this fix. Shown, not gated:
+                unlike the circle step's own `disabled={...}` (which picks
+                *among* several saved drivers), this screen has no
+                alternative driver to offer instead -- the passenger came
+                here through this one driver's own link. The caption below
+                points at the "Заранее" scheduling option that already
+                exists, rather than inventing a new one. */}
+            {driverName && (
+              <>
+                <DriverTrustIndicator name={driverName} availability={driverAvailability ?? undefined} emphasis="compact" />
+                {driverAvailability === 'UNAVAILABLE' && (
+                  <Text role="caption" tone="muted">
+                    Сейчас недоступен. Вы можете заказать поездку заранее, выбрав время ниже.
+                  </Text>
+                )}
+              </>
+            )}
+
             <FormField label="Откуда" htmlFor="pickupAddress" error={pickupAddressError}>
               <Input
                 id="pickupAddress"
@@ -1236,7 +1322,13 @@ export function RideRequest() {
                 loads either fact (docs/DRIVER_IDENTITY_DESIGN_DECISION.md
                 Section 9), so the component is not asked to assert what
                 the code hasn't actually checked. */}
-            {driverName && <DriverTrustIndicator name={driverName} emphasis="prominent" />}
+            {driverName && (
+              <DriverTrustIndicator
+                name={driverName}
+                availability={driverAvailability ?? undefined}
+                emphasis="prominent"
+              />
+            )}
             <StatusMessage tone="success">✅ Заказ оформлен.</StatusMessage>
             <Text role="caption" tone="muted">
               Здесь вы увидите, что происходит с вашим заказом — от отправки до завершения поездки.
@@ -1381,6 +1473,19 @@ export function RideRequest() {
                     Мои водители
                   </button>
                 )}
+                {/* Product audit follow-up (2026-09-12): only on an actual
+                    COMPLETED ride, unlike the two actions above -- there is
+                    a real experience to recommend at this specific status;
+                    DECLINED/LAPSED/WITHDRAWN never got a ride at all, so
+                    prompting a referral there would not reflect anything
+                    real. See [handleShareWithFriend]'s own KDoc for why
+                    this reuses the existing invite link unchanged. */}
+                {rideStatus === 'COMPLETED' && (
+                  <button type="button" className={styles.textAction} onClick={() => void handleShareWithFriend()}>
+                    Поделиться с другом
+                  </button>
+                )}
+                {shareFeedback && <StatusMessage>{shareFeedback}</StatusMessage>}
               </>
             )}
           </div>

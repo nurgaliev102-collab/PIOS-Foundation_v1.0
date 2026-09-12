@@ -98,6 +98,28 @@ describe('PassengerLanding', () => {
     expect(screen.queryByText(/Машина:/)).not.toBeInTheDocument()
   })
 
+  // --- Availability (Referral funnel friction audit, 2026-09-12) ---
+  // This value was already fetched (`GET /v1/drivers/:driverId` already
+  // returns it) and silently discarded before this fix -- a brand-new
+  // referral used to have zero signal here about whether this driver was
+  // even online, before registering or ordering.
+
+  it('shows the driver\'s own live availability on the very first screen a new referral sees', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'UNAVAILABLE', displayName: 'Иван' })
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('Недоступен')).toBeInTheDocument()
+  })
+
+  it('shows the driver as available when they are', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('Доступен')).toBeInTheDocument()
+  })
+
   // --- Long-distance preference (PIOS Group and Long-Distance Rides Roadmap, Stage 3) ---
 
   it('shows the long-distance line when the driver has opted in', async () => {

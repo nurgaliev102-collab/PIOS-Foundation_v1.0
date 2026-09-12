@@ -398,7 +398,17 @@ export function PassengerLanding() {
                 (this one, and the steps card's own distinct "the order
                 goes specifically to them" fact below, which explains a
                 different thing and stays). */}
-            <DriverTrustIndicator name={invitation.driverName} emphasis="prominent" showAvatar />
+            {/* Referral funnel friction audit (2026-09-12): [availability]
+                (see [InvitationInfo]'s own KDoc) shown at the very first
+                moment a brand-new referral sees this driver at all — before
+                registering, before ordering. No backend change: the value
+                was already fetched and silently dropped. */}
+            <DriverTrustIndicator
+              name={invitation.driverName}
+              availability={invitation.availability}
+              emphasis="prominent"
+              showAvatar
+            />
             <Heading level={1} visual="heading">
               Вас пригласили лично
             </Heading>
@@ -484,7 +494,12 @@ export function PassengerLanding() {
 
         {step === 'confirm-add' && invitation && (
           <>
-            <DriverTrustIndicator name={invitation.driverName} emphasis="prominent" showAvatar />
+            <DriverTrustIndicator
+              name={invitation.driverName}
+              availability={invitation.availability}
+              emphasis="prominent"
+              showAvatar
+            />
             <Heading level={1} visual="heading">
               Добавить {invitation.driverName} в ваш список водителей?
             </Heading>

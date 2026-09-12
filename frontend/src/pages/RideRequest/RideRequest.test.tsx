@@ -136,6 +136,38 @@ describe('RideRequest', () => {
     expect(mockedRequest).toHaveBeenCalledTimes(3)
   })
 
+  // --- Availability on the plain order form (Referral funnel friction audit, 2026-09-12) ---
+  // This is the exact path every 0-or-1-relationship referral takes (the
+  // circle-of-trust step above is skipped entirely) -- this driver's own
+  // live availability used to be fetched and silently discarded, so a
+  // brand-new passenger could submit a real order to an offline driver
+  // with zero signal beforehand.
+
+  it('shows the driver as unavailable on the order form, with a pointer to scheduling instead of blocking submission', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'UNAVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('Недоступен')).toBeInTheDocument()
+    expect(screen.getByText(/Вы можете заказать поездку заранее/)).toBeInTheDocument()
+    // Not gated, unlike the circle-of-trust step's own per-driver choice --
+    // this screen has no alternative driver to offer instead.
+    expect(screen.getByRole('button', { name: 'Заказать поездку' })).toBeEnabled()
+  })
+
+  it('shows the driver as available on the order form, with no scheduling hint', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('Доступен')).toBeInTheDocument()
+    expect(screen.queryByText(/Вы можете заказать поездку заранее/)).not.toBeInTheDocument()
+  })
+
   // --- Explicit driver intent (Task 17: First Refusal Explicit Driver Intent Integration) ---
 
   it('sends explicitDriverIntent: true on POST /v1/orders, since this screen always already knows the driver', async () => {
@@ -583,6 +615,42 @@ describe('RideRequest', () => {
 
     await screen.findByText(/принял ваш заказ/)
     expect(screen.queryByRole('button', { name: 'Мои водители' })).not.toBeInTheDocument()
+  })
+
+  // Product audit follow-up (2026-09-12): word-of-mouth growth
+  // (docs/PIOS_PRODUCT_VISION.md §16) used to be driver-initiated only --
+  // a passenger who just had a genuinely COMPLETED ride had no in-product
+  // way to recommend this same driver to a friend. Reuses the exact same
+  // `/i/:driverCode` invite link, same Web Share API / clipboard fallback
+  // DriverHome.tsx's own share action already uses.
+  it('offers "Поделиться с другом" when the ride completed, sharing this driver\'s own invite link', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }])
+
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+
+    renderAt('driver-1')
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Поделиться с другом' }))
+
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/i/driver-1`)
+    expect(await screen.findByText('Ссылка скопирована')).toBeInTheDocument()
+  })
+
+  it('does not offer "Поделиться с другом" when the proposal was merely declined -- no real ride to recommend', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'DECLINED' }])
+
+    renderAt('driver-1')
+
+    await screen.findByRole('button', { name: 'Заказать ещё раз' })
+    expect(screen.queryByRole('button', { name: 'Поделиться с другом' })).not.toBeInTheDocument()
   })
 
   it('does not offer "Заказать ещё раз" while still waiting for the driver', async () => {

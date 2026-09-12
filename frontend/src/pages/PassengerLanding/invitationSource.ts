@@ -39,9 +39,23 @@ import { ApiError, request } from '../../api/apiClient'
  * `DriverHome.tsx`'s own long-distance checkbox writes -- shown here so a
  * passenger planning a vakhta/airport/another-city trip knows to ask this
  * driver about it, before any login exists to gate behind.
+ *
+ * [availability] (Referral funnel friction audit, 2026-09-12): the same
+ * public `GET /v1/drivers/:driverId` field `RideRequest.tsx`'s own circle-
+ * of-trust step already reads for its own `DriverTrustIndicator` -- this
+ * function already fetched it and silently discarded it, so the one path
+ * every new referral actually takes on their very first visit (0 or 1
+ * existing relationship skips the circle step entirely, straight to
+ * Passenger Landing's 'invited' screen and then the plain order form) never
+ * saw it at all. A passenger could fill out and submit a real order to a
+ * driver who has been OFFLINE the entire time, with literally no signal
+ * anywhere before submission -- exactly the "поездка так и не случилась"
+ * dead end this audit's own instruction named. No backend change: the
+ * field was always in the response, only unused here.
  */
 export interface InvitationInfo {
   driverName: string
+  availability: 'AVAILABLE' | 'UNAVAILABLE'
   vehicleMake: string | null
   vehicleModel: string | null
   vehicleColor: string | null
@@ -56,7 +70,7 @@ export type InvitationResult =
 
 interface DriverResponse {
   id: string
-  availability: string
+  availability: 'AVAILABLE' | 'UNAVAILABLE'
   displayName: string | null
   vehicleMake?: string | null
   vehicleModel?: string | null
@@ -78,6 +92,7 @@ export async function getInvitationByDriverCode(driverCode: string): Promise<Inv
       status: 'found',
       invitation: {
         driverName: driver.displayName,
+        availability: driver.availability,
         vehicleMake: driver.vehicleMake ?? null,
         vehicleModel: driver.vehicleModel ?? null,
         vehicleColor: driver.vehicleColor ?? null,
