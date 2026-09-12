@@ -3,7 +3,7 @@ import { Header } from '../../components/Header'
 import { BottomNav } from '../../components/BottomNav'
 import { DriverCard } from '../../components/DriverCard'
 import { QRCard } from '../../components/QRCard'
-import { ActionButton } from '../../components/ActionButton'
+import { Button } from '../../components/Button'
 import { Spinner } from '../../components/Spinner'
 import { PasswordInput } from '../../components/PasswordInput'
 import { AvailabilityStatus } from '../../components/AvailabilityStatus'
@@ -12,6 +12,8 @@ import { ActiveRidePanel } from '../../components/ActiveRidePanel'
 import { RideStatus, type RideLifecycleStatus } from '../../components/RideStatus'
 import { Card } from '../../components/Card'
 import { Text } from '../../components/Text'
+import { Heading } from '../../components/Heading'
+import { FormField } from '../../components/FormField'
 import { Input, Select } from '../../components/Input'
 import { StatusMessage } from '../../components/StatusMessage'
 import { ApiError, request, resolveBackendBaseUrl } from '../../api/apiClient'
@@ -1206,7 +1208,9 @@ export function DriverHome() {
         <main className={styles.content}>
           {authStep === 'intro' && (
             <>
-              <h1 className={styles.welcomeTitle}>Добро пожаловать!</h1>
+              <Heading level={1} visual="display">
+                Добро пожаловать!
+              </Heading>
               <p className={styles.welcomeText}>PIOS помогает вам строить собственную клиентскую сеть.</p>
 
               <section className={styles.welcomeCard}>
@@ -1225,56 +1229,50 @@ export function DriverHome() {
               </section>
 
               <div className={styles.actionRow}>
-                <ActionButton label="Начать" variant="primary" onClick={handleWelcomeContinue} />
+                <Button label="Начать" variant="primary" onClick={handleWelcomeContinue} />
               </div>
             </>
           )}
 
           {authStep === 'auth' && (
             <>
-              <h1 className={styles.welcomeTitle}>
+              <Heading level={1} visual="display">
                 {authMode === 'register' ? 'Создайте свой аккаунт PIOS' : 'Войти в PIOS'}
-              </h1>
-              <input
-                className={styles.driverCodeInput}
-                type="tel"
-                value={phone}
-                placeholder="Номер телефона"
-                aria-label="Номер телефона"
-                onChange={(event) => handleAuthFieldChange(setPhone)(event.target.value)}
-              />
-              <PasswordInput
-                className={styles.driverCodeInput}
-                value={password}
-                onChange={handleAuthFieldChange(setPassword)}
-                placeholder="Пароль"
-                ariaLabel="Пароль"
-                autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    void (authMode === 'register' ? handleRegisterSubmit() : handleLoginSubmit())
-                  }
-                }}
-              />
+              </Heading>
+              <FormField label="Номер телефона" htmlFor="driver-phone">
+                <input
+                  id="driver-phone"
+                  className={styles.driverCodeInput}
+                  type="tel"
+                  value={phone}
+                  onChange={(event) => handleAuthFieldChange(setPhone)(event.target.value)}
+                />
+              </FormField>
+              <FormField label="Пароль" htmlFor="driver-password">
+                <PasswordInput
+                  id="driver-password"
+                  className={styles.driverCodeInput}
+                  value={password}
+                  onChange={handleAuthFieldChange(setPassword)}
+                  autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      void (authMode === 'register' ? handleRegisterSubmit() : handleLoginSubmit())
+                    }
+                  }}
+                />
+              </FormField>
               {authError && (
                 <p className={styles.error} role="alert">
                   {authError}
                 </p>
               )}
               <div className={styles.actionRow}>
-                <ActionButton
-                  label={
-                    isSubmittingAuth
-                      ? authMode === 'register'
-                        ? 'Создаём…'
-                        : 'Входим…'
-                      : authMode === 'register'
-                        ? 'Создать аккаунт'
-                        : 'Войти'
-                  }
+                <Button
+                  label={authMode === 'register' ? 'Создать аккаунт' : 'Войти'}
                   variant="primary"
+                  loading={isSubmittingAuth}
                   onClick={() => void (authMode === 'register' ? handleRegisterSubmit() : handleLoginSubmit())}
-                  disabled={isSubmittingAuth}
                 />
               </div>
               <button type="button" className={styles.linkAction} onClick={toggleAuthMode}>
@@ -1294,38 +1292,41 @@ export function DriverHome() {
       <div className={styles.screen}>
         <Header />
         <main className={styles.content}>
-          <h1 className={styles.welcomeTitle}>Как вас зовут?</h1>
+          <Heading level={1} visual="display">
+            Как вас зовут?
+          </Heading>
           <p className={styles.welcomeText}>Это имя увидят ваши клиенты, когда вы их пригласите.</p>
-          <input
-            className={styles.driverCodeInput}
-            type="text"
-            value={nameInput}
-            maxLength={MAX_NAME_LENGTH}
-            placeholder="Ваше имя"
-            aria-label="Ваше имя"
-            onChange={(event) => {
-              setNameInput(event.target.value)
-              if (nameError) {
-                setNameError(null)
-              }
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                void handleNameSubmit()
-              }
-            }}
-          />
+          <FormField label="Ваше имя" htmlFor="driver-name">
+            <input
+              id="driver-name"
+              className={styles.driverCodeInput}
+              type="text"
+              value={nameInput}
+              maxLength={MAX_NAME_LENGTH}
+              onChange={(event) => {
+                setNameInput(event.target.value)
+                if (nameError) {
+                  setNameError(null)
+                }
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  void handleNameSubmit()
+                }
+              }}
+            />
+          </FormField>
           {nameError && (
             <p className={styles.error} role="alert">
               {nameError}
             </p>
           )}
           <div className={styles.actionRow}>
-            <ActionButton
-              label={isCreatingDriver ? 'Создаём профиль…' : 'Создать профиль'}
+            <Button
+              label="Создать профиль"
               variant="primary"
+              loading={isCreatingDriver}
               onClick={() => void handleNameSubmit()}
-              disabled={isCreatingDriver}
             />
           </div>
         </main>
@@ -1358,7 +1359,7 @@ export function DriverHome() {
             <p className={styles.error} role="alert">
               Не удалось загрузить профиль водителя. Проверьте связь с интернетом.
             </p>
-            <ActionButton
+            <Button
               label="Попробовать снова"
               variant="secondary"
               onClick={() => loadDriver(true, identity.driverId!)}
@@ -1393,9 +1394,17 @@ export function DriverHome() {
         {activeMainTab === 'work' && (
           <>
             <h1 className={styles.pageTitle}>Ваши заказы</h1>
+            {/* Final UX walkthrough (2026-09-12): this used to tell a driver
+                to press "Принять" -- no such button exists on an OPEN
+                request (Product Owner instruction, 2026-09-05, changed
+                accept into "propose a price"; RequestCard's own primary
+                action has read "Предложить цену" ever since). A driver
+                reading this instruction and then scanning the card below
+                it for a button that matches was told something false at
+                exactly the moment they need to know what to do next. */}
             <p className={styles.hint}>
-              Здесь появляются заявки от ваших клиентов. Проверьте, откуда забрать пассажира и куда его отвезти, и
-              нажмите «Принять», если готовы выполнить поездку.
+              Здесь появляются заявки от ваших клиентов. Проверьте, откуда забрать пассажира и куда его отвезти,
+              укажите цену и время подачи, и нажмите «Предложить цену».
             </p>
 
             {/* UX audit Section 5/9 ("COMPLETE"): a ride used to simply vanish
@@ -1416,7 +1425,7 @@ export function DriverHome() {
                 <p className={styles.error} role="alert">
                   Не удалось загрузить заказы. Проверьте связь с интернетом.
                 </p>
-                <ActionButton
+                <Button
                   label="Попробовать снова"
                   variant="secondary"
                   onClick={() => loadProposals(true, identity.driverId!, identity.token)}
@@ -1458,36 +1467,44 @@ export function DriverHome() {
                   // than a click that silently does nothing.
                   acceptDisabled={!(priceInputs[proposal.proposalId] ?? '').trim()}
                 >
-                  <Input
-                    type="text"
-                    value={priceInputs[proposal.proposalId] ?? ''}
-                    placeholder="Стоимость поездки"
-                    aria-label="Стоимость поездки"
-                    onChange={(event) =>
-                      setPriceInputs((current) => ({ ...current, [proposal.proposalId]: event.target.value }))
-                    }
-                  />
-                  <Text role="label" as="label" htmlFor={`eta-${proposal.proposalId}`} tone="secondary">
-                    Когда сможете приехать?
-                  </Text>
-                  <Select
-                    id={`eta-${proposal.proposalId}`}
-                    value={etaInputs[proposal.proposalId] ?? ''}
-                    aria-label="Через сколько вы приедете"
-                    onChange={(event) =>
-                      setEtaInputs((current) => ({
-                        ...current,
-                        [proposal.proposalId]: event.target.value ? Number(event.target.value) : null,
-                      }))
-                    }
-                  >
-                    <option value="">Не указано</option>
-                    {ETA_OPTIONS_MINUTES.map((minutes) => (
-                      <option key={minutes} value={minutes}>
-                        {minutes} мин
-                      </option>
-                    ))}
-                  </Select>
+                  {/* UI/UX redesign, Stage 3 (2026-09-12): the price is the
+                      one real decision this whole card exists for --
+                      "Цена + действие должны быть очевиднее второстепенных
+                      элементов" -- so it gets a persistent, visible label
+                      (`FormField`, matching this exact fix already applied
+                      to every other form field in the app) instead of a
+                      placeholder that disappears the moment a driver
+                      starts typing the one number that matters most. */}
+                  <FormField label="Ваша цена" htmlFor={`price-${proposal.proposalId}`}>
+                    <Input
+                      id={`price-${proposal.proposalId}`}
+                      type="text"
+                      value={priceInputs[proposal.proposalId] ?? ''}
+                      placeholder="Например, 300 ₽"
+                      onChange={(event) =>
+                        setPriceInputs((current) => ({ ...current, [proposal.proposalId]: event.target.value }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Когда сможете приехать?" htmlFor={`eta-${proposal.proposalId}`}>
+                    <Select
+                      id={`eta-${proposal.proposalId}`}
+                      value={etaInputs[proposal.proposalId] ?? ''}
+                      onChange={(event) =>
+                        setEtaInputs((current) => ({
+                          ...current,
+                          [proposal.proposalId]: event.target.value ? Number(event.target.value) : null,
+                        }))
+                      }
+                    >
+                      <option value="">Не указано</option>
+                      {ETA_OPTIONS_MINUTES.map((minutes) => (
+                        <option key={minutes} value={minutes}>
+                          {minutes} мин
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
                 </RequestCard>
               )
             }
@@ -1760,7 +1777,7 @@ export function DriverHome() {
                   existing PIOS path to reach them -- no passenger-specific
                   URL parameter exists or is needed in the current
                   Connection model, and none is added here. */}
-              {connections.length > 0 && (
+              {connections.length > 0 ? (
                 <section className={styles.growthCard}>
                   <p className={styles.growthTitle}>Мои пассажиры</p>
                   <div className={styles.passengerList}>
@@ -1782,6 +1799,18 @@ export function DriverHome() {
                     })}
                   </div>
                 </section>
+              ) : (
+                /* UI/UX redesign, Stage 5 (2026-09-12): this section used to
+                   render nothing at all for a driver with zero connections
+                   -- honest (no fake list), but silent in a way that could
+                   read as an unfinished screen rather than a real, expected
+                   "nothing yet" state, unlike every other empty state in
+                   this app (e.g. "Пока нет заказов…" just above, on
+                   "Работа"). Same plain-text convention, no new component. */
+                <p className={styles.hint}>
+                  Пока никто не подключился по вашей ссылке. Поделитесь ей, чтобы увидеть здесь своего первого
+                  клиента.
+                </p>
               )}
             </div>
             )}
@@ -1808,9 +1837,15 @@ export function DriverHome() {
         {status === 'ready' && driver && activeMainTab === 'profile' && (
           <>
             <h1 className={styles.pageTitle}>Профиль</h1>
-            <button type="button" className={styles.linkAction} onClick={() => setShowOnboarding(true)}>
-              Как это работает
-            </button>
+            {/* UI/UX redesign, Stage 6 (2026-09-12): moved from the very
+                top (where it used to sit above the driver's own identity
+                card) down to the bottom, grouped with "Выйти" -- both are
+                quiet, low-frequency utility actions, not "who I am" or
+                "what I can change" content, and the onboarding this
+                replays already shows itself automatically on first load
+                (see [hasAutoShownOnboarding]) -- a driver opening Profile
+                came to see their own info first, not to be led to a
+                tutorial link before it. */}
             <DriverCard
               driverCode={driver.id}
               displayName={driver.displayName}
@@ -1828,44 +1863,56 @@ export function DriverHome() {
             <section className={styles.growthCard}>
               <p className={styles.growthTitle}>Моя машина</p>
               <p className={styles.hint}>Пассажир увидит это на странице приглашения — чтобы узнать вашу машину.</p>
-              <input
-                className={styles.driverCodeInput}
-                placeholder="Марка (например, Lada)"
-                value={vehicleMakeInput}
-                onChange={(event) => setVehicleMakeInput(event.target.value)}
-              />
-              <input
-                className={styles.driverCodeInput}
-                placeholder="Модель (например, Vesta)"
-                value={vehicleModelInput}
-                onChange={(event) => setVehicleModelInput(event.target.value)}
-              />
-              <input
-                className={styles.driverCodeInput}
-                placeholder="Цвет"
-                value={vehicleColorInput}
-                onChange={(event) => setVehicleColorInput(event.target.value)}
-              />
-              <input
-                className={styles.driverCodeInput}
-                placeholder="Гос. номер"
-                value={vehiclePlateInput}
-                onChange={(event) => setVehiclePlateInput(event.target.value)}
-              />
-              <input
-                className={styles.driverCodeInput}
-                type="number"
-                min={1}
-                placeholder="Количество мест"
-                value={vehicleSeatsInput}
-                onChange={(event) => setVehicleSeatsInput(event.target.value)}
-              />
+              <FormField label="Марка" htmlFor="vehicle-make">
+                <input
+                  id="vehicle-make"
+                  className={styles.driverCodeInput}
+                  placeholder="Например, Lada"
+                  value={vehicleMakeInput}
+                  onChange={(event) => setVehicleMakeInput(event.target.value)}
+                />
+              </FormField>
+              <FormField label="Модель" htmlFor="vehicle-model">
+                <input
+                  id="vehicle-model"
+                  className={styles.driverCodeInput}
+                  placeholder="Например, Vesta"
+                  value={vehicleModelInput}
+                  onChange={(event) => setVehicleModelInput(event.target.value)}
+                />
+              </FormField>
+              <FormField label="Цвет" htmlFor="vehicle-color">
+                <input
+                  id="vehicle-color"
+                  className={styles.driverCodeInput}
+                  value={vehicleColorInput}
+                  onChange={(event) => setVehicleColorInput(event.target.value)}
+                />
+              </FormField>
+              <FormField label="Гос. номер" htmlFor="vehicle-plate">
+                <input
+                  id="vehicle-plate"
+                  className={styles.driverCodeInput}
+                  value={vehiclePlateInput}
+                  onChange={(event) => setVehiclePlateInput(event.target.value)}
+                />
+              </FormField>
+              <FormField label="Количество мест" htmlFor="vehicle-seats">
+                <input
+                  id="vehicle-seats"
+                  className={styles.driverCodeInput}
+                  type="number"
+                  min={1}
+                  value={vehicleSeatsInput}
+                  onChange={(event) => setVehicleSeatsInput(event.target.value)}
+                />
+              </FormField>
               {vehicleAction === 'error' && <p className={styles.error}>Не удалось сохранить. Попробуйте ещё раз.</p>}
               <div className={styles.actionRow}>
-                <ActionButton
-                  label={vehicleAction === 'submitting' ? 'Сохраняем…' : 'Сохранить машину'}
+                <Button
+                  label="Сохранить машину"
+                  loading={vehicleAction === 'submitting'}
                   onClick={handleUpdateVehicle}
-                  disabled={vehicleAction === 'submitting'}
                 />
               </div>
               {/* PIOS Group and Long-Distance Rides Roadmap, Stage 3: a
@@ -1894,9 +1941,12 @@ export function DriverHome() {
               <section className={styles.installCard}>
                 <p className={styles.growthTitle}>PIOS всегда под рукой</p>
                 <p className={styles.installCardText}>Добавьте PIOS на экран телефона.</p>
-                <ActionButton label="Установить PIOS" variant="secondary" onClick={() => setShowInstall(true)} />
+                <Button label="Установить PIOS" variant="secondary" onClick={() => setShowInstall(true)} />
               </section>
             )}
+            <button type="button" className={styles.linkAction} onClick={() => setShowOnboarding(true)}>
+              Как это работает
+            </button>
             <button type="button" className={styles.linkAction} onClick={handleLogout}>
               Выйти
             </button>

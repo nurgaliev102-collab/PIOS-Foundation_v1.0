@@ -1413,10 +1413,28 @@ export function RideRequest() {
                 emphasis="prominent"
               />
             )}
-            <StatusMessage tone="success">✅ Заказ оформлен.</StatusMessage>
+            {/* UI/UX redesign, Stage 2 (2026-09-12): used to be a
+                `StatusMessage tone="success"` -- a second, permanently-
+                green status banner sitting right above [RideStatus] below,
+                which already carries the one real, currently-correct
+                status (and its own correct color -- e.g. red for
+                DECLINED, appearing directly under a green "success" line
+                otherwise). Demoted to a quiet caption, same unchanged
+                text, so there is exactly one prominent status indicator on
+                screen at a time -- [RideStatus]. */}
             <Text role="caption" tone="muted">
-              Здесь вы увидите, что происходит с вашим заказом — от отправки до завершения поездки.
+              ✅ Заказ оформлен.
             </Text>
+            {/* UI/UX redesign, Stage 2: shown only while genuinely true --
+                once a real status is known ([rideStatus] past 'OPEN'),
+                this orientation sentence is stale ("here's what you'll
+                see happen" after it already happened); [RideStatus] itself
+                is by then the honest, current answer. */}
+            {rideStatus === 'OPEN' && (
+              <Text role="caption" tone="muted">
+                Здесь вы увидите, что происходит с вашим заказом — от отправки до завершения поездки.
+              </Text>
+            )}
             {requestedPickupAt && (
               <Text role="body" tone="secondary">
                 📅 Заказ на: {formatRequestedPickupAt(requestedPickupAt)}
@@ -1461,16 +1479,21 @@ export function RideRequest() {
                       Стоимость: {statedPrice}
                     </Text>
                   )}
-                {/* ADR-057: same placement and gating as statedPrice immediately above. */}
-                {typeof statedEtaMinutes === 'number' &&
-                  rideStatus !== 'OPEN' &&
-                  rideStatus !== 'PRICE_PROPOSED' &&
-                  rideStatus !== 'DECLINED' &&
-                  rideStatus !== 'LAPSED' && (
-                    <Text role="numeric" tone="primary">
-                      Будет примерно через: {statedEtaMinutes} мин
-                    </Text>
-                  )}
+                {/* ADR-057, narrowed in UI/UX redesign Stage 2: unlike
+                    [statedPrice] just above (a fact that stays true as a
+                    receipt for the rest of the ride), an ETA is a promise
+                    about arrival specifically -- stale and potentially
+                    confusing once the driver has already arrived
+                    (ARRIVED/IN_PROGRESS/COMPLETED all already say so via
+                    [RideStatus] itself) or the order is no longer live
+                    (WITHDRAWN, which the previous, wider condition did not
+                    exclude). Shown only for ACCEPTED, the one status where
+                    "will arrive in ~N min" is still a genuinely current fact. */}
+                {typeof statedEtaMinutes === 'number' && rideStatus === 'ACCEPTED' && (
+                  <Text role="numeric" tone="primary">
+                    Будет примерно через: {statedEtaMinutes} мин
+                  </Text>
+                )}
                 {/* Product Owner instruction, 2026-09-05: the driver named
                     a price -- the passenger must confirm or decline it
                     before a ride is settled. No renegotiation offered
@@ -1548,26 +1571,36 @@ export function RideRequest() {
                     actions above, for the same reason [handleOrderAgain]
                     is gated the same way: a ride still open or in progress
                     must not distract with "see your other drivers" while
-                    this one is the only thing that matters right now. */}
+                    this one is the only thing that matters right now.
+                    UI/UX redesign, Stage 2: grouped with "Поделиться с
+                    другом" into one row (reusing `.circleMemberActions`,
+                    the exact same secondary-actions-cluster treatment the
+                    'circle' step above already establishes) instead of two
+                    separately stacked full-width lines -- one quiet
+                    secondary cluster, not a second list of options
+                    competing with "Заказать ещё раз" above it. */}
                 {(rideStatus === 'DECLINED' ||
                   rideStatus === 'LAPSED' ||
                   rideStatus === 'WITHDRAWN' ||
                   rideStatus === 'COMPLETED') && (
-                  <button type="button" className={styles.textAction} onClick={() => navigate('/me')}>
-                    Мои водители
-                  </button>
-                )}
-                {/* Product audit follow-up (2026-09-12): only on an actual
-                    COMPLETED ride, unlike the two actions above -- there is
-                    a real experience to recommend at this specific status;
-                    DECLINED/LAPSED/WITHDRAWN never got a ride at all, so
-                    prompting a referral there would not reflect anything
-                    real. See [handleShareWithFriend]'s own KDoc for why
-                    this reuses the existing invite link unchanged. */}
-                {rideStatus === 'COMPLETED' && (
-                  <button type="button" className={styles.textAction} onClick={() => void handleShareWithFriend()}>
-                    Поделиться с другом
-                  </button>
+                  <div className={styles.circleMemberActions}>
+                    <button type="button" className={styles.textAction} onClick={() => navigate('/me')}>
+                      Мои водители
+                    </button>
+                    {/* Product audit follow-up (2026-09-12): only on an
+                        actual COMPLETED ride -- there is a real experience
+                        to recommend at this specific status;
+                        DECLINED/LAPSED/WITHDRAWN never got a ride at all,
+                        so prompting a referral there would not reflect
+                        anything real. See [handleShareWithFriend]'s own
+                        KDoc for why this reuses the existing invite link
+                        unchanged. */}
+                    {rideStatus === 'COMPLETED' && (
+                      <button type="button" className={styles.textAction} onClick={() => void handleShareWithFriend()}>
+                        Поделиться с другом
+                      </button>
+                    )}
+                  </div>
                 )}
                 {shareFeedback && <StatusMessage>{shareFeedback}</StatusMessage>}
               </>

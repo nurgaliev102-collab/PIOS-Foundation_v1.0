@@ -23,6 +23,13 @@
   gap: var(--pios-space-3);
 }
 
-.action {
-  margin-top: var(--pios-space-3);
+/* UI/UX redesign, Stage 4 (2026-09-12): an unavailable driver's whole card
+   is muted, not only its own "Заказать поездку" button -- so it reads as
+   "not actionable right now" at a glance while scanning several cards,
+   before reading any caption text. Kept well above fully-transparent
+   (`Button`'s own `:disabled` opacity is 0.5) so the driver's name and the
+   fact of the relationship itself stay perfectly legible -- muted, not
+   broken-looking. */
+.unavailable {
+  opacity: 0.7;
 }

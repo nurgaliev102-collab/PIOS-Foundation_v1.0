@@ -155,36 +155,49 @@ export function MyDrivers() {
 
         {status === 'ready' && (
           <div className={styles.list}>
-            {drivers.map(({ connection, driver }) => (
-              <Card key={connection.connectionId}>
-                <DriverTrustIndicator
-                  name={driver?.displayName ?? 'Водитель PIOS'}
-                  availability={driver?.availability}
-                  isPrimary={connection.isPrimary}
-                  showAvatar
-                />
-                <div className={styles.action}>
-                  {/* Product audit follow-up (2026-09-12): this action used
-                      to stay enabled regardless of [driver.availability],
-                      unlike this exact same "order a connected driver"
-                      action in RideRequest.tsx's own circle-of-trust step
-                      (`disabled={member.availability !== 'AVAILABLE'}`) --
-                      an inconsistency for the identical underlying choice.
-                      A passenger reordering through this screen (this
-                      product's own designated repeat path) could tap
-                      through to /request for a driver already shown as
-                      "Недоступен" just above and place an order nobody is
-                      working to answer. [DriverTrustIndicator] already
-                      renders that fact -- this only stops acting on it. */}
-                  <Button
-                    label="Заказать поездку"
-                    variant="primary"
-                    onClick={() => navigate(`/i/${connection.driverId}/request`)}
-                    disabled={driver?.availability !== 'AVAILABLE'}
-                  />
+            {drivers.map(({ connection, driver }) => {
+              const isAvailable = driver?.availability === 'AVAILABLE'
+              return (
+                /* UI/UX redesign, Stage 4 (2026-09-12): an unavailable
+                   driver used to differ from an available one only by
+                   [DriverTrustIndicator]'s own small dot + caption text --
+                   real, but not something a passenger scanning several
+                   cards at once picks up "instantly" (this stage's own
+                   explicit requirement). Muting the whole card is purely
+                   presentational, scoped to this one screen (`Card` itself
+                   takes no className, so the dim applies to a wrapping
+                   element instead) -- the actual gate stays exactly what
+                   it already was: [Button]'s own `disabled`, unchanged. */
+                <div key={connection.connectionId} className={isAvailable ? undefined : styles.unavailable}>
+                  <Card>
+                    <DriverTrustIndicator
+                      name={driver?.displayName ?? 'Водитель PIOS'}
+                      availability={driver?.availability}
+                      isPrimary={connection.isPrimary}
+                      showAvatar
+                    />
+                    {/* Product audit follow-up (2026-09-12): this action used
+                        to stay enabled regardless of [driver.availability],
+                        unlike this exact same "order a connected driver"
+                        action in RideRequest.tsx's own circle-of-trust step
+                        (`disabled={member.availability !== 'AVAILABLE'}`) --
+                        an inconsistency for the identical underlying choice.
+                        A passenger reordering through this screen (this
+                        product's own designated repeat path) could tap
+                        through to /request for a driver already shown as
+                        "Недоступен" just above and place an order nobody is
+                        working to answer. [DriverTrustIndicator] already
+                        renders that fact -- this only stops acting on it. */}
+                    <Button
+                      label="Заказать поездку"
+                      variant="primary"
+                      onClick={() => navigate(`/i/${connection.driverId}/request`)}
+                      disabled={!isAvailable}
+                    />
+                  </Card>
                 </div>
-              </Card>
-            ))}
+              )
+            })}
           </div>
         )}
       </main>

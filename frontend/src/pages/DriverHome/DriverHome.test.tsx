@@ -101,9 +101,9 @@ describe('DriverHome', () => {
     renderDriverHome()
     await userEvent.click(await screen.findByRole('tab', { name: 'Профиль' }))
 
-    await userEvent.type(await screen.findByPlaceholderText('Марка (например, Lada)'), 'Lada')
-    await userEvent.type(screen.getByPlaceholderText('Модель (например, Vesta)'), 'Vesta')
-    await userEvent.type(screen.getByPlaceholderText('Количество мест'), '4')
+    await userEvent.type(await screen.findByLabelText('Марка'), 'Lada')
+    await userEvent.type(screen.getByLabelText('Модель'), 'Vesta')
+    await userEvent.type(screen.getByLabelText('Количество мест'), '4')
 
     mockedRequest.mockResolvedValueOnce({
       id: 'driver-1',
@@ -172,7 +172,7 @@ describe('DriverHome', () => {
     // proposals now live under the "Работа" bottom-nav tab, not the default
     // "Главное".
     await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
-    await screen.findByLabelText('Через сколько вы приедете')
+    await screen.findByLabelText('Когда сможете приехать?')
 
     const proposalsCall = mockedRequest.mock.calls.find(([path]) => (path as string).startsWith('/v1/proposals?driverId='))
     expect(proposalsCall).toBeDefined()
@@ -213,7 +213,7 @@ describe('DriverHome', () => {
     renderDriverHome()
 
     await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
-    const select = await screen.findByLabelText('Через сколько вы приедете')
+    const select = await screen.findByLabelText('Когда сможете приехать?')
     expect(screen.getByRole('option', { name: '5 мин' })).toBeInTheDocument()
 
     await userEvent.selectOptions(select, '5')
@@ -222,7 +222,7 @@ describe('DriverHome', () => {
     // the button stays disabled (and clicking it does nothing) without one.
     const proposeButton = screen.getByRole('button', { name: 'Предложить цену' })
     expect(proposeButton).toBeDisabled()
-    await userEvent.type(screen.getByLabelText('Стоимость поездки'), '350')
+    await userEvent.type(screen.getByLabelText('Ваша цена'), '350')
     expect(proposeButton).toBeEnabled()
 
     mockedRequest.mockResolvedValueOnce({

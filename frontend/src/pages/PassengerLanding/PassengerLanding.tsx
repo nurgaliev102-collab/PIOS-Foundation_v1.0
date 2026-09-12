@@ -8,6 +8,8 @@ import { StatusMessage } from '../../components/StatusMessage'
 import { PasswordInput } from '../../components/PasswordInput'
 import { DriverTrustIndicator } from '../../components/DriverTrustIndicator'
 import { Heading } from '../../components/Heading'
+import { FormField } from '../../components/FormField'
+import { Card } from '../../components/Card'
 import { getInvitationByDriverCode } from './invitationSource'
 import type { InvitationInfo } from './invitationSource'
 import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
@@ -557,7 +559,7 @@ export function PassengerLanding() {
               <Button label="Начать" variant="primary" onClick={handleContinue} />
             </div>
 
-            <section className={styles.stepsCard}>
+            <Card>
               <h2 className={styles.stepsTitle}>Как работает PIOS</h2>
 
               <div className={styles.stepRow}>
@@ -579,20 +581,20 @@ export function PassengerLanding() {
                   <p className={styles.stepDescription}>Заказ приходит напрямую ему — и больше никому.</p>
                 </div>
               </div>
-            </section>
+            </Card>
 
             {/* PIOS Install v1 (Product Owner exception): additive, placed
                 after the primary "Начать" action so it never competes with
                 registration (Section 9's own explicit rule) — hidden once
                 PIOS is already running installed. */}
             {!isStandalone() && (
-              <section className={styles.installCard}>
+              <Card>
                 <p className={styles.installCardTitle}>Установить PIOS</p>
                 <p className={styles.installCardText}>
                   Добавьте PIOS на экран телефона, чтобы в следующий раз быстро заказать поездку.
                 </p>
                 <Button label="Установить PIOS" variant="secondary" onClick={() => setShowInstall(true)} />
-              </section>
+              </Card>
             )}
 
             <section className={styles.faqSection}>
@@ -638,41 +640,44 @@ export function PassengerLanding() {
 
         {step === 'auth' && (
           <>
-            <h1 className={styles.question}>
+            <Heading level={1} visual="display">
               {authMode === 'register' ? 'Создайте свой аккаунт PIOS' : 'Войти в PIOS'}
-            </h1>
+            </Heading>
             {authMode === 'register' && (
-              <input
-                className={styles.input}
-                type="text"
-                value={name}
-                maxLength={MAX_NAME_LENGTH}
-                placeholder="Ваше имя"
-                aria-label="Ваше имя"
-                onChange={(event) => handleFieldChange(setName)(event.target.value)}
-              />
+              <FormField label="Ваше имя" htmlFor="passenger-name">
+                <input
+                  id="passenger-name"
+                  className={styles.input}
+                  type="text"
+                  value={name}
+                  maxLength={MAX_NAME_LENGTH}
+                  onChange={(event) => handleFieldChange(setName)(event.target.value)}
+                />
+              </FormField>
             )}
-            <input
-              className={styles.input}
-              type="tel"
-              value={phone}
-              placeholder="Номер телефона"
-              aria-label="Номер телефона"
-              onChange={(event) => handleFieldChange(setPhone)(event.target.value)}
-            />
-            <PasswordInput
-              className={styles.input}
-              value={password}
-              onChange={handleFieldChange(setPassword)}
-              placeholder="Пароль"
-              ariaLabel="Пароль"
-              autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  void (authMode === 'register' ? handleRegisterSubmit() : handleLoginSubmit())
-                }
-              }}
-            />
+            <FormField label="Номер телефона" htmlFor="passenger-phone">
+              <input
+                id="passenger-phone"
+                className={styles.input}
+                type="tel"
+                value={phone}
+                onChange={(event) => handleFieldChange(setPhone)(event.target.value)}
+              />
+            </FormField>
+            <FormField label="Пароль" htmlFor="passenger-password">
+              <PasswordInput
+                id="passenger-password"
+                className={styles.input}
+                value={password}
+                onChange={handleFieldChange(setPassword)}
+                autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    void (authMode === 'register' ? handleRegisterSubmit() : handleLoginSubmit())
+                  }
+                }}
+              />
+            </FormField>
             {authError && <StatusMessage tone="error">{authError}</StatusMessage>}
             <div className={styles.actionRow}>
               <Button
@@ -690,15 +695,17 @@ export function PassengerLanding() {
 
         {step === 'confirmed' && identity && (
           <>
-            <h1 className={styles.greeting}>Добро пожаловать!</h1>
+            <Heading level={1} visual="display">
+              Добро пожаловать!
+            </Heading>
             <p className={styles.subtitle}>Вы успешно подключены к PIOS.</p>
 
-            <section className={styles.checklist}>
+            <Card>
               <p className={styles.checklistTitle}>Теперь вы можете:</p>
               <p className={styles.checklistItem}>✅ заказать поездку</p>
               <p className={styles.checklistItem}>✅ пользоваться личной ссылкой {invitation?.driverName}</p>
               <p className={styles.checklistItem}>✅ не искать его номер телефона</p>
-            </section>
+            </Card>
 
             <div className={styles.actionRow}>
               <Button label="Создать первый заказ" variant="primary" onClick={handleCreateFirstOrder} />

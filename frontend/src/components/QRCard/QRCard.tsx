@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import QRCode from 'qrcode'
-import { ActionButton } from '../ActionButton'
+import { Button } from '../Button'
 import styles from './QRCard.module.css'
 
 export interface QRCardProps {
@@ -89,8 +89,8 @@ export function QRCard({ invitationLink, linkTo, onCopy, onShare, feedback, labe
       )}
 
       <div className={styles.actions}>
-        <ActionButton label="Копировать" onClick={onCopy} variant="secondary" />
-        <ActionButton label="Поделиться" onClick={onShare} variant="primary" />
+        <Button label="Копировать" onClick={onCopy} variant="secondary" />
+        <Button label="Поделиться" onClick={onShare} variant="primary" />
       </div>
 
       {feedback && (
