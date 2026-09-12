@@ -164,10 +164,23 @@ export function MyDrivers() {
                   showAvatar
                 />
                 <div className={styles.action}>
+                  {/* Product audit follow-up (2026-09-12): this action used
+                      to stay enabled regardless of [driver.availability],
+                      unlike this exact same "order a connected driver"
+                      action in RideRequest.tsx's own circle-of-trust step
+                      (`disabled={member.availability !== 'AVAILABLE'}`) --
+                      an inconsistency for the identical underlying choice.
+                      A passenger reordering through this screen (this
+                      product's own designated repeat path) could tap
+                      through to /request for a driver already shown as
+                      "Недоступен" just above and place an order nobody is
+                      working to answer. [DriverTrustIndicator] already
+                      renders that fact -- this only stops acting on it. */}
                   <Button
                     label="Заказать поездку"
                     variant="primary"
                     onClick={() => navigate(`/i/${connection.driverId}/request`)}
+                    disabled={driver?.availability !== 'AVAILABLE'}
                   />
                 </div>
               </Card>

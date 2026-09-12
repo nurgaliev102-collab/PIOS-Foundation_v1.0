@@ -66,7 +66,7 @@ describe('MyDrivers', () => {
     expect(await screen.findByText(/Пока нет сохранённых водителей/)).toBeInTheDocument()
   })
 
-  it('lists connected drivers, primary first, each with a working "Заказать поездку"', async () => {
+  it('lists connected drivers, primary first, with a working "Заказать поездку" only for an available one', async () => {
     seedIdentity()
     mockedRequest.mockResolvedValueOnce({ id: 'passenger-1', phone: '+70000000000', driverId: null })
     mockedRequest.mockResolvedValueOnce([
@@ -86,8 +86,15 @@ describe('MyDrivers', () => {
     const names = screen.getAllByText(/Иван|Мария/).map((el) => el.textContent)
     expect(names.indexOf('Мария')).toBeLessThan(names.indexOf('Иван'))
 
+    // Product audit follow-up (2026-09-12): Мария (primary) is
+    // UNAVAILABLE -- her own "Заказать поездку" must be disabled, mirroring
+    // RideRequest.tsx's own circle-of-trust step for this identical "order
+    // a connected driver" choice, so a repeat passenger cannot place an
+    // order nobody is working to answer.
     const orderButtons = screen.getAllByRole('button', { name: 'Заказать поездку' })
-    await userEvent.click(orderButtons[0])
+    expect(orderButtons[0]).toBeDisabled()
+
+    await userEvent.click(orderButtons[1])
 
     expect(await screen.findByText('ride-request-screen')).toBeInTheDocument()
   })
