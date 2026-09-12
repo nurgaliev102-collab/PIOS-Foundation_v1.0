@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, request, resolveBackendBaseUrl } from './apiClient'
+import { ApiError, isSessionExpiredError, request, resolveBackendBaseUrl } from './apiClient'
 
 // Sprint "My Business + Circle of Trust" (ADR-054): `DELETE
 // /v1/connections/{id}` is this project's first 204 No Content response.
@@ -81,5 +81,31 @@ describe('resolveBackendBaseUrl', () => {
     } finally {
       globalThis.window = originalWindow
     }
+  })
+})
+
+// P1 UX audit (2026-09-12): the one shared classifier every screen's own
+// catch block now calls before falling back to its existing generic error
+// handling -- see [isSessionExpiredError]'s own KDoc for why a 401 is only
+// ever this for an *already-authenticated* call, never a login/register
+// credential check.
+describe('isSessionExpiredError', () => {
+  it('is true for a 401 ApiError', () => {
+    expect(isSessionExpiredError(new ApiError(401, '/v1/connections'))).toBe(true)
+  })
+
+  it('is false for any other ApiError status', () => {
+    expect(isSessionExpiredError(new ApiError(404, '/v1/connections'))).toBe(false)
+    expect(isSessionExpiredError(new ApiError(500, '/v1/connections'))).toBe(false)
+    expect(isSessionExpiredError(new ApiError(403, '/v1/connections'))).toBe(false)
+  })
+
+  it('is false for a plain network failure (not an ApiError at all)', () => {
+    expect(isSessionExpiredError(new TypeError('Failed to fetch'))).toBe(false)
+  })
+
+  it('is false for a non-error value', () => {
+    expect(isSessionExpiredError(undefined)).toBe(false)
+    expect(isSessionExpiredError(null)).toBe(false)
   })
 })

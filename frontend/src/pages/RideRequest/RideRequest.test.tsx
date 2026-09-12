@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { RideRequest } from './RideRequest'
@@ -653,6 +653,41 @@ describe('RideRequest', () => {
     expect(screen.queryByRole('button', { name: 'Поделиться с другом' })).not.toBeInTheDocument()
   })
 
+  // --- Session expiry (P1 UX audit, 2026-09-12) ---
+  // A 401 from the status poll's own authenticated call used to be
+  // indistinguishable from a transient network blip -- retried silently,
+  // forever, with the screen frozen on whatever status it last showed and
+  // zero indication anything was wrong.
+
+  it('shows "Сессия истекла. Войдите снова." when the status poll\'s session has expired, with a working way back', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockRejectedValueOnce(new ApiError(401, '/v1/proposals'))
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('Сессия истекла. Войдите снова.')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Войти снова' }))
+
+    expect(await screen.findByText('passenger-landing-screen')).toBeInTheDocument()
+    expect(localStorage.getItem('pios.identity')).toBeNull()
+  })
+
+  it('does not treat an ordinary poll failure (not a 401) as a session expiry', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockRejectedValueOnce(new Error('network down'))
+    mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
+
+    renderAt('driver-1')
+
+    await screen.findByText(/Ждём ответа водителя/)
+    expect(screen.queryByText('Сессия истекла. Войдите снова.')).not.toBeInTheDocument()
+  })
+
   it('does not offer "Заказать ещё раз" while still waiting for the driver', async () => {
     saveCurrentOrderId('driver-1', 'order-1')
     mockMeResponse()
@@ -773,6 +808,52 @@ describe('RideRequest', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Вызвать' }))
 
     expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+  })
+
+  // --- Browser Back (P1 UX audit, 2026-09-12) ---
+  // 'form' reached via the circle-of-trust step used to have no way back
+  // to it through the browser's own Back button -- it left the whole
+  // screen instead, skipping past a step the passenger had just seen.
+
+  it('returns to the circle-of-trust step, not off the screen, when Back is pressed after choosing a driver from it', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { connectionId: 'c1', driverId: 'driver-1', createdAt: '2026-08-01T00:00:00Z', isPrimary: true },
+      { connectionId: 'c2', driverId: 'driver-2', createdAt: '2026-08-02T00:00:00Z', isPrimary: false },
+    ])
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-2', availability: 'AVAILABLE', displayName: 'Ахмад' })
+
+    renderAt('driver-1')
+    await screen.findByRole('heading', { name: 'Кому доверить эту поездку?' })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Вызвать' }))
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+
+    expect(await screen.findByRole('heading', { name: 'Кому доверить эту поездку?' })).toBeInTheDocument()
+  })
+
+  it('does not intercept Back on the order form when it was reached directly (0-or-1 relationship, no circle step shown)', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+
+    // No circle step was ever shown for this passenger -- Back must not
+    // invent one to return to.
+    expect(screen.queryByRole('heading', { name: 'Кому доверить эту поездку?' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
   })
 
   it('choosing a different trusted driver for this specific ride navigates away, without asking to change primary', async () => {

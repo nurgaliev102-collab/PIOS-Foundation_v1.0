@@ -77,6 +77,30 @@ export class ApiError extends Error {
 }
 
 /**
+ * P1 UX audit (2026-09-12): the one fact every screen making an
+ * authenticated call must be able to tell apart from a generic network
+ * failure or backend error -- a 401 from an endpoint that was sent a
+ * Bearer token means that specific credential is no longer valid
+ * (expired, or a session secret rotated server-side), not "try again in
+ * a moment": retrying the exact same request with the same stale token
+ * will never succeed on its own, unlike a transient network blip or a
+ * momentary 5xx.
+ *
+ * Deliberately does NOT fire for a 401 from a credential *check* itself
+ * (login/register with a wrong password) -- that call sends no existing
+ * session token to begin with, so its own 401 means "wrong credentials",
+ * a completely different fact this function must never relabel. Every
+ * call site below only applies this to a request that already carried
+ * `Authorization: Bearer <token>` for an already-established session.
+ */
+export function isSessionExpiredError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401
+}
+
+/** The one message every screen shows for [isSessionExpiredError] — see that function's own KDoc. */
+export const SESSION_EXPIRED_MESSAGE = 'Сессия истекла. Войдите снова.'
+
+/**
  * Sprint 5 — First Backend Integration: the single function every real
  * backend call in this project goes through. Issues a JSON `fetch`
  * against a base URL + [path], parses the response as `T` on success,

@@ -19,7 +19,8 @@ import type { StoredIdentity } from '../../identity/IdentityProvider'
 import { LocalInvitationProvider } from '../../identity/InvitationProvider'
 import { getDisplayName } from '../../persistence/localDisplayName'
 import { clearCurrentOrderId, getCurrentOrderId, saveCurrentOrderId } from '../../persistence/localCurrentOrder'
-import { request, resolveBackendBaseUrl } from '../../api/apiClient'
+import { isSessionExpiredError, request, resolveBackendBaseUrl, SESSION_EXPIRED_MESSAGE } from '../../api/apiClient'
+import { useBackableStep } from '../../navigation/useBackableStep'
 import styles from './RideRequest.module.css'
 
 // ADR-038/ADR-039/ADR-055: same module-level provider instance `PassengerLanding.tsx` already uses.
@@ -341,6 +342,21 @@ export function RideRequest() {
   const [driverAvailability, setDriverAvailability] = useState<'AVAILABLE' | 'UNAVAILABLE' | null>(null)
   const [circle, setCircle] = useState<EnrichedCircleMember[]>([])
   const [circleError, setCircleError] = useState(false)
+  // P1 UX audit (2026-09-12): session expiry, centrally classified by
+  // [isSessionExpiredError] (`api/apiClient.ts`) -- see this screen's own
+  // [handleSessionExpiredError] for the one place every catch block below
+  // now checks it, instead of a stale token's 401 silently reading as a
+  // generic/best-effort failure the way it used to.
+  const [sessionExpired, setSessionExpired] = useState(false)
+  // P1 UX audit (2026-09-12): the browser's own Back button used to leave
+  // this whole screen from 'form' -- reached only by choosing a member in
+  // the circle-of-trust step -- rather than returning to that step, as a
+  // user would expect. Enabled only when the circle step was actually
+  // shown (`circle.length > 1`, [loadCircleThenAdvance]'s own gate below):
+  // a passenger who skipped straight to 'form' (0 or 1 relationship) has
+  // no real circle screen to return to. See [useBackableStep]'s own KDoc
+  // for why this never touches the route/URL or affects a deep link.
+  useBackableStep(step, setStep, 'form', 'circle', circle.length > 1)
   const [primaryChangeTarget, setPrimaryChangeTarget] = useState<string | null>(null)
   const [primaryChangeStatus, setPrimaryChangeStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
   const [removeTarget, setRemoveTarget] = useState<string | null>(null)
@@ -613,8 +629,16 @@ export function RideRequest() {
               })
           }
         })
-        .catch(() => {
-          // Best-effort: a failed poll simply tries again next tick.
+        .catch((error) => {
+          // P1 UX audit (2026-09-12): a stale/invalidated session token
+          // making this exact request 401 forever is not a transient
+          // failure "next tick" will fix -- unlike every other failure
+          // here, which keeps its own pre-existing best-effort tolerance
+          // completely unchanged.
+          if (active) {
+            handleSessionExpiredError(error)
+          }
+          // Best-effort otherwise: a failed poll simply tries again next tick.
         })
     }
     poll()
@@ -636,6 +660,27 @@ export function RideRequest() {
         <Header />
         <main className={styles.content}>
           <LoadingState label="Загрузка…" />
+        </main>
+      </div>
+    )
+  }
+
+  // P1 UX audit (2026-09-12): once any call above has confirmed the
+  // session itself is invalid, nothing else on this screen can succeed
+  // either (every remaining action reuses the exact same stale token) --
+  // replacing the whole screen, rather than layering a banner over
+  // whatever `step` last showed, is the honest reflection of that: the
+  // order/ride status underneath may no longer even be currently visible
+  // to this passenger. "Войти снова" reuses [handleLogout] exactly.
+  if (sessionExpired) {
+    return (
+      <div className={styles.screen}>
+        <Header />
+        <main className={styles.content}>
+          <StatusMessage tone="error">{SESSION_EXPIRED_MESSAGE}</StatusMessage>
+          <div className={styles.actionRow}>
+            <Button label="Войти снова" variant="primary" onClick={handleLogout} />
+          </div>
         </main>
       </div>
     )
@@ -761,7 +806,10 @@ export function RideRequest() {
       saveCurrentOrderId(driverCode ?? '', response.orderId)
       setStep('confirmed')
       void attemptProposal(response.orderId)
-    } catch {
+    } catch (error) {
+      if (handleSessionExpiredError(error)) {
+        return
+      }
       setSubmitError('Не удалось связаться с сервером. Попробуйте ещё раз через несколько секунд.')
     } finally {
       setIsSubmitting(false)
@@ -804,7 +852,10 @@ export function RideRequest() {
         baseUrl: DISPATCH_BASE_URL,
       })
       setProposalStatus('proposed')
-    } catch {
+    } catch (error) {
+      if (handleSessionExpiredError(error)) {
+        return
+      }
       setProposalStatus('error')
     }
   }
@@ -856,7 +907,10 @@ export function RideRequest() {
       })
       setRideStatus('WITHDRAWN')
       setCancelStatus('idle')
-    } catch {
+    } catch (error) {
+      if (handleSessionExpiredError(error)) {
+        return
+      }
       setCancelStatus('error')
     }
   }
@@ -885,7 +939,10 @@ export function RideRequest() {
       })
       setRideStatus('ACCEPTED')
       setPriceDecisionStatus('idle')
-    } catch {
+    } catch (error) {
+      if (handleSessionExpiredError(error)) {
+        return
+      }
       setPriceDecisionStatus('error')
     }
   }
@@ -911,7 +968,10 @@ export function RideRequest() {
       })
       setRideStatus('DECLINED')
       setPriceDecisionStatus('idle')
-    } catch {
+    } catch (error) {
+      if (handleSessionExpiredError(error)) {
+        return
+      }
       setPriceDecisionStatus('error')
     }
   }
@@ -929,6 +989,24 @@ export function RideRequest() {
   function handleLogout() {
     identityProvider.logout()
     navigate(`/i/${driverCode ?? ''}`, { replace: true })
+  }
+
+  /**
+   * P1 UX audit (2026-09-12): the one place every catch block below checks
+   * whether a failure was actually an expired/invalidated session
+   * ([isSessionExpiredError], `api/apiClient.ts`) before falling back to
+   * its own existing, unchanged generic-error handling. Returns `true`
+   * when it was, so the caller can `return` immediately rather than also
+   * setting its own (now misleading) generic error state. "Войти снова"
+   * reuses [handleLogout] exactly -- there is nothing session-specific to
+   * clean up beyond what signing out already does.
+   */
+  function handleSessionExpiredError(error: unknown): boolean {
+    if (isSessionExpiredError(error)) {
+      setSessionExpired(true)
+      return true
+    }
+    return false
   }
 
   function handleOrderAgain() {
@@ -1031,7 +1109,10 @@ export function RideRequest() {
       )
       setPrimaryChangeTarget(null)
       setPrimaryChangeStatus('idle')
-    } catch {
+    } catch (error) {
+      if (handleSessionExpiredError(error)) {
+        return
+      }
       setPrimaryChangeStatus('error')
     }
   }
@@ -1061,7 +1142,10 @@ export function RideRequest() {
       setCircle((current) => current.filter((member) => member.connectionId !== removeTarget))
       setRemoveTarget(null)
       setRemoveStatus('idle')
-    } catch {
+    } catch (error) {
+      if (handleSessionExpiredError(error)) {
+        return
+      }
       setRemoveStatus('error')
     }
   }

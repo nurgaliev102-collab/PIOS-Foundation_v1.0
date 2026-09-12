@@ -14,7 +14,8 @@ import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
 import { normalizePhone, isValidPhone, PHONE_FORMAT_HINT } from '../../identity/phoneFormat'
 import { saveDisplayName } from '../../persistence/localDisplayName'
-import { ApiError, request, resolveBackendBaseUrl } from '../../api/apiClient'
+import { ApiError, isSessionExpiredError, request, resolveBackendBaseUrl, SESSION_EXPIRED_MESSAGE } from '../../api/apiClient'
+import { useBackableStep } from '../../navigation/useBackableStep'
 import { PassengerOnboarding } from './PassengerOnboarding'
 import { hasSeenPassengerOnboarding, markPassengerOnboardingSeen } from '../../persistence/localOnboardingSeen'
 import { InstallPIOS, isStandalone } from '../../features/install'
@@ -103,6 +104,13 @@ export function PassengerLanding() {
   const [authError, setAuthError] = useState<string | null>(null)
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
   const [addStatus, setAddStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
+  // P1 UX audit (2026-09-12): see [handleSessionExpiredError]'s own KDoc.
+  const [sessionExpired, setSessionExpired] = useState(false)
+  // P1 UX audit (2026-09-12): 'auth' is only ever reached from 'invited'
+  // (via [handleContinue], the "Начать" button) -- unconditionally
+  // enabled since no other path reaches it. See [useBackableStep]'s own
+  // KDoc for why this never touches the route/URL or affects a deep link.
+  useBackableStep(step, setStep, 'auth', 'invited', true)
 
   // PIOS Onboarding v1 (Product Owner exception, PIOS_PRODUCT_EVIDENCE.md
   // gate): shown once, automatically, the first time this passenger reaches
@@ -224,9 +232,31 @@ export function PassengerLanding() {
         baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
       })
       navigate(`/i/${driverCode ?? ''}/request`)
-    } catch {
+    } catch (error) {
+      if (handleSessionExpiredError(error)) {
+        return
+      }
       setAddStatus('error')
     }
+  }
+
+  /**
+   * P1 UX audit (2026-09-12): the one place this screen checks whether a
+   * failure was actually an expired/invalidated session
+   * ([isSessionExpiredError], `api/apiClient.ts`) before falling back to
+   * existing, unchanged generic-error handling. Clears the stale identity
+   * and returns to 'invited' -- this screen's own starting point, where
+   * "Начать" leads back into a fresh register/login -- since there is no
+   * separate login route to send a passenger to on this specific screen.
+   */
+  function handleSessionExpiredError(error: unknown): boolean {
+    if (isSessionExpiredError(error)) {
+      identityProvider.logout()
+      setIdentity(null)
+      setSessionExpired(true)
+      return true
+    }
+    return false
   }
 
   function handleSkipAdd() {
@@ -415,6 +445,33 @@ export function PassengerLanding() {
 
   function handleCreateFirstOrder() {
     navigate(`/i/${driverCode ?? ''}/request`)
+  }
+
+  // P1 UX audit (2026-09-12): checked ahead of every `step` branch below --
+  // once a session is known to be invalid, nothing else on this screen
+  // (which is only ever reached with an identity already needed for
+  // `confirm-add`/`handleAddToCircle`) can succeed with the same stale
+  // token. See [handleSessionExpiredError]'s own KDoc for why this
+  // specific screen resets to 'invited' rather than a separate login route.
+  if (sessionExpired) {
+    return (
+      <div className={styles.screen}>
+        <Header />
+        <main className={styles.content}>
+          <StatusMessage tone="error">{SESSION_EXPIRED_MESSAGE}</StatusMessage>
+          <div className={styles.actionRow}>
+            <Button
+              label="Войти снова"
+              variant="primary"
+              onClick={() => {
+                setSessionExpired(false)
+                setStep('invited')
+              }}
+            />
+          </div>
+        </main>
+      </div>
+    )
   }
 
   return (

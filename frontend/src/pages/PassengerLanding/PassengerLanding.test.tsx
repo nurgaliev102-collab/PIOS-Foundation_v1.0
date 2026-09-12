@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { PassengerLanding } from './PassengerLanding'
@@ -476,5 +476,46 @@ describe('PassengerLanding', () => {
     await userEvent.click(screen.getByText('Пропустить'))
 
     expect(await screen.findByRole('button', { name: 'Позже' })).toBeInTheDocument() // install chained in next
+  })
+
+  // --- Session expiry (P1 UX audit, 2026-09-12) ---
+
+  it('shows "Сессия истекла. Войдите снова." when adding to circle fails because the session has expired', async () => {
+    localStorage.setItem(
+      'pios.identity',
+      JSON.stringify({ identityId: 'passenger-1', driverId: null, token: 'test-token', expiresAt: '2099-01-01T00:00:00.000Z' })
+    )
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce({ id: 'passenger-1', phone: '+70000000000', driverId: null }) // GET /v1/identities/me
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections?passengerReference= -- not yet connected to driver-1
+    mockedRequest.mockRejectedValueOnce(new ApiError(401, '/v1/connections'))
+
+    renderAt('driver-1')
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Добавить' }))
+
+    expect(await screen.findByText('Сессия истекла. Войдите снова.')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Войти снова' }))
+
+    // Back to this screen's own starting point -- "Начать" leads into a
+    // fresh register/login, since there is no separate login route here.
+    expect(await screen.findByText('Вас пригласили лично')).toBeInTheDocument()
+  })
+
+  // --- Browser Back (P1 UX audit, 2026-09-12) ---
+
+  it('returns to the invitation screen, not off the screen, when Back is pressed from the auth form', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderAt('driver-1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Начать' }))
+    expect(await screen.findByRole('heading', { name: 'Создайте свой аккаунт PIOS' })).toBeInTheDocument()
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+
+    expect(await screen.findByText('Вас пригласили лично')).toBeInTheDocument()
   })
 })
