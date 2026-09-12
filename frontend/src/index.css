@@ -12,6 +12,14 @@
 body {
   margin: 0;
   min-height: 100svh;
+  /* UI hardening pass (2026-09-12): defensive-only -- a real address,
+     name, or plate number a passenger/driver types (or a stray long
+     word/URL with no spaces to wrap at) must never force the page itself
+     to scroll sideways on a phone. Every screen's own layout is
+     unchanged; this only stops the one class of input this app cannot
+     fully control (free-text length) from breaking it. */
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
 }
 
 #root {
