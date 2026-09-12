@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { PassengerLanding } from './PassengerLanding'
@@ -169,6 +169,160 @@ describe('PassengerLanding', () => {
 
     expect(await screen.findByRole('heading', { name: 'Добро пожаловать!' })).toBeInTheDocument()
     expect(localStorage.getItem('pios.identity')).not.toBeNull()
+  })
+
+  // --- Connection bootstrap reliability (2026-09-12) ---
+  // Retrying the whole `POST /v1/connections` + `POST .../primary`
+  // sequence is safe because the real backend already makes both calls
+  // idempotent by design (see [bootstrapCircleOfTrust]'s own KDoc for the
+  // exact code cited) -- these tests cover the frontend's own retry
+  // policy, not the backend guarantee itself.
+
+  /**
+   * Fills the registration form and queues [identityProvider.register]'s
+   * own response, but does not click submit -- every caller must queue
+   * the connection/primary mocks it wants *before* clicking, exactly like
+   * the happy-path test above, since [bootstrapCircleOfTrust] starts
+   * calling `request('/v1/connections', ...)` in the same microtask
+   * `handleRegisterSubmit`'s own state updates resolve in, before
+   * `userEvent.click`'s own returned promise resolves. Queuing a
+   * connection/primary mock *after* awaiting the click would race an
+   * already-in-flight call reading an unconfigured mock instead.
+   */
+  async function fillRegistrationForm() {
+    await userEvent.click(await screen.findByRole('button', { name: 'Начать' }))
+    await userEvent.type(screen.getByLabelText('Ваше имя'), 'Аня')
+    await userEvent.type(screen.getByLabelText('Номер телефона'), '+70000000001')
+    await userEvent.type(screen.getByLabelText('Пароль'), 'password123')
+  }
+
+  function queueSuccessfulRegisterResponse() {
+    mockedRequest.mockResolvedValueOnce({
+      identityId: 'passenger-1',
+      driverId: null,
+      token: 'test-token',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    })
+  }
+
+  it('makes exactly one connection call and one primary call when the first attempt succeeds', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    renderAt('driver-1')
+    await fillRegistrationForm()
+
+    queueSuccessfulRegisterResponse()
+    mockedRequest.mockResolvedValueOnce({ connectionId: 'c1' }) // POST /v1/connections
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/connections/c1/primary
+
+    await userEvent.click(screen.getByRole('button', { name: 'Создать аккаунт' }))
+    await screen.findByRole('heading', { name: 'Добро пожаловать!' })
+
+    const connectionCalls = mockedRequest.mock.calls.filter(([path]) => path === '/v1/connections')
+    const primaryCalls = mockedRequest.mock.calls.filter(([path]) => path === '/v1/connections/c1/primary')
+    expect(connectionCalls).toHaveLength(1)
+    expect(primaryCalls).toHaveLength(1)
+  })
+
+  it('creates the connection when the first attempt fails and the retry succeeds', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    renderAt('driver-1')
+    await fillRegistrationForm()
+
+    queueSuccessfulRegisterResponse()
+    mockedRequest.mockRejectedValueOnce(new Error('network down')) // POST /v1/connections, attempt 1
+    mockedRequest.mockResolvedValueOnce({ connectionId: 'c1' }) // POST /v1/connections, attempt 2
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/connections/c1/primary, attempt 2
+
+    await userEvent.click(screen.getByRole('button', { name: 'Создать аккаунт' }))
+    await screen.findByRole('heading', { name: 'Добро пожаловать!' })
+    await waitFor(
+      () => {
+        const connectionCalls = mockedRequest.mock.calls.filter(([path]) => path === '/v1/connections')
+        expect(connectionCalls).toHaveLength(2)
+      },
+      { timeout: 3000 }
+    )
+    const primaryCalls = mockedRequest.mock.calls.filter(([path]) => path === '/v1/connections/c1/primary')
+    expect(primaryCalls).toHaveLength(1)
+  })
+
+  it('retries the whole sequence with the same natural key after a transient failure creating the connection', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    renderAt('driver-1')
+    await fillRegistrationForm()
+
+    queueSuccessfulRegisterResponse()
+    mockedRequest.mockRejectedValueOnce(new Error('network down')) // attempt 1: POST /v1/connections fails
+    mockedRequest.mockResolvedValueOnce({ connectionId: 'c1' }) // attempt 2: POST /v1/connections succeeds
+    mockedRequest.mockResolvedValueOnce({}) // attempt 2: POST primary succeeds
+
+    await userEvent.click(screen.getByRole('button', { name: 'Создать аккаунт' }))
+    await waitFor(
+      () => {
+        const connectionCalls = mockedRequest.mock.calls.filter(([path]) => path === '/v1/connections')
+        expect(connectionCalls).toHaveLength(2)
+      },
+      { timeout: 3000 }
+    )
+    // Same natural key on every attempt -- this is exactly what makes the
+    // repeated call safe against the backend's own UNIQUE constraint,
+    // rather than accidentally producing a different one.
+    const bodies = mockedRequest.mock.calls
+      .filter(([path]) => path === '/v1/connections')
+      .map(([, init]) => (init as RequestInit).body)
+    expect(bodies[0]).toEqual(bodies[1])
+  })
+
+  it('retries the whole sequence again after a transient failure setting primary, safely', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    renderAt('driver-1')
+    await fillRegistrationForm()
+
+    queueSuccessfulRegisterResponse()
+    mockedRequest.mockResolvedValueOnce({ connectionId: 'c1' }) // attempt 1: POST /v1/connections succeeds
+    mockedRequest.mockRejectedValueOnce(new Error('network down')) // attempt 1: POST primary fails
+    // Attempt 2 redoes the whole sequence -- the backend's own idempotent
+    // create returns the same existing connection either way; mocked here
+    // returning the same id, matching that real behavior.
+    mockedRequest.mockResolvedValueOnce({ connectionId: 'c1' }) // attempt 2: POST /v1/connections
+    mockedRequest.mockResolvedValueOnce({}) // attempt 2: POST primary succeeds
+
+    await userEvent.click(screen.getByRole('button', { name: 'Создать аккаунт' }))
+    await waitFor(
+      () => {
+        const primaryCalls = mockedRequest.mock.calls.filter(([path]) => path === '/v1/connections/c1/primary')
+        expect(primaryCalls).toHaveLength(2)
+      },
+      { timeout: 3000 }
+    )
+    const connectionCalls = mockedRequest.mock.calls.filter(([path]) => path === '/v1/connections')
+    expect(connectionCalls).toHaveLength(2)
+  })
+
+  it('preserves today\'s silent best-effort behavior once every attempt has failed', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    renderAt('driver-1')
+    await fillRegistrationForm()
+
+    queueSuccessfulRegisterResponse()
+    mockedRequest.mockRejectedValueOnce(new Error('network down')) // attempt 1
+    mockedRequest.mockRejectedValueOnce(new Error('network down')) // attempt 2
+    mockedRequest.mockRejectedValueOnce(new Error('network down')) // attempt 3
+
+    await userEvent.click(screen.getByRole('button', { name: 'Создать аккаунт' }))
+
+    // The passenger still reaches the confirmed screen -- registration
+    // itself succeeded; only the best-effort bootstrap exhausted its
+    // attempts, unchanged from before this fix's own tolerance.
+    expect(await screen.findByRole('heading', { name: 'Добро пожаловать!' })).toBeInTheDocument()
+    await waitFor(
+      () => {
+        const connectionCalls = mockedRequest.mock.calls.filter(([path]) => path === '/v1/connections')
+        expect(connectionCalls).toHaveLength(3)
+      },
+      { timeout: 3000 }
+    )
+    expect(screen.queryByText(/Не удалось/)).not.toBeInTheDocument()
   })
 
   it('shows a clear message when the phone number is already registered, and does not sign the visitor in', async () => {

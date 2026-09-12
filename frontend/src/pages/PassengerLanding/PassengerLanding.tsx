@@ -31,6 +31,13 @@ const identityProvider = new BackendIdentityProvider()
 const MAX_NAME_LENGTH = 50
 const MIN_PASSWORD_LENGTH = 8
 
+// Connection reliability audit (2026-09-12): see [bootstrapCircleOfTrust]'s
+// own KDoc for why retrying is safe. One initial attempt plus two retries;
+// a short, flat delay -- not exponential backoff, which this fix's own
+// scope does not call for.
+const CONNECTION_BOOTSTRAP_MAX_ATTEMPTS = 3
+const CONNECTION_BOOTSTRAP_RETRY_DELAY_MS = 300
+
 // Passenger Experience's own local port (INTERFACE_CONTRACTS.md) — Sprint
 // 7B (Personal Network Flow MVP): this page now also calls that module
 // directly, to record that this passenger reached PIOS through this
@@ -253,6 +260,69 @@ export function PassengerLanding() {
   }
 
   /**
+   * Connection reliability audit (2026-09-12): [bootstrapCircleOfTrust]
+   * used to be a single, unretried attempt -- a transient network failure
+   * silently and permanently lost the one relationship an entire referral
+   * exists to create. Retrying is unconditionally safe here, verified by
+   * reading the real backend code, not assumed: `POST /v1/connections`
+   * (`CreateConnectionApplicationService.kt`) is check-then-create with a
+   * `UNIQUE(driver_id, passenger_reference)` database constraint
+   * (`V1__create_connections.sql`) as the actual race guard -- calling it
+   * again with the same pair returns the same existing row, never a
+   * duplicate. `POST /v1/connections/:id/primary`
+   * (`SetPrimaryConnectionApplicationService.kt` ->
+   * `PostgreSQLPrimaryConnectionRepository.setPrimary`) is a true
+   * `INSERT ... ON CONFLICT (passenger_reference) DO UPDATE` upsert --
+   * calling it again with the same `connectionId` is a no-op. Neither
+   * endpoint, the database schema, nor any new idempotency-key mechanism
+   * is touched by this fix; the natural key already made both calls safe
+   * to repeat.
+   *
+   * [CONNECTION_BOOTSTRAP_MAX_ATTEMPTS] = 3 (one initial attempt, two
+   * retries), [CONNECTION_BOOTSTRAP_RETRY_DELAY_MS] a short, flat pause
+   * between them -- deliberately not exponential backoff or a configurable
+   * policy, which this fix's own scope does not call for. Retries the
+   * *whole* two-call sequence on any failure of either call, rather than
+   * trying to resume from whichever call failed -- simpler, and just as
+   * safe, since both calls are independently idempotent.
+   *
+   * Still best-effort once attempts are exhausted -- this does not change
+   * the existing successful scenario, and does not add a new user-facing
+   * failure indicator (a deliberately separate, not-yet-decided
+   * follow-up); it only makes the already-intended outcome survive a
+   * transient blip instead of any single dropped request losing it
+   * forever. The existing, already-honest recovery path (reopening the
+   * same invitation link routes an unconnected returning passenger to the
+   * 'confirm-add' screen) is unchanged.
+   */
+  async function bootstrapCircleOfTrust(identity: StoredIdentity, forDriverCode: string): Promise<void> {
+    for (let attempt = 1; attempt <= CONNECTION_BOOTSTRAP_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const connection = await request<{ connectionId: string }>('/v1/connections', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity.token}` },
+          body: JSON.stringify({ driverId: forDriverCode, passengerReference: identity.identityId }),
+          baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
+        })
+        await request(`/v1/connections/${connection.connectionId}/primary`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${identity.token}` },
+          baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
+        })
+        return
+      } catch {
+        if (attempt === CONNECTION_BOOTSTRAP_MAX_ATTEMPTS) {
+          // Best-effort bootstrap -- see this function's own KDoc. All
+          // attempts exhausted; the passenger still proceeds (see call
+          // site), unchanged from before this fix.
+          return
+        }
+        await new Promise((resolve) => setTimeout(resolve, CONNECTION_BOOTSTRAP_RETRY_DELAY_MS))
+      }
+    }
+  }
+
+  /**
    * ADR-055: a brand-new account, created specifically through this
    * driver's own invitation link — the intent to connect with them is
    * already obvious, so this bootstraps the connection (and, since it is
@@ -262,7 +332,8 @@ export function PassengerLanding() {
    * `PRODUCT_DECISION_CIRCLE_OF_TRUST.md` already accepted for this
    * bootstrap step; the *explicit* "Добавить в круг доверия" action
    * ([handleAddToCircle]) is the one Section 16 requires to be honest about
-   * failure, not this implicit one.
+   * failure, not this implicit one. See [bootstrapCircleOfTrust]'s own
+   * KDoc for the retry behavior added on top of that same tolerance.
    */
   async function handleRegisterSubmit() {
     const trimmedName = name.trim()
@@ -297,21 +368,7 @@ export function PassengerLanding() {
       setIdentity(created)
       setStep('confirmed')
 
-      try {
-        const connection = await request<{ connectionId: string }>('/v1/connections', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${created.token}` },
-          body: JSON.stringify({ driverId: driverCode ?? '', passengerReference: created.identityId }),
-          baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
-        })
-        await request(`/v1/connections/${connection.connectionId}/primary`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${created.token}` },
-          baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
-        })
-      } catch {
-        // Best-effort bootstrap -- see this function's own KDoc.
-      }
+      await bootstrapCircleOfTrust(created, driverCode ?? '')
     } catch (error) {
       setAuthError(
         error instanceof ApiError && error.status === 409
