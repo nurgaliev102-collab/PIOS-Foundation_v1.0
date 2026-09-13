@@ -715,6 +715,138 @@ describe('RideRequest', () => {
     expect(screen.queryByRole('button', { name: 'Заказать у этого водителя' })).not.toBeInTheDocument()
   })
 
+  // --- Repeat Client Loop (Product Cycle) ---
+
+  it('does not offer "Добавить в мои водители" once this driver is already in the circle of trust', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { connectionId: 'c1', driverId: 'driver-1', createdAt: '2026-08-01T00:00:00Z', isPrimary: true },
+    ])
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-1' })
+    mockedRequest.mockResolvedValueOnce({})
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    await screen.findByRole('button', { name: 'Заказать у этого водителя' })
+    expect(screen.queryByRole('button', { name: 'Добавить в мои водители' })).not.toBeInTheDocument()
+  })
+
+  it('saving a driver with no existing primary creates the connection and sets it primary, then the repeat label updates', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([]) // circle-of-trust: no relationships at all
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-1' })
+    mockedRequest.mockResolvedValueOnce({})
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+    const saveButton = await screen.findByRole('button', { name: 'Добавить в мои водители' })
+
+    mockedRequest.mockResolvedValueOnce({ connectionId: 'c-new' }) // POST /v1/connections
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/connections/c-new/primary -- no existing primary, so this fires
+
+    await userEvent.click(saveButton)
+
+    expect(await screen.findByRole('button', { name: 'Заказать у этого водителя' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Добавить в мои водители' })).not.toBeInTheDocument()
+    // The button vanishing is a subtle cue on its own -- an explicit
+    // confirmation names what happened and that this driver became primary.
+    expect(await screen.findByText('Водитель сохранён и назначен основным')).toBeInTheDocument()
+
+    const createCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/connections')
+    expect(createCall).toBeDefined()
+    const createBody = JSON.parse((createCall?.[1] as RequestInit).body as string)
+    expect(createBody).toEqual({ driverId: 'driver-1', passengerReference: TEST_IDENTITY.identityId })
+    expect(mockedRequest.mock.calls.some(([path]) => path === '/v1/connections/c-new/primary')).toBe(true)
+  })
+
+  it('saving a driver while another primary already exists creates the connection but does not touch primary', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { connectionId: 'c-existing', driverId: 'driver-existing-primary', createdAt: '2026-08-01T00:00:00Z', isPrimary: true },
+    ])
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-existing-primary', availability: 'AVAILABLE', displayName: 'Пётр' })
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-1' })
+    mockedRequest.mockResolvedValueOnce({})
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+    const saveButton = await screen.findByRole('button', { name: 'Добавить в мои водители' })
+
+    mockedRequest.mockResolvedValueOnce({ connectionId: 'c-new' }) // POST /v1/connections -- the only call this click should make
+
+    await userEvent.click(saveButton)
+
+    await screen.findByRole('button', { name: 'Заказать у этого водителя' })
+    // Rule 4 (PRODUCT_DECISION_CIRCLE_OF_TRUST.md): an existing primary is
+    // never silently replaced -- only the create call happens, never
+    // /primary for the newly saved connection.
+    expect(mockedRequest.mock.calls.some(([path]) => path === '/v1/connections/c-new/primary')).toBe(false)
+    // Confirmation still names what actually happened -- saved, but not
+    // made primary, since Пётр already holds that role.
+    expect(await screen.findByText('Водитель сохранён в вашем круге доверия')).toBeInTheDocument()
+  })
+
+  it('shows a retryable error if saving the driver fails', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-1' })
+    mockedRequest.mockResolvedValueOnce({})
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+    const saveButton = await screen.findByRole('button', { name: 'Добавить в мои водители' })
+
+    mockedRequest.mockRejectedValueOnce(new Error('network down'))
+    await userEvent.click(saveButton)
+
+    expect(await screen.findByText('Не удалось сохранить водителя. Попробуйте ещё раз.')).toBeInTheDocument()
+    // Still offered -- nothing was saved, the passenger can just try again.
+    const retryButton = screen.getByRole('button', { name: 'Добавить в мои водители' })
+
+    mockedRequest.mockResolvedValueOnce({ connectionId: 'c-new' })
+    mockedRequest.mockResolvedValueOnce({})
+    await userEvent.click(retryButton)
+
+    expect(await screen.findByRole('button', { name: 'Заказать у этого водителя' })).toBeInTheDocument()
+  })
 
   // Product audit (2026-09-12): "Мои водители" (/me) is PIOS's own
   // designated repeat-a-ride path but had no link to it anywhere in the

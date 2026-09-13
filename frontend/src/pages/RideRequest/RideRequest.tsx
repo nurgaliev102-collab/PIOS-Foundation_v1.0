@@ -459,6 +459,12 @@ export function RideRequest() {
   // DriverHome.tsx's own [feedback]/[feedbackTimeout].
   const [shareFeedback, setShareFeedback] = useState<string | null>(null)
   const shareFeedbackTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // Repeat Client Loop (Product Cycle): the passenger's own explicit act of
+  // saving the driver they just completed a ride with, when that driver is
+  // not already in their circle of trust -- see [handleSaveDriver]'s own
+  // KDoc for the full reasoning and exactly which existing endpoints this
+  // reuses.
+  const [saveDriverStatus, setSaveDriverStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
 
   // Sprint 6 (Passenger Entry-Path Failure Handling): pulled out of the
   // effect (mirrors DriverHome.tsx's own loadDriver) so the same fetch can
@@ -1139,6 +1145,79 @@ export function RideRequest() {
   }
 
   /**
+   * Repeat Client Loop (Product Cycle): closes a real gap the COMPLETED
+   * screen's own Repeat Ride label already exposes -- a passenger who just
+   * had a genuinely good ride with a driver *not* in their circle of trust
+   * (declined the "confirm-add" step earlier, or `bootstrapCircleOfTrust`'s
+   * own best-effort attempt at registration never landed) had no in-product
+   * way to fix that short of navigating away to "Мои водители", which does
+   * not even show a driver they were never connected to in the first
+   * place. No new API, no new model: reuses exactly the same two Passenger
+   * Experience endpoints `handleAddToCircle`
+   * (`PassengerLanding.tsx`)/[bootstrapCircleOfTrust] already call --
+   * `POST /v1/connections` (create), then, only if this passenger has no
+   * primary driver at all yet, `POST /v1/connections/:id/primary` — mirrors
+   * [bootstrapCircleOfTrust]'s own "a brand-new account's first connection
+   * needs no separate confirmation to become primary" reasoning exactly,
+   * generalized to "no primary yet" rather than "brand-new account", since
+   * both describe the identical real fact this method must not assume: an
+   * *existing* primary is never silently replaced (Rule 4,
+   * `PRODUCT_DECISION_CIRCLE_OF_TRUST.md` -- only [handleConfirmMakePrimary]'s
+   * own explicit, confirmed act may do that). A successful save updates
+   * [circle] locally, which is also the exact state the COMPLETED button's
+   * own label already reads — so on success this driver's own repeat
+   * action immediately relabels itself "Заказать у этого водителя" with no
+   * separate flag needed.
+   */
+  async function handleSaveDriver() {
+    if (!identity || !driverCode || saveDriverStatus === 'submitting') {
+      return
+    }
+    setSaveDriverStatus('submitting')
+    try {
+      const created = await request<{ connectionId: string }>('/v1/connections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity.token}` },
+        body: JSON.stringify({ driverId: driverCode, passengerReference: identity.identityId }),
+        baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
+      })
+      const hasExistingPrimary = circle.some((member) => member.isPrimary)
+      if (!hasExistingPrimary) {
+        await request(`/v1/connections/${created.connectionId}/primary`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${identity.token}` },
+          baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
+        })
+      }
+      setCircle((current) => [
+        ...current,
+        {
+          connectionId: created.connectionId,
+          driverId: driverCode,
+          createdAt: new Date().toISOString(),
+          isPrimary: !hasExistingPrimary,
+          displayName: driverName ?? driverCode,
+          availability: driverAvailability ?? 'UNAVAILABLE',
+        },
+      ])
+      setSaveDriverStatus('idle')
+      // The button that triggered this disappears once [circle] updates
+      // above (same condition its own render already reads), but that is
+      // a subtle cue on its own -- unlike [handleConfirmRemove]'s own list
+      // item vanishing right in front of the passenger, nothing else on
+      // this screen visibly moves. Reuses [showShareFeedback]'s own
+      // transient-message mechanism (already rendered just below) rather
+      // than adding a second success banner.
+      showShareFeedback(hasExistingPrimary ? 'Водитель сохранён в вашем круге доверия' : 'Водитель сохранён и назначен основным')
+    } catch (error) {
+      if (handleSessionExpiredError(error)) {
+        return
+      }
+      setSaveDriverStatus('error')
+    }
+  }
+
+  /**
    * Rule 12/13 (`PRODUCT_DECISION_CIRCLE_OF_TRUST.md`): choosing a driver
    * for *this* ride only ever changes which driver this specific order goes
    * to -- never who is primary. Picking the driver whose own link this page
@@ -1736,9 +1815,29 @@ export function RideRequest() {
                         Поделиться с другом
                       </button>
                     )}
+                    {/* Repeat Client Loop (Product Cycle): only while this
+                        driver is genuinely not yet in the circle of trust --
+                        once [handleSaveDriver] succeeds, [circle] already
+                        contains this driver, so this condition (the same one
+                        the COMPLETED button's own label already reads)
+                        naturally stops rendering it -- no separate "saved"
+                        flag needed. */}
+                    {rideStatus === 'COMPLETED' && !circle.some((member) => member.driverId === driverCode) && (
+                      <button
+                        type="button"
+                        className={styles.textAction}
+                        onClick={() => void handleSaveDriver()}
+                        disabled={saveDriverStatus === 'submitting'}
+                      >
+                        Добавить в мои водители
+                      </button>
+                    )}
                   </div>
                 )}
                 {shareFeedback && <StatusMessage>{shareFeedback}</StatusMessage>}
+                {saveDriverStatus === 'error' && (
+                  <StatusMessage tone="error">Не удалось сохранить водителя. Попробуйте ещё раз.</StatusMessage>
+                )}
               </>
             )}
           </div>
