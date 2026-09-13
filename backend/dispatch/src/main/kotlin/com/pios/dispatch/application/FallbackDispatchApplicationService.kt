@@ -1,5 +1,6 @@
 package com.pios.dispatch.application
 
+import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import com.pios.dispatch.domain.PassengerReference
 import com.pios.dispatch.domain.Proposal
@@ -69,16 +70,29 @@ class FallbackDispatchApplicationService(
      * Attempts Fallback Dispatch for [order], on behalf of [passengerReference].
      * Called only when First Refusal itself produced no Proposal and none is
      * expected (see [OrderSubmittedFirstRefusalListener] for the exact
-     * outcomes that trigger this call) — never throws for the ordinary "no
-     * driver available"/"already attempted" cases, each a
+     * outcomes that trigger this call), or when a primary driver's own
+     * Proposal for this order just declined or lapsed
+     * ([ProposalController.declineProposal]/
+     * [ProposalLapseApplicationService] respectively) — never throws for
+     * the ordinary "no driver available"/"already attempted" cases, each a
      * [FallbackDispatchOutcome] value, not an exception.
+     *
+     * [excludeDrivers] is passed straight through to
+     * [DriverAvailabilityRepository.findLongestIdleAvailable] — see that
+     * method's own KDoc for why: the driver whose own decline/lapse just
+     * triggered this specific call must never be re-selected for the same
+     * order merely because their availability record still shows
+     * `available = true`. Defaults to empty for the immediate,
+     * no-primary-was-ever-proposed-to path, where no driver has yet said
+     * no to this particular order.
      */
     fun attempt(
         order: OrderReference,
         passengerReference: PassengerReference,
-        isTest: Boolean = false
+        isTest: Boolean = false,
+        excludeDrivers: Set<DriverReference> = emptySet()
     ): FallbackDispatchOutcome {
-        val driver = driverAvailabilityRepository.findLongestIdleAvailable()
+        val driver = driverAvailabilityRepository.findLongestIdleAvailable(excludeDrivers)
             ?: return FallbackDispatchOutcome.NoAvailableDriver
 
         return try {

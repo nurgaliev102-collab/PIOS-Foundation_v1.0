@@ -152,7 +152,7 @@ class ProposalLapseApplicationService(
         if (primary.primaryDriverId != proposal.driver) {
             return
         }
-        val outcome = fallback.attempt(proposal.order, passengerReference, proposal.isTest)
+        val outcome = fallback.attempt(proposal.order, passengerReference, proposal.isTest, excludeDrivers = setOf(proposal.driver))
         logger.info(
             "Proposal {} (primary driver {}) lapsed without a response for order {}: Fallback Dispatch outcome {}",
             proposal.id.value,

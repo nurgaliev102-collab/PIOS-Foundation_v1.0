@@ -34,10 +34,20 @@ interface DriverAvailabilityRepository {
 
     /**
      * The currently available driver whose record has held `available = true`
-     * for the longest (FR-003A, Fallback Dispatch — the "future routing
-     * task" [com.pios.dispatch.application.FirstRefusalApplicationService]'s
+     * for the longest, excluding [excluding] (FR-003A, Fallback Dispatch —
+     * the "future routing task" [com.pios.dispatch.application.FirstRefusalApplicationService]'s
      * own KDoc deferred: what happens when First Refusal finds no eligible
-     * primary driver). `null` if no driver is currently available at all.
+     * primary driver). `null` if no eligible driver is currently available
+     * at all.
+     *
+     * [excluding] exists for exactly one reason (FR-003A, decline/lapse
+     * retry, [FallbackDispatchApplicationService.attempt]'s own KDoc): a
+     * driver whose own Proposal for *this* order just declined or lapsed
+     * is not re-selected for the very same order merely because their
+     * local availability record (which a decline/lapse never touches —
+     * only a real `DriverAvailabilityChanged` event does) still shows
+     * `available = true` and happens to be the longest-standing one.
+     * Defaults to empty so every other, unrelated caller is unaffected.
      *
      * Defaults to `null` so every existing implementation of this interface
      * — none of which has any interest in fallback selection — continues to
@@ -49,5 +59,5 @@ interface DriverAvailabilityRepository {
      * [com.pios.dispatch.persistence.PostgreSQLDriverAvailabilityRepository]
      * overrides it with a real query.
      */
-    fun findLongestIdleAvailable(): DriverReference? = null
+    fun findLongestIdleAvailable(excluding: Set<DriverReference> = emptySet()): DriverReference? = null
 }

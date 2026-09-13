@@ -131,8 +131,8 @@ class ProposalLapseApplicationServiceTest {
         override fun findByDriverReference(driverReference: DriverReference): DriverAvailabilityRecord? =
             recordsInOrder.lastOrNull { it.driverReference == driverReference }
 
-        override fun findLongestIdleAvailable(): DriverReference? =
-            recordsInOrder.firstOrNull { it.available }?.driverReference
+        override fun findLongestIdleAvailable(excluding: Set<DriverReference>): DriverReference? =
+            recordsInOrder.firstOrNull { it.available && it.driverReference !in excluding }?.driverReference
     }
 
     private val passenger = PassengerReference("passenger-1")

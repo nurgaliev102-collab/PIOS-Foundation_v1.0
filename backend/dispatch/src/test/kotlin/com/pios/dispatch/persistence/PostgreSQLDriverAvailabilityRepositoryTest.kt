@@ -3,6 +3,7 @@ package com.pios.dispatch.persistence
 import com.pios.dispatch.application.DriverAvailabilityRecord
 import com.pios.dispatch.domain.DriverReference
 import org.springframework.jdbc.core.JdbcTemplate
+import java.time.Instant
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -125,6 +126,73 @@ class PostgreSQLDriverAvailabilityRepositoryTest {
             assertNotEquals(oldestButUnavailable, repository.findLongestIdleAvailable())
         } finally {
             deleteDriverAvailability(listOf(oldestButUnavailable))
+        }
+    }
+
+    /**
+     * FR-003A, decline/lapse retry. Proves the real `NOT IN (...)` SQL this
+     * class's own [findLongestIdleAvailable] issues actually excludes the
+     * oldest row when asked to, and falls through to the next-oldest
+     * eligible one -- not merely "returns null/no match" the way an
+     * unparameterized query might if the exclusion clause were silently
+     * dropped or malformed.
+     */
+    @Test
+    fun `findLongestIdleAvailable excludes the named driver, falling through to the next-oldest available one`() {
+        val jdbcTemplate = JdbcTemplate(PostgreSQLTestDatabase.dataSource)
+        val excluded = DriverReference("repo-driver-excluded-${UUID.randomUUID()}")
+        val nextOldest = DriverReference("repo-driver-next-oldest-${UUID.randomUUID()}")
+
+        try {
+            // A random reference point (collision-avoidance against other
+            // tests' own rows, same reasoning as farPastTimestamp's own
+            // KDoc), with `excluded` forced a further, fixed 115 days
+            // *older* than `nextOldest` -- deterministic ordering between
+            // these two specific rows, not left to the same random draw
+            // farPastTimestamp() on its own would give each independently
+            // (which could tie or invert their relative order).
+            val referenceInstant = Instant.parse("1995-01-01T00:00:00Z").minusSeconds((0..1_000_000_000L).random())
+            repository.upsert(DriverAvailabilityRecord(excluded, available = true))
+            jdbcTemplate.update(
+                "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
+                java.sql.Timestamp.from(referenceInstant.minusSeconds(10_000_000)),
+                excluded.driverId
+            )
+            repository.upsert(DriverAvailabilityRecord(nextOldest, available = true))
+            jdbcTemplate.update(
+                "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
+                java.sql.Timestamp.from(referenceInstant),
+                nextOldest.driverId
+            )
+
+            // Without the exclusion, `excluded` (forced strictly older) would win.
+            assertEquals(excluded, repository.findLongestIdleAvailable())
+            assertEquals(nextOldest, repository.findLongestIdleAvailable(excluding = setOf(excluded)))
+        } finally {
+            deleteDriverAvailability(listOf(excluded, nextOldest))
+        }
+    }
+
+    @Test
+    fun `findLongestIdleAvailable never returns a driver named in excluding, even as the sole oldest candidate`() {
+        // Asserts the negative precisely (never this driver), not "returns
+        // null overall" -- this table is shared across this whole suite,
+        // so other tests' own available=true rows may legitimately still
+        // be present and eligible; that is not this test's own concern.
+        val jdbcTemplate = JdbcTemplate(PostgreSQLTestDatabase.dataSource)
+        val onlyDriver = DriverReference("repo-driver-only-${UUID.randomUUID()}")
+
+        try {
+            repository.upsert(DriverAvailabilityRecord(onlyDriver, available = true))
+            jdbcTemplate.update(
+                "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
+                farPastTimestamp(),
+                onlyDriver.driverId
+            )
+
+            assertNotEquals(onlyDriver, repository.findLongestIdleAvailable(excluding = setOf(onlyDriver)))
+        } finally {
+            deleteDriverAvailability(listOf(onlyDriver))
         }
     }
 }

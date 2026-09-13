@@ -1183,4 +1183,130 @@ class ProposalControllerTest {
 
         assertEquals(false, assertNotNull(response.body).isTest)
     }
+
+    // --- FR-003A: Fallback Dispatch after an explicit decline ---
+
+    /** Adds [findLongestIdleAvailable] support, mirroring [FallbackDispatchApplicationServiceTest]'s own private fake exactly. */
+    private class InMemoryFallbackDriverAvailabilityRepository : DriverAvailabilityRepository {
+        private val recordsInOrder = mutableListOf<DriverAvailabilityRecord>()
+
+        override fun markProcessed(eventId: String): Boolean = throw UnsupportedOperationException("not used by this test")
+
+        override fun upsert(record: DriverAvailabilityRecord) {
+            recordsInOrder.removeAll { it.driverReference == record.driverReference }
+            recordsInOrder.add(record)
+        }
+
+        override fun findByDriverReference(driverReference: DriverReference): DriverAvailabilityRecord? =
+            recordsInOrder.lastOrNull { it.driverReference == driverReference }
+
+        override fun findLongestIdleAvailable(excluding: Set<DriverReference>): DriverReference? =
+            recordsInOrder.firstOrNull { it.available && it.driverReference !in excluding }?.driverReference
+    }
+
+    /**
+     * A third [ProposalController], wired with a real
+     * [com.pios.dispatch.application.PrimaryDriverRepository]/
+     * [com.pios.dispatch.application.FallbackDispatchApplicationService]
+     * this time -- kept separate from [controller] above for the identical
+     * reason [GatedFixture] already is (none of this file's other tests
+     * concern Fallback Dispatch).
+     */
+    private class FallbackDispatchFixture {
+        val availabilityRepository = InMemoryFallbackDriverAvailabilityRepository()
+        val primaryDriverRepository = com.pios.dispatch.persistence.InMemoryPrimaryDriverRepository()
+        val repository = InMemoryProposalRepository()
+        val service = ProposalApplicationService(repository, driverAvailabilityRepository = availabilityRepository)
+        val assignmentRepository = InMemoryAssignmentRepository()
+        val assignmentService = DispatchAssignmentApplicationService(assignmentRepository)
+        val orchestrationService = ProposalAssignmentOrchestrationService(repository, service, assignmentService)
+        val fallbackDispatchApplicationService = com.pios.dispatch.application.FallbackDispatchApplicationService(availabilityRepository, service)
+        val rawSecret = "fallback-dispatch-fixture-secret".toByteArray()
+        val controller = ProposalController(
+            service,
+            orchestrationService,
+            repository,
+            SessionTokenVerifier(secretBase64 = Base64.getEncoder().encodeToString(rawSecret)),
+            OwnerCredentialGate(
+                configuredUsername = "",
+                configuredPasswordHash = "",
+                configuredPasswordSalt = "",
+                iterations = 1000,
+                failureDelayMillis = 0,
+                maxFailuresPerWindow = 1000,
+                windowMillis = 900_000
+            ),
+            primaryDriverRepository,
+            fallbackDispatchApplicationService
+        )
+
+        private val objectMapper = ObjectMapper()
+
+        private fun token(sub: String, drv: String?): String {
+            val payloadNode = objectMapper.createObjectNode()
+            payloadNode.put("sub", sub)
+            if (drv == null) payloadNode.putNull("drv") else payloadNode.put("drv", drv)
+            payloadNode.put("exp", Instant.now().plusSeconds(3600).epochSecond)
+            val encodedPayload =
+                Base64.getUrlEncoder().withoutPadding().encodeToString(objectMapper.writeValueAsBytes(payloadNode))
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(rawSecret, "HmacSHA256"))
+            val encodedSignature =
+                Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(encodedPayload.toByteArray(Charsets.UTF_8)))
+            return "Bearer $encodedPayload.$encodedSignature"
+        }
+
+        fun passengerAuthorization(passengerId: String = "fallback-fixture-passenger"): String = token(passengerId, null)
+        fun driverAuthorization(driverId: String): String = token("$driverId-identity", driverId)
+    }
+
+    @Test
+    fun `declining as the primary driver triggers a real Fallback Dispatch proposal for an available driver`() {
+        val fixture = FallbackDispatchFixture()
+        val passenger = "fallback-fixture-passenger"
+        val primaryDriver = "driver-primary"
+        val fallbackDriver = DriverReference("driver-fallback")
+        fixture.primaryDriverRepository.upsert(
+            com.pios.dispatch.application.PrimaryDriverRecord(PassengerReference(passenger), DriverReference(primaryDriver))
+        )
+        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference(primaryDriver), available = true))
+        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(fallbackDriver, available = true))
+        val created = fixture.controller.createProposal(
+            ProposeDriverRequest("order-decline-fallback", primaryDriver, passengerReference = passenger),
+            authorization = fixture.passengerAuthorization()
+        ).body!!
+
+        val response = fixture.controller.declineProposal(created.proposalId, authorization = fixture.driverAuthorization(primaryDriver))
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals("DECLINED", response.body?.status)
+        val proposalsForOrder = fixture.repository.findByOrder(OrderReference("order-decline-fallback"))
+        assertEquals(2, proposalsForOrder.size, "the declined primary proposal, plus a new Fallback Dispatch proposal")
+        val fallbackProposal = proposalsForOrder.single { it.id.value != created.proposalId }
+        assertEquals(fallbackDriver, fallbackProposal.driver)
+        assertEquals("OPEN", fallbackProposal.status.name)
+    }
+
+    @Test
+    fun `declining as a driver who is not the current primary does not trigger Fallback Dispatch`() {
+        // Simulates a Fallback Dispatch driver's own decline -- must not
+        // automatically try a second, third, ... driver (FallbackDispatchApplicationService's
+        // own "No retry on decline/lapse" scope boundary).
+        val fixture = FallbackDispatchFixture()
+        val passenger = "fallback-fixture-passenger"
+        fixture.primaryDriverRepository.upsert(
+            com.pios.dispatch.application.PrimaryDriverRecord(PassengerReference(passenger), DriverReference("driver-actual-primary"))
+        )
+        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-not-primary"), available = true))
+        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-would-be-fallback"), available = true))
+        val created = fixture.controller.createProposal(
+            ProposeDriverRequest("order-decline-no-fallback", "driver-not-primary", passengerReference = passenger),
+            authorization = fixture.passengerAuthorization()
+        ).body!!
+
+        val response = fixture.controller.declineProposal(created.proposalId, authorization = fixture.driverAuthorization("driver-not-primary"))
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals(1, fixture.repository.findByOrder(OrderReference("order-decline-no-fallback")).size, "no second, Fallback Dispatch proposal must be created")
+    }
 }

@@ -64,13 +64,18 @@ class PostgreSQLDriverAvailabilityRepository(
      * FR-003A (Fallback Dispatch). `updated_at` is set to `now()` on every
      * [upsert] -- the row with the oldest `updated_at` among `available =
      * true` rows is the driver whose availability has stood unchanged the
-     * longest, i.e. is currently the most idle.
+     * longest, i.e. is currently the most idle. See [DriverAvailabilityRepository.findLongestIdleAvailable]'s
+     * own KDoc for why [excluding] exists.
      */
-    override fun findLongestIdleAvailable(): DriverReference? {
-        val rows = jdbcTemplate.query(
-            "SELECT driver_reference FROM driver_availability WHERE available = true ORDER BY updated_at ASC LIMIT 1",
-            { rs, _ -> DriverReference(rs.getString("driver_reference")) }
-        )
+    override fun findLongestIdleAvailable(excluding: Set<DriverReference>): DriverReference? {
+        val sql = if (excluding.isEmpty()) {
+            "SELECT driver_reference FROM driver_availability WHERE available = true ORDER BY updated_at ASC LIMIT 1"
+        } else {
+            val placeholders = excluding.joinToString(", ") { "?" }
+            "SELECT driver_reference FROM driver_availability WHERE available = true AND driver_reference NOT IN ($placeholders) ORDER BY updated_at ASC LIMIT 1"
+        }
+        val args = excluding.map { it.driverId }.toTypedArray()
+        val rows = jdbcTemplate.query(sql, { rs, _ -> DriverReference(rs.getString("driver_reference")) }, *args)
         return rows.firstOrNull()
     }
 }

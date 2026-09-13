@@ -4,7 +4,9 @@ import com.pios.dispatch.application.AcceptProposalCommand
 import com.pios.dispatch.application.ConfirmPriceCommand
 import com.pios.dispatch.application.DeclinePriceCommand
 import com.pios.dispatch.application.DeclineProposalCommand
+import com.pios.dispatch.application.FallbackDispatchApplicationService
 import com.pios.dispatch.application.LapseProposalCommand
+import com.pios.dispatch.application.PrimaryDriverRepository
 import com.pios.dispatch.application.ProposalApplicationService
 import com.pios.dispatch.application.ProposalAssignmentOrchestrationService
 import com.pios.dispatch.application.ProposalNotFoundException
@@ -120,7 +122,9 @@ class ProposalController(
     private val proposalAssignmentOrchestrationService: ProposalAssignmentOrchestrationService,
     private val proposalRepository: ProposalRepository,
     private val sessionTokenVerifier: SessionTokenVerifier,
-    private val ownerCredentialGate: OwnerCredentialGate
+    private val ownerCredentialGate: OwnerCredentialGate,
+    private val primaryDriverRepository: PrimaryDriverRepository? = null,
+    private val fallbackDispatchApplicationService: FallbackDispatchApplicationService? = null
 ) {
 
     /**
@@ -372,7 +376,27 @@ class ProposalController(
         }
     }
 
-    /** Task 21: identical identity check to [acceptProposal]'s own — see that method's own KDoc. */
+    /**
+     * Task 21: identical identity check to [acceptProposal]'s own — see
+     * that method's own KDoc.
+     *
+     * ## FR-003A (Fallback Dispatch) after an explicit decline
+     *
+     * Mirrors [com.pios.dispatch.application.ProposalLapseApplicationService]'s
+     * own "FR-003A after a primary driver's own lapse" reasoning exactly,
+     * for the other way a primary driver's own Proposal can end without an
+     * acceptance: an explicit decline, right here at the transport boundary
+     * that already knows this driver and this passenger, rather than
+     * waiting for the lapse sweep to notice minutes later. Same test for
+     * "was this the primary driver" (a fresh [primaryDriverRepository]
+     * read compared against [Proposal.driver]), same reason it is not a
+     * new [Proposal] field, and the identical, already-established
+     * consequence: a driver Fallback Dispatch itself selected is never the
+     * primary, so its own decline never re-triggers this — no special
+     * case needed. [primaryDriverRepository]/[fallbackDispatchApplicationService]
+     * default to `null` for the identical reason every other optional
+     * collaborator in this module does.
+     */
     @PostMapping("/{proposalId}/decline")
     fun declineProposal(
         @PathVariable proposalId: String,
@@ -388,6 +412,7 @@ class ProposalController(
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
             }
             val event = proposalApplicationService.declineProposal(DeclineProposalCommand(id))
+            attemptFallbackAfterDecline(proposal)
             ResponseEntity.ok(
                 ProposalResponse(id.value, event.orderId.orderId, event.driverId.driverId, ProposalStatus.DECLINED.name)
             )
@@ -398,6 +423,18 @@ class ProposalController(
         } catch (ex: IllegalStateException) {
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         }
+    }
+
+    /** See [declineProposal]'s own "FR-003A after an explicit decline" KDoc for the full reasoning. */
+    private fun attemptFallbackAfterDecline(proposal: Proposal) {
+        val fallback = fallbackDispatchApplicationService ?: return
+        val primaryDriverRepository = this.primaryDriverRepository ?: return
+        val passengerReference = proposal.passengerReference ?: return
+        val primary = primaryDriverRepository.findByPassenger(passengerReference) ?: return
+        if (primary.primaryDriverId != proposal.driver) {
+            return
+        }
+        fallback.attempt(proposal.order, passengerReference, proposal.isTest, excludeDrivers = setOf(proposal.driver))
     }
 
     /**
