@@ -915,6 +915,94 @@ describe('RideRequest', () => {
     expect(screen.queryByRole('button', { name: 'Поделиться с другом' })).not.toBeInTheDocument()
   })
 
+  // --- Minimal In-Ride Messaging (Product Cycle) ---
+
+  it('a passenger can send a message on an open order, before the driver has even responded', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ proposalId: 'p1', status: 'OPEN' }])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals/p1/messages -- nothing yet
+
+    renderAt('driver-1')
+
+    await userEvent.type(await screen.findByLabelText('Сообщение водителю'), 'Встречайте у второго подъезда')
+
+    mockedRequest.mockResolvedValueOnce({
+      id: 'm1',
+      senderRole: 'PASSENGER',
+      body: 'Встречайте у второго подъезда',
+      sentAt: '2026-09-14T10:00:00Z',
+    }) // POST /v1/proposals/p1/messages
+
+    await userEvent.click(screen.getByRole('button', { name: 'Отправить' }))
+
+    expect(await screen.findByText('Вы: Встречайте у второго подъезда')).toBeInTheDocument()
+    const sendCall = mockedRequest.mock.calls.find(
+      ([path, options]) => path === '/v1/proposals/p1/messages' && (options as RequestInit | undefined)?.method === 'POST'
+    )
+    expect(sendCall).toBeDefined()
+    const body = JSON.parse((sendCall?.[1] as RequestInit).body as string)
+    expect(body.body).toBe('Встречайте у второго подъезда')
+  })
+
+  it("the passenger sees the driver's reply", async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ proposalId: 'p1', status: 'OPEN' }])
+    mockedRequest.mockResolvedValueOnce([
+      { id: 'm1', senderRole: 'DRIVER', body: 'Уже еду, буду через 5 минут', sentAt: '2026-09-14T10:05:00Z' },
+    ])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('Водитель: Уже еду, буду через 5 минут')).toBeInTheDocument()
+  })
+
+  it('closes messaging once the ride is COMPLETED, but keeps existing history visible', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ proposalId: 'p1', status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: null }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }]) // GET /v1/assignments?orderId=order-1
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?passengerReference=... (requestedPickupAt)
+    mockedRequest.mockResolvedValueOnce([
+      { id: 'm1', senderRole: 'PASSENGER', body: 'Спасибо!', sentAt: '2026-09-14T10:10:00Z' },
+    ]) // GET /v1/proposals/p1/messages
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('Вы: Спасибо!')).toBeInTheDocument()
+    expect(screen.getByText('Обмен сообщениями закрыт.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Сообщение водителю')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Отправить' })).not.toBeInTheDocument()
+  })
+
+  it('sending a message can be retried after a failure, without losing the typed draft', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ proposalId: 'p1', status: 'OPEN' }])
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+
+    await userEvent.type(await screen.findByLabelText('Сообщение водителю'), 'Уточните адрес')
+
+    mockedRequest.mockRejectedValueOnce(new Error('network down'))
+    await userEvent.click(screen.getByRole('button', { name: 'Отправить' }))
+
+    expect(await screen.findByText('Не удалось отправить сообщение. Попробуйте ещё раз.')).toBeInTheDocument()
+    // The draft is not cleared on failure -- nothing typed is lost.
+    expect(screen.getByLabelText('Сообщение водителю')).toHaveValue('Уточните адрес')
+
+    mockedRequest.mockResolvedValueOnce({ id: 'm1', senderRole: 'PASSENGER', body: 'Уточните адрес', sentAt: '2026-09-14T10:15:00Z' })
+    await userEvent.click(screen.getByRole('button', { name: 'Отправить' }))
+
+    expect(await screen.findByText('Вы: Уточните адрес')).toBeInTheDocument()
+  })
+
   // --- Session expiry (P1 UX audit, 2026-09-12) ---
   // A 401 from the status poll's own authenticated call used to be
   // indistinguishable from a transient network blip -- retried silently,

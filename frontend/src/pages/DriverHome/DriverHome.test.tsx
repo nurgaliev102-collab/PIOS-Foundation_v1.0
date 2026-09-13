@@ -530,6 +530,116 @@ describe('DriverHome', () => {
     expect(screen.queryByText(/Пожелания/)).not.toBeInTheDocument()
   })
 
+  // --- Minimal In-Ride Messaging (Product Cycle) ---
+
+  it("shows the passenger's message on an open proposal, before the driver names a price", async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'OPEN', statedPrice: null, statedEtaMinutes: null },
+    ])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections (fired right after proposals, before it resolves)
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1 (chained after proposals resolves -- ADR-060)
+    mockedRequest.mockResolvedValueOnce([
+      { id: 'm1', senderRole: 'PASSENGER', body: 'Встречайте у второго подъезда', sentAt: '2026-09-14T10:00:00Z' },
+    ]) // GET /v1/proposals/p1/messages
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
+
+    const messageText = await screen.findByText('Пассажир: Встречайте у второго подъезда')
+    const priceField = screen.getByLabelText('Ваша цена')
+    // "до блока цены" -- same requirement this cycle's own passenger-notes
+    // block already established: the message appears above the price input.
+    expect(messageText.compareDocumentPosition(priceField) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('lets the driver send a reply, which then appears in the thread', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'OPEN', statedPrice: null, statedEtaMinutes: null },
+    ])
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 })
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals/p1/messages -- nothing yet
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
+    await userEvent.type(await screen.findByLabelText('Ответ пассажиру'), 'Уже еду, буду через 5 минут')
+
+    mockedRequest.mockResolvedValueOnce({
+      id: 'm2',
+      senderRole: 'DRIVER',
+      body: 'Уже еду, буду через 5 минут',
+      sentAt: '2026-09-14T10:05:00Z',
+    }) // POST /v1/proposals/p1/messages
+
+    await userEvent.click(screen.getByRole('button', { name: 'Отправить' }))
+
+    expect(await screen.findByText('Вы: Уже еду, буду через 5 минут')).toBeInTheDocument()
+    const sendCall = mockedRequest.mock.calls.find(
+      ([path, options]) => path === '/v1/proposals/p1/messages' && (options as RequestInit | undefined)?.method === 'POST'
+    )
+    expect(sendCall).toBeDefined()
+    const body = JSON.parse((sendCall?.[1] as RequestInit).body as string)
+    expect(body.body).toBe('Уже еду, буду через 5 минут')
+  })
+
+  it('closes messaging (no reply control) for a declined proposal, but keeps any existing history visible', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'DECLINED', statedPrice: null, statedEtaMinutes: null },
+    ])
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 })
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1
+    mockedRequest.mockResolvedValueOnce([
+      { id: 'm1', senderRole: 'PASSENGER', body: 'Ещё здесь?', sentAt: '2026-09-14T10:00:00Z' },
+    ]) // GET /v1/proposals/p1/messages
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
+
+    expect(await screen.findByText('Пассажир: Ещё здесь?')).toBeInTheDocument()
+    expect(screen.getByText('Обмен сообщениями закрыт.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Ответ пассажиру')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Отправить' })).not.toBeInTheDocument()
+  })
+
+  it("does not show another proposal's own messages on this one's card", async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'OPEN', statedPrice: null, statedEtaMinutes: null },
+      { proposalId: 'p2', orderId: 'o2', driverId: 'driver-1', status: 'OPEN', statedPrice: null, statedEtaMinutes: null },
+    ])
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 })
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1,o2
+    // loadMessages fires one GET per proposal, in the same order as [proposals] --
+    // p1's own thread, then p2's own thread.
+    mockedRequest.mockResolvedValueOnce([
+      { id: 'm1', senderRole: 'PASSENGER', body: 'Для первого заказа', sentAt: '2026-09-14T10:00:00Z' },
+    ]) // GET /v1/proposals/p1/messages
+    mockedRequest.mockResolvedValueOnce([
+      { id: 'm2', senderRole: 'PASSENGER', body: 'Для второго заказа', sentAt: '2026-09-14T10:00:00Z' },
+    ]) // GET /v1/proposals/p2/messages
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
+
+    expect(await screen.findByText('Пассажир: Для первого заказа')).toBeInTheDocument()
+    expect(await screen.findByText('Пассажир: Для второго заказа')).toBeInTheDocument()
+  })
+
   // --- Referral visibility (ADR-064): lifetime clients via the driver's own link ---
 
   it("shows the lifetime count of clients who connected through this driver's own link, not just today's", async () => {

@@ -125,6 +125,22 @@ interface AssignmentStatusItem {
 }
 
 /**
+ * Minimal In-Ride Messaging (Product Cycle): `GET/POST
+ * /v1/proposals/:id/messages`'s own response shape (Dispatch) -- a single
+ * short message exchanged between this proposal's own passenger and
+ * driver. [senderRole] is derived server-side from which identity the
+ * caller's own Bearer token names (never a caller-supplied claim), the
+ * same authorization discipline every other Proposal action on this
+ * screen already relies on.
+ */
+interface ProposalMessageItem {
+  id: string
+  senderRole: 'PASSENGER' | 'DRIVER'
+  body: string
+  sentAt: string
+}
+
+/**
  * ADR-058 (Scheduled Pickup Time): the subset of `GET /v1/orders`'s own
  * response shape this screen needs -- the same unfiltered, already-public
  * endpoint `DriverHome.tsx` already reads for its own order details, only
@@ -154,6 +170,14 @@ const STATUS_POLL_INTERVAL_MS = 3000
 // case any caller bypasses the control itself (e.g. a pasted value some
 // browser does not truncate on paste).
 const NOTES_MAX_LENGTH = 500
+
+// Minimal In-Ride Messaging (Product Cycle): matches
+// ProposalMessage.MAX_BODY_LENGTH (Dispatch) exactly, for the same reason
+// NOTES_MAX_LENGTH mirrors Order.MAX_NOTES_LENGTH -- so nothing typed here
+// is ever silently rejected by the backend after submission. Shorter than
+// NOTES_MAX_LENGTH: this is a short, chat-like message exchanged mid-ride,
+// not the one-time trip context [notes] already covers.
+const MESSAGE_MAX_LENGTH = 300
 
 /**
  * The passenger-facing ride chain (ADR-040, Assignment Ride Lifecycle):
@@ -459,6 +483,15 @@ export function RideRequest() {
   // DriverHome.tsx's own [feedback]/[feedbackTimeout].
   const [shareFeedback, setShareFeedback] = useState<string | null>(null)
   const shareFeedbackTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // Minimal In-Ride Messaging (Product Cycle): scoped to [proposalId], not
+  // [orderId] or any passenger-wide inbox -- "коммуникация принадлежит
+  // конкретной поездке, а не платформе в целом." Refreshed by the same poll
+  // that already refreshes every other proposal-derived field on this
+  // screen (see [loadMessages]'s own call sites), so a driver's reply
+  // appears without a reload, the same way accepting a ride already does.
+  const [messages, setMessages] = useState<ProposalMessageItem[]>([])
+  const [messageDraft, setMessageDraft] = useState('')
+  const [sendMessageStatus, setSendMessageStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
   // Repeat Client Loop (Product Cycle): the passenger's own explicit act of
   // saving the driver they just completed a ride with, when that driver is
   // not already in their circle of trust -- see [handleSaveDriver]'s own
@@ -616,6 +649,7 @@ export function RideRequest() {
               setProposalId(priceProposedItem.proposalId)
               setStatedPrice(priceProposedItem.statedPrice)
               setStatedEtaMinutes(priceProposedItem.statedEtaMinutes)
+              loadMessages(active, priceProposedItem.proposalId, currentIdentity.token)
               return
             }
             // Sprint H5 (Truthful Status Rendering): reflect whichever real
@@ -630,14 +664,34 @@ export function RideRequest() {
             // withdraws the open proposal automatically, asynchronously, so
             // this poll is also what confirms a cancellation actually took
             // effect, not only [handleCancelOrder]'s own optimistic update.
-            if (items.some((item) => item.status === 'OPEN')) {
+            const openItem = items.find((item) => item.status === 'OPEN')
+            const declinedItem = items.find((item) => item.status === 'DECLINED')
+            const lapsedItem = items.find((item) => item.status === 'LAPSED')
+            const withdrawnItem = items.find((item) => item.status === 'WITHDRAWN')
+            if (openItem) {
               setRideStatus('OPEN')
-            } else if (items.some((item) => item.status === 'DECLINED')) {
+              // Minimal In-Ride Messaging (Product Cycle): [proposalId] used
+              // to only ever be captured in the PRICE_PROPOSED branch above
+              // -- every other status here left it `null` for the entire
+              // rest of a ride, even though a real proposal already exists
+              // the moment this order is proposed to a driver. The message
+              // thread is scoped to this proposal from the start (a
+              // passenger can message before the driver has even named a
+              // price), so it needs this id at every status, not only one.
+              setProposalId(openItem.proposalId)
+              loadMessages(active, openItem.proposalId, currentIdentity.token)
+            } else if (declinedItem) {
               setRideStatus('DECLINED')
-            } else if (items.some((item) => item.status === 'LAPSED')) {
+              setProposalId(declinedItem.proposalId)
+              loadMessages(active, declinedItem.proposalId, currentIdentity.token)
+            } else if (lapsedItem) {
               setRideStatus('LAPSED')
-            } else if (items.some((item) => item.status === 'WITHDRAWN')) {
+              setProposalId(lapsedItem.proposalId)
+              loadMessages(active, lapsedItem.proposalId, currentIdentity.token)
+            } else if (withdrawnItem) {
               setRideStatus('WITHDRAWN')
+              setProposalId(withdrawnItem.proposalId)
+              loadMessages(active, withdrawnItem.proposalId, currentIdentity.token)
             } else {
               // No proposal recorded yet (e.g., the propose call is still
               // in flight) -- honestly "waiting", not yet knowable as
@@ -646,6 +700,14 @@ export function RideRequest() {
             }
             return
           }
+          // Minimal In-Ride Messaging (Product Cycle): see the [openItem]
+          // branch's own KDoc above -- captured here too so the thread
+          // stays addressable through ACCEPTED/ARRIVED/IN_PROGRESS/
+          // COMPLETED, not only while still OPEN or PRICE_PROPOSED. The
+          // actual [loadMessages] call is issued further below, after the
+          // assignments/orders requests -- see that call site's own
+          // comment for why the position matters here specifically.
+          setProposalId(acceptedItem.proposalId)
           // ADR-042 R9: read back here, not only in the branch above,
           // since this same poll keeps running through ARRIVED/IN_PROGRESS/
           // COMPLETED too -- the amount was fixed at accept time and never
@@ -697,6 +759,15 @@ export function RideRequest() {
                 // Best-effort: the confirmation simply omits this line.
               })
           }
+          // Minimal In-Ride Messaging (Product Cycle): issued last,
+          // deliberately after the assignments/orders requests just above
+          // -- mirrors the exact reasoning [hasFetchedRequestedPickupAt]'s
+          // own comment already gives for why *that* request is chained
+          // after assignments rather than in parallel with it: this poll's
+          // own call order stays deterministic tick to tick (proposals,
+          // assignments, [orders once], messages) rather than racing
+          // whichever of these happens to settle first.
+          loadMessages(active, acceptedItem.proposalId, currentIdentity.token)
         })
         .catch((error) => {
           // P1 UX audit (2026-09-12): a stale/invalidated session token
@@ -717,6 +788,65 @@ export function RideRequest() {
       clearInterval(interval)
     }
   }, [step, orderId, identity])
+
+  /**
+   * Minimal In-Ride Messaging (Product Cycle): best-effort, same tolerance
+   * every other proposal-derived fetch on this screen already has -- a
+   * failed load simply tries again on the next poll tick, never blocking
+   * or degrading anything else this screen shows. Scoped entirely by
+   * [forProposalId] (`GET /v1/proposals/:id/messages`, Dispatch): a
+   * different order's or a different proposal's own messages are never
+   * requested, let alone rendered, here.
+   */
+  function loadMessages(active: boolean, forProposalId: string, token: string) {
+    request<ProposalMessageItem[]>(`/v1/proposals/${forProposalId}/messages`, {
+      baseUrl: DISPATCH_BASE_URL,
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((items) => {
+        if (active) {
+          setMessages(items)
+        }
+      })
+      .catch(() => {
+        // Best-effort -- see this function's own KDoc.
+      })
+  }
+
+  /**
+   * Minimal In-Ride Messaging (Product Cycle): the passenger's own act of
+   * sending a short message to the driver of this specific proposal.
+   * Guarded against double-submit like every other mutating action on this
+   * screen ([isSubmitting]/[cancelStatus]/[priceDecisionStatus]'s own
+   * precedent). Appends the server's own returned message optimistically
+   * (Dispatch's response already carries the real, server-assigned [id]/
+   * [sentAt] -- not a locally-fabricated placeholder) rather than waiting
+   * for the next poll tick, mirroring [handleConfirmPrice]'s own optimistic-
+   * update precedent for this screen.
+   */
+  async function handleSendMessage() {
+    const trimmed = messageDraft.trim()
+    if (!trimmed || !proposalId || !identity || sendMessageStatus === 'submitting') {
+      return
+    }
+    setSendMessageStatus('submitting')
+    try {
+      const created = await request<ProposalMessageItem>(`/v1/proposals/${proposalId}/messages`, {
+        method: 'POST',
+        baseUrl: DISPATCH_BASE_URL,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity.token}` },
+        body: JSON.stringify({ body: trimmed }),
+      })
+      setMessages((current) => [...current, created])
+      setMessageDraft('')
+      setSendMessageStatus('idle')
+    } catch (error) {
+      if (handleSessionExpiredError(error)) {
+        return
+      }
+      setSendMessageStatus('error')
+    }
+  }
 
   if (identityChecked && !identity) {
     return <Navigate to={`/i/${driverCode ?? ''}`} replace />
@@ -1304,6 +1434,18 @@ export function RideRequest() {
     }
   }
 
+  // Minimal In-Ride Messaging (Product Cycle): mirrors Dispatch's own
+  // gating exactly (`ProposalMessagingApplicationService.isOpen`, backend) --
+  // a completed ride, or a proposal that never resulted in one
+  // (DECLINED/LAPSED/WITHDRAWN), has nothing left to coordinate. Every
+  // other rideStatus (OPEN, PRICE_PROPOSED, ACCEPTED, ARRIVED, IN_PROGRESS)
+  // still permits sending, matching the backend's own check against the
+  // Assignment's status rather than the Proposal's own (which stays
+  // ACCEPTED for the rest of the ride and would otherwise never reflect
+  // that the ride actually finished).
+  const isMessagingOpen =
+    rideStatus !== 'COMPLETED' && rideStatus !== 'DECLINED' && rideStatus !== 'LAPSED' && rideStatus !== 'WITHDRAWN'
+
   return (
     <div className={styles.screen}>
       <Header />
@@ -1837,6 +1979,65 @@ export function RideRequest() {
                 {shareFeedback && <StatusMessage>{shareFeedback}</StatusMessage>}
                 {saveDriverStatus === 'error' && (
                   <StatusMessage tone="error">Не удалось сохранить водителя. Попробуйте ещё раз.</StatusMessage>
+                )}
+                {/* Minimal In-Ride Messaging (Product Cycle): "коммуникация
+                    принадлежит конкретной поездке, а не платформе в целом"
+                    -- rendered inside this exact order's own confirmation
+                    card, directly under its own status, never as a
+                    separate inbox/chat screen elsewhere in the app. Shown
+                    once [proposalId] is known -- every status from OPEN
+                    onward already sets it (see the poll effect's own
+                    KDoc) -- so a passenger can reach the driver about this
+                    specific ride from the moment it exists, exactly as
+                    "после создания заказа" states, not gated behind
+                    acceptance. Hidden entirely when there is nothing to
+                    show (no history and no longer open): an empty card
+                    with only a "closed" caption would be noise, not a
+                    feature. Read-only once [isMessagingOpen] is false --
+                    a completed, declined, lapsed, or withdrawn ride has
+                    nothing left to coordinate; existing messages stay
+                    visible as a record, but no new one can be sent. */}
+                {proposalId && (isMessagingOpen || messages.length > 0) && (
+                  <Card>
+                    <Text role="label" tone="muted">
+                      Сообщения по этой поездке
+                    </Text>
+                    {messages.map((message) => (
+                      <Text key={message.id} role="body">
+                        {message.senderRole === 'PASSENGER' ? 'Вы' : 'Водитель'}: {message.body}
+                      </Text>
+                    ))}
+                    {isMessagingOpen ? (
+                      <>
+                        <FormField label="Сообщение водителю" htmlFor="message-to-driver">
+                          <Textarea
+                            id="message-to-driver"
+                            value={messageDraft}
+                            maxLength={MESSAGE_MAX_LENGTH}
+                            rows={2}
+                            placeholder="Например: буду у подъезда через 2 минуты"
+                            onChange={(event) => setMessageDraft(event.target.value)}
+                          />
+                        </FormField>
+                        <div className={styles.actionRow}>
+                          <Button
+                            label="Отправить"
+                            variant="secondary"
+                            loading={sendMessageStatus === 'submitting'}
+                            disabled={!messageDraft.trim()}
+                            onClick={() => void handleSendMessage()}
+                          />
+                        </div>
+                        {sendMessageStatus === 'error' && (
+                          <StatusMessage tone="error">Не удалось отправить сообщение. Попробуйте ещё раз.</StatusMessage>
+                        )}
+                      </>
+                    ) : (
+                      <Text role="caption" tone="muted">
+                        Обмен сообщениями закрыт.
+                      </Text>
+                    )}
+                  </Card>
                 )}
               </>
             )}

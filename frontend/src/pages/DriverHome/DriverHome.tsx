@@ -14,7 +14,7 @@ import { Card } from '../../components/Card'
 import { Text } from '../../components/Text'
 import { Heading } from '../../components/Heading'
 import { FormField } from '../../components/FormField'
-import { Input, Select } from '../../components/Input'
+import { Input, Select, Textarea } from '../../components/Input'
 import { StatusMessage } from '../../components/StatusMessage'
 import { ApiError, request, resolveBackendBaseUrl } from '../../api/apiClient'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
@@ -125,6 +125,26 @@ interface ProposalListItem {
   // null-until-accepted rule as [statedPrice].
   statedEtaMinutes: number | null
 }
+
+/**
+ * Minimal In-Ride Messaging (Product Cycle): `GET/POST
+ * /v1/proposals/:id/messages`'s own response shape (Dispatch) -- mirrors
+ * `RideRequest.tsx`'s own identical interface exactly (same backend
+ * contract, read from both ends of the same proposal).
+ */
+interface ProposalMessageItem {
+  id: string
+  senderRole: 'PASSENGER' | 'DRIVER'
+  body: string
+  sentAt: string
+}
+
+// Minimal In-Ride Messaging (Product Cycle): matches
+// ProposalMessage.MAX_BODY_LENGTH (Dispatch) and RideRequest.tsx's own
+// identical constant exactly, for the same reason that file's own KDoc
+// gives -- nothing typed here is ever silently rejected by the backend
+// after submission.
+const MESSAGE_MAX_LENGTH = 300
 
 // ADR-057 Decision item 4: the fixed choice set lives in the UI, not the
 // domain -- this is a presentation choice about what is easy to tap, so it
@@ -283,10 +303,22 @@ function ProposalDetails({
   proposal,
   order,
   time,
+  messages,
+  isMessagingOpen,
+  messageDraft,
+  messageStatus,
+  onMessageDraftChange,
+  onSendMessage,
 }: {
   proposal: ProposalListItem
   order: OrderListItem | undefined
   time: string | null
+  messages: ProposalMessageItem[]
+  isMessagingOpen: boolean
+  messageDraft: string
+  messageStatus: ProposalActionStatus
+  onMessageDraftChange: (value: string) => void
+  onSendMessage: () => void
 }) {
   return (
     <>
@@ -339,6 +371,61 @@ function ProposalDetails({
           as statedPrice immediately above. */}
       {typeof proposal.statedEtaMinutes === 'number' && (
         <Text role="body">Будет примерно через: {proposal.statedEtaMinutes} мин</Text>
+      )}
+      {/* Minimal In-Ride Messaging (Product Cycle): "коммуникация
+          принадлежит конкретной поездке, а не платформе в целом" --
+          rendered inside this exact proposal's own card, alongside its
+          route/price, never as a separate inbox screen. No "closed after
+          COMPLETED" branch is needed for that status specifically (unlike
+          RideRequest.tsx's own mirror of this block): once an Assignment
+          for this order reaches COMPLETED, [visibleProposals] (this
+          file's own filter, above) already removes this whole card from
+          the screen. DECLINED/LAPSED/WITHDRAWN proposals, however, *do*
+          stay visible here (the terminal-status branch just below this
+          function's own call site) -- [isMessagingOpen] closes sending for
+          exactly those three, mirroring Dispatch's own
+          `ProposalMessagingApplicationService.isMessagingOpen` gating.
+          Hidden entirely when there is nothing to show at all (closed and
+          no history) -- an empty card section would be noise. */}
+      {(isMessagingOpen || messages.length > 0) && (
+        <>
+          <Text role="label" tone="muted">
+            Сообщения по этой поездке
+          </Text>
+          {messages.map((message) => (
+            <Text key={message.id} role="body">
+              {message.senderRole === 'DRIVER' ? 'Вы' : 'Пассажир'}: {message.body}
+            </Text>
+          ))}
+          {isMessagingOpen ? (
+            <>
+              <FormField label="Ответ пассажиру" htmlFor={`message-${proposal.proposalId}`}>
+                <Textarea
+                  id={`message-${proposal.proposalId}`}
+                  value={messageDraft}
+                  maxLength={MESSAGE_MAX_LENGTH}
+                  rows={2}
+                  placeholder="Например: уже еду, буду через 5 минут"
+                  onChange={(event) => onMessageDraftChange(event.target.value)}
+                />
+              </FormField>
+              <Button
+                label="Отправить"
+                variant="secondary"
+                loading={messageStatus === 'submitting'}
+                disabled={!messageDraft.trim()}
+                onClick={onSendMessage}
+              />
+              {messageStatus === 'error' && (
+                <StatusMessage tone="error">Не удалось отправить сообщение. Попробуйте ещё раз.</StatusMessage>
+              )}
+            </>
+          ) : (
+            <Text role="caption" tone="muted">
+              Обмен сообщениями закрыт.
+            </Text>
+          )}
+        </>
       )}
     </>
   )
@@ -516,6 +603,13 @@ export function DriverHome() {
   // mirrors [priceInputs] exactly. `null`/unset means "not chosen".
   const [etaInputs, setEtaInputs] = useState<Record<string, number | null>>({})
   const [orderDetails, setOrderDetails] = useState<Record<string, OrderListItem>>({})
+  // Minimal In-Ride Messaging (Product Cycle): all three keyed by
+  // proposalId, mirroring [priceInputs]/[etaInputs]'s own per-card
+  // convention exactly -- each visible proposal card gets its own
+  // independent draft/status, never shared across cards.
+  const [messagesByProposal, setMessagesByProposal] = useState<Record<string, ProposalMessageItem[]>>({})
+  const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>({})
+  const [messageActions, setMessageActions] = useState<Record<string, ProposalActionStatus>>({})
   const [connections, setConnections] = useState<ConnectionListItem[]>([])
   const [milestones, setMilestones] = useState<DriverMilestonesInfo | null>(null)
   // Product owner request, 2026-09-07: "Мой бизнес" as three separate
@@ -690,6 +784,47 @@ export function DriverHome() {
       })
   }
 
+  /**
+   * Minimal In-Ride Messaging (Product Cycle): mirrors [loadOrderDetails]'s
+   * own shape exactly, one level down -- a message thread is scoped to a
+   * proposal, not an order (see `ProposalMessage.kt`'s own KDoc for why),
+   * so this fetches per [proposalId] rather than per order id. No batch
+   * endpoint exists for this MVP (a driver's own visible proposal count is
+   * always small), so each proposal's own thread is requested independently
+   * and merged back together; one proposal's own failure never blocks
+   * another's -- same best-effort tolerance [loadOrderDetails] already
+   * establishes.
+   */
+  function loadMessages(active: boolean, proposalIds: string[], token: string) {
+    if (proposalIds.length === 0) {
+      setMessagesByProposal({})
+      return
+    }
+    Promise.all(
+      proposalIds.map((id) =>
+        request<ProposalMessageItem[]>(`/v1/proposals/${id}/messages`, {
+          headers: { Authorization: `Bearer ${token}` },
+          baseUrl: DISPATCH_BASE_URL,
+        })
+          .then((items): [string, ProposalMessageItem[]] | null => [id, items])
+          // Best-effort per proposal, not merely per batch: a transient
+          // failure for one card's own thread must never overwrite its
+          // last-known messages with an empty flash -- omitted here, then
+          // filtered out below, so [current] (the merge target) simply
+          // keeps whatever it already had for that one id, exactly
+          // [loadOrderDetails]'s own whole-fetch best-effort tolerance,
+          // applied per-id instead of per-batch.
+          .catch((): [string, ProposalMessageItem[]] | null => null)
+      )
+    ).then((entries) => {
+      if (!active) {
+        return
+      }
+      const succeeded = entries.filter((entry): entry is [string, ProposalMessageItem[]] => entry !== null)
+      setMessagesByProposal((current) => ({ ...current, ...Object.fromEntries(succeeded) }))
+    })
+  }
+
   /** H6 ("Driver Growth Snapshot"): best-effort, same tolerance as [loadOrderDetails] -- a failure here only hides today's client count, nothing actionable on this screen depends on it. ADR-055: this endpoint now requires this driver's own session token. */
   function loadConnections(active: boolean, forDriverId: string, token: string) {
     request<ConnectionListItem[]>(`/v1/connections?driverId=${forDriverId}`, {
@@ -771,6 +906,9 @@ export function DriverHome() {
         setProposalsStatus('ready')
         loadAssignments(active, result)
         loadOrderDetails(active, Array.from(new Set(result.map((p) => p.orderId))), token)
+        // Minimal In-Ride Messaging (Product Cycle): scoped per proposal,
+        // not per order -- see [loadMessages]'s own KDoc.
+        loadMessages(active, result.map((p) => p.proposalId), token)
       })
       .catch(() => {
         // A silent poll failure keeps the last-known list on screen rather
@@ -1048,6 +1186,36 @@ export function DriverHome() {
       if (error instanceof ApiError && (error.status === 404 || error.status === 409) && driverId && identity) {
         loadProposals(true, driverId, identity.token)
       }
+    }
+  }
+
+  /**
+   * Minimal In-Ride Messaging (Product Cycle): the driver's own act of
+   * sending a short reply on one specific proposal's own thread. Guarded
+   * against double-submit like every other mutating action on this screen
+   * ([respondToProposal]'s own precedent). Appends the server's own
+   * returned message optimistically -- Dispatch's response already
+   * carries the real, server-assigned `id`/`sentAt`, not a locally-
+   * fabricated placeholder -- rather than waiting for the next poll tick.
+   */
+  async function handleSendMessage(proposalId: string) {
+    const draft = (messageDrafts[proposalId] ?? '').trim()
+    if (!draft || !identity || messageActions[proposalId] === 'submitting') {
+      return
+    }
+    setMessageActions((current) => ({ ...current, [proposalId]: 'submitting' }))
+    try {
+      const created = await request<ProposalMessageItem>(`/v1/proposals/${proposalId}/messages`, {
+        method: 'POST',
+        baseUrl: DISPATCH_BASE_URL,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity.token}` },
+        body: JSON.stringify({ body: draft }),
+      })
+      setMessagesByProposal((current) => ({ ...current, [proposalId]: [...(current[proposalId] ?? []), created] }))
+      setMessageDrafts((current) => ({ ...current, [proposalId]: '' }))
+      setMessageActions((current) => ({ ...current, [proposalId]: 'idle' }))
+    } catch {
+      setMessageActions((current) => ({ ...current, [proposalId]: 'error' }))
     }
   }
 
@@ -1469,7 +1637,21 @@ export function DriverHome() {
             const time = formatOrderTime(order?.createdAt ?? null)
             const assignment = assignments[proposal.orderId]
             const orderCode = shortOrderCode(proposal.orderId)
-            const details = <ProposalDetails proposal={proposal} order={order} time={time} />
+            const details = (
+              <ProposalDetails
+                proposal={proposal}
+                order={order}
+                time={time}
+                messages={messagesByProposal[proposal.proposalId] ?? []}
+                isMessagingOpen={proposal.status !== 'DECLINED' && proposal.status !== 'LAPSED' && proposal.status !== 'WITHDRAWN'}
+                messageDraft={messageDrafts[proposal.proposalId] ?? ''}
+                messageStatus={messageActions[proposal.proposalId] ?? 'idle'}
+                onMessageDraftChange={(value) =>
+                  setMessageDrafts((current) => ({ ...current, [proposal.proposalId]: value }))
+                }
+                onSendMessage={() => void handleSendMessage(proposal.proposalId)}
+              />
+            )
 
             // OPEN: this is the one state that needs the driver to decide
             // something right now -- RequestCard's own elevated, accent-
