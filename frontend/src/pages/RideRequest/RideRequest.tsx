@@ -343,6 +343,22 @@ function rideStatusLabel(status: PassengerRideStatus): string {
  * screen ever creates without an already-known, specific driver. Setting
  * this stops Dispatch's automatic First Refusal (Task 16) from racing that
  * already-explicit choice for orders created here.
+ *
+ * Repeat Ride (Product Cycle): the COMPLETED branch of the repeat button
+ * (`rideStatus === 'COMPLETED'`, below) reads [circle] to choose its label
+ * -- "Заказать у этого водителя" when this driver is already in the
+ * passenger's circle of trust, "Повторить поездку" otherwise. No new
+ * backend/API surface: [circle] is exactly the same state
+ * [loadCircleThenAdvance] already populates for a brand-new order (see that
+ * function's own KDoc for the one disclosed edge case this reuse accepts).
+ * Preserving the route/details across a repeat ("сохранением маршрута и
+ * основных параметров") needed no new code at all: [handleOrderAgain]
+ * already never reset `pickupAddress`/`destination`/`passengerCount`/
+ * `notes`, only the order-specific state (id, status, price, schedule).
+ * "Primary Driver gets the first right of offer, not exclusivity" (PIOS's
+ * own product rule): repeating defaults to the driver just ridden with, but
+ * "Мои водители" — rendered alongside, unconditionally, for every terminal
+ * status — remains the passenger's own way to choose someone else instead.
  */
 export function RideRequest() {
   const { driverCode } = useParams<{ driverCode: string }>()
@@ -485,6 +501,21 @@ export function RideRequest() {
    * choose, so this skips straight to the form, unchanged from before this
    * Sprint. Best-effort throughout: a failure here never blocks ordering
    * with the driver whose link this page was already opened through.
+   *
+   * Repeat Ride (Product Cycle): this is also the only place [circle] is
+   * ever populated — deliberately not re-fetched again when
+   * [loadInvitation] instead resumes an already-placed order (that branch,
+   * just above, returns before reaching this function). This keeps this
+   * addition's own footprint to a pure read of already-loaded state (no new
+   * network call on the far more common "still on this screen" path the
+   * COMPLETED repeat button actually appears on) at the cost of one
+   * disclosed edge case: a passenger who reloads the page while an order
+   * with this driver is already COMPLETED sees the generic "Повторить
+   * поездку" wording rather than "Заказать у этого водителя", since
+   * [circle] resets to empty on remount and is never told to refetch. Never
+   * a functional regression — the button still repeats the same ride with
+   * the same driver either way, see the `rideStatus === 'COMPLETED'`
+   * render branch's own KDoc — only the label is momentarily less precise.
    */
   function loadCircleThenAdvance(active: boolean, forIdentity: StoredIdentity) {
     request<CircleMember[]>(`/v1/connections?passengerReference=${forIdentity.identityId}`, {
@@ -1607,18 +1638,60 @@ export function RideRequest() {
                 )}
                 {cancelStatus === 'error' && <StatusMessage tone="error">Не удалось отменить заказ. Попробуйте ещё раз.</StatusMessage>}
                 {/* P0-1: a terminal ride state ('DECLINED', 'LAPSED',
-                    'WITHDRAWN', 'COMPLETED') is exactly where this driver's
-                    link otherwise dead-ended forever -- 'OPEN', 'ACCEPTED',
+                    'WITHDRAWN') is exactly where this driver's link
+                    otherwise dead-ended forever -- 'OPEN', 'ACCEPTED',
                     'ARRIVED', 'IN_PROGRESS' keep today's behavior
                     unchanged, since a ride still in progress must not
                     offer a second, concurrent order with the same
-                    driver. */}
-                {(rideStatus === 'DECLINED' ||
-                  rideStatus === 'LAPSED' ||
-                  rideStatus === 'WITHDRAWN' ||
-                  rideStatus === 'COMPLETED') && (
+                    driver. 'COMPLETED' has its own, differently-labelled
+                    branch immediately below (Repeat Ride) -- none of these
+                    three ever produced an actual ride, so they keep the
+                    plain, unconditional "Заказать ещё раз" wording. */}
+                {(rideStatus === 'DECLINED' || rideStatus === 'LAPSED' || rideStatus === 'WITHDRAWN') && (
                   <div className={styles.actionRow}>
                     <Button label="Заказать ещё раз" variant="primary" onClick={handleOrderAgain} />
+                  </div>
+                )}
+                {/* Repeat Ride (Product Cycle): a completed ride is the one
+                    terminal state that actually happened, so the repeat
+                    action here is framed around the specific driver the
+                    passenger just rode with, not a generic retry. Same
+                    underlying action as the plain "Заказать ещё раз" above
+                    ([handleOrderAgain] itself is completely unchanged --
+                    same driver, same lifecycle, pickupAddress/destination/
+                    passengerCount/notes all already survive it unmodified,
+                    since that function never resets them) -- only the label
+                    differs, chosen from [circle] ([loadCircleThenAdvance]'s
+                    own state, populated for the unrelated circle-of-trust
+                    step -- reused here rather than fetched again; see that
+                    function's own KDoc for the one disclosed edge case):
+                    - This driver is already in the passenger's circle of
+                      trust -- "Заказать у этого водителя". This is the
+                      common case (Circle of Trust is normally bootstrapped
+                      at registration or explicit confirm-add, before an
+                      order can even be placed with them) and is exactly the
+                      "Primary Driver gets the first right of offer" product
+                      rule: repeating defaults to the driver already ridden
+                      with, one tap, no re-typing.
+                    - This driver is not (or no longer) in the circle --
+                      "Повторить поездку", an ordinary repeat with no implied
+                      relationship.
+                    Neither branch is exclusive: "Мои водители" right below
+                    remains the passenger's own, always-available way to
+                    choose a different driver instead -- this never locks
+                    anyone in, matching "не эксклюзивность и не владение
+                    пассажиром". */}
+                {rideStatus === 'COMPLETED' && (
+                  <div className={styles.actionRow}>
+                    <Button
+                      label={
+                        circle.some((member) => member.driverId === driverCode)
+                          ? 'Заказать у этого водителя'
+                          : 'Повторить поездку'
+                      }
+                      variant="primary"
+                      onClick={handleOrderAgain}
+                    />
                   </div>
                 )}
                 {/* Product audit (2026-09-12): "Мои водители" (/me) is this

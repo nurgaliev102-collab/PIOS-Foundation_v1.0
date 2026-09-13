@@ -658,17 +658,63 @@ describe('RideRequest', () => {
     expect(await screen.findByRole('button', { name: 'Заказать ещё раз' })).toBeInTheDocument()
   })
 
-  it('offers "Заказать ещё раз" when the ride completed', async () => {
-    saveCurrentOrderId('driver-1', 'order-1')
+  // --- Repeat Ride (Product Cycle) ---
+  // The COMPLETED-specific repeat action reads [circle] -- populated only
+  // by [loadCircleThenAdvance] (a brand-new order), never re-fetched when
+  // resuming an already-placed one (see that function's own KDoc for the
+  // one disclosed edge case this accepts) -- so, unlike this file's other
+  // COMPLETED tests, these two go through the full fresh-order flow
+  // (circle-of-trust fetch -> form -> submit -> poll to COMPLETED) rather
+  // than the `saveCurrentOrderId` resume shortcut, to get real circle-of-
+  // trust membership in place before the ride completes.
+
+  it('offers "Заказать у этого водителя" when the ride completed and this driver is already in the circle of trust', async () => {
     mockMeResponse()
     mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
-    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
-    mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }])
+    mockedRequest.mockResolvedValueOnce([
+      { connectionId: 'c1', driverId: 'driver-1', createdAt: '2026-08-01T00:00:00Z', isPrimary: true },
+    ])
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' }) // enrichCircle's own per-member lookup
 
     renderAt('driver-1')
 
-    expect(await screen.findByRole('button', { name: 'Заказать ещё раз' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-1' }) // POST /v1/orders
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }]) // status poll
+    mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }]) // GET /v1/assignments?orderId=order-1
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByRole('button', { name: 'Заказать у этого водителя' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Повторить поездку' })).not.toBeInTheDocument()
   })
+
+  it('offers "Повторить поездку" when the ride completed and this driver is not in the circle of trust', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([]) // circle-of-trust: no relationships at all
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-1' }) // POST /v1/orders
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }]) // status poll
+    mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }]) // GET /v1/assignments?orderId=order-1
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByRole('button', { name: 'Повторить поездку' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Заказать у этого водителя' })).not.toBeInTheDocument()
+  })
+
 
   // Product audit (2026-09-12): "Мои водители" (/me) is PIOS's own
   // designated repeat-a-ride path but had no link to it anywhere in the
