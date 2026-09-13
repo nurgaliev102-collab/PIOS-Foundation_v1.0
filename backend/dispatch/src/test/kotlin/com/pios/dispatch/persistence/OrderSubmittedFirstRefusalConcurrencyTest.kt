@@ -2,6 +2,7 @@ package com.pios.dispatch.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.dispatch.application.DriverAvailabilityRecord
+import com.pios.dispatch.application.FallbackDispatchApplicationService
 import com.pios.dispatch.application.FirstRefusalApplicationService
 import com.pios.dispatch.application.PrimaryDriverRecord
 import com.pios.dispatch.application.PrimaryDriverRepository
@@ -49,7 +50,9 @@ class OrderSubmittedFirstRefusalConcurrencyTest {
         ProposalApplicationService(proposalRepository, transactionRunner, driverAvailabilityRepository)
     private val firstRefusalApplicationService =
         FirstRefusalApplicationService(primaryDriverRepository, proposalApplicationService, driverAvailabilityRepository)
-    private val listener = OrderSubmittedFirstRefusalListener(firstRefusalApplicationService, ObjectMapper())
+    private val fallbackDispatchApplicationService =
+        FallbackDispatchApplicationService(driverAvailabilityRepository, proposalApplicationService)
+    private val listener = OrderSubmittedFirstRefusalListener(firstRefusalApplicationService, fallbackDispatchApplicationService, ObjectMapper())
     private val objectMapper = ObjectMapper()
 
     private fun envelopeFor(orderId: String, passengerReference: String, eventId: String): String =
@@ -97,5 +100,58 @@ class OrderSubmittedFirstRefusalConcurrencyTest {
         assertEquals(1, proposals.size, "exactly one OPEN proposal must exist after two concurrent listener invocations")
         assertEquals(ProposalStatus.OPEN, proposals.single().status)
         assertEquals(primaryDriver, proposals.single().driver)
+    }
+
+    /**
+     * FR-003A's own analogue of Test E above: [FallbackDispatchApplicationService.attempt]
+     * delegates to the identical [ProposalApplicationService.handle] ->
+     * `Proposal.propose` path, so the same `proposals_one_open_per_order`
+     * (V14) guarantee applies mechanically -- this test exercises it
+     * directly for Fallback Dispatch rather than relying only on that
+     * inherited proof.
+     */
+    @Test
+    fun `Test G -- FR-003A -- two concurrent Fallback Dispatch attempts for the same order produce exactly one OPEN proposal`() {
+        val order = OrderReference("order-${UUID.randomUUID()}")
+        val passenger = PassengerReference("passenger-${UUID.randomUUID()}")
+        // No PrimaryDriverRecord for this passenger -- both attempts must
+        // reach FallbackDispatchApplicationService.attempt on equal footing.
+        val fallbackDriver = DriverReference("driver-fallback-${UUID.randomUUID()}")
+        try {
+            driverAvailabilityRepository.upsert(DriverAvailabilityRecord(fallbackDriver, available = true))
+            // Forced far into the past (randomized -- see this module's own
+            // OrderSubmittedFirstRefusalConsumerIntegrationTest "Test B"
+            // KDoc for why a shared literal would collide) so this driver is
+            // deterministically the "longest idle" candidate regardless of
+            // any other available-driver row this shared pios_dispatch_test
+            // database may already hold.
+            JdbcTemplate(dataSource).update(
+                "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
+                java.sql.Timestamp.from(Instant.parse("2000-01-01T00:00:00Z").minusSeconds((0..3_000_000_000L).random())),
+                fallbackDriver.driverId
+            )
+
+            val executor = Executors.newFixedThreadPool(2)
+            val startLatch = CountDownLatch(1)
+            try {
+                val futures = (1..2).map {
+                    executor.submit {
+                        startLatch.await()
+                        fallbackDispatchApplicationService.attempt(order, passenger)
+                    }
+                }
+                startLatch.countDown()
+                futures.forEach { it.get(15, TimeUnit.SECONDS) }
+            } finally {
+                executor.shutdown()
+            }
+
+            val proposals = proposalRepository.findByOrder(order)
+            assertEquals(1, proposals.size, "exactly one OPEN proposal must exist after two concurrent Fallback Dispatch attempts")
+            assertEquals(ProposalStatus.OPEN, proposals.single().status)
+            assertEquals(fallbackDriver, proposals.single().driver)
+        } finally {
+            JdbcTemplate(dataSource).update("DELETE FROM driver_availability WHERE driver_reference = ?", fallbackDriver.driverId)
+        }
     }
 }

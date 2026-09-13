@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -47,5 +48,83 @@ class PostgreSQLDriverAvailabilityRepositoryTest {
 
         assertTrue(repository.markProcessed(eventId))
         assertTrue(!repository.markProcessed(eventId))
+    }
+
+    // --- FR-003A: findLongestIdleAvailable ---
+
+    /**
+     * A randomized, far-past timestamp -- never a shared literal constant.
+     * Two tests (in this file, or in any other file sharing this same
+     * pios_dispatch_test database and run in the same suite) that both
+     * force a row's `updated_at` to the *identical* instant create a tie
+     * `ORDER BY updated_at ASC LIMIT 1` resolves arbitrarily -- exactly the
+     * failure this randomization avoids, at negligible (~1 in 3 billion)
+     * collision odds.
+     */
+    private fun farPastTimestamp(): java.sql.Timestamp =
+        java.sql.Timestamp.from(java.time.Instant.parse("2000-01-01T00:00:00Z").minusSeconds((0..3_000_000_000L).random()))
+
+    /**
+     * `driver_availability` is never cleaned between test runs anywhere in
+     * this suite (every existing test relies only on unique UUIDs per row,
+     * never on the table's overall contents or order) -- harmless until a
+     * query that cares about *ordering across the whole table* exists. Once
+     * one does ([DriverAvailabilityRepository.findLongestIdleAvailable]),
+     * leaving a far-past-dated row behind forever would make it a permanent
+     * contender against every future run's own "oldest" row (an
+     * accumulating collision risk across repeated runs, not just within
+     * one) -- so, uniquely among this file's tests, these two clean up the
+     * exact rows they create.
+     */
+    private fun deleteDriverAvailability(references: List<DriverReference>) {
+        val jdbcTemplate = JdbcTemplate(PostgreSQLTestDatabase.dataSource)
+        references.forEach { jdbcTemplate.update("DELETE FROM driver_availability WHERE driver_reference = ?", it.driverId) }
+    }
+
+    @Test
+    fun `findLongestIdleAvailable returns the available driver whose record is oldest, regardless of other rows in this shared table`() {
+        val jdbcTemplate = JdbcTemplate(PostgreSQLTestDatabase.dataSource)
+        val oldest = DriverReference("repo-driver-oldest-${UUID.randomUUID()}")
+        val newer = DriverReference("repo-driver-newer-${UUID.randomUUID()}")
+
+        try {
+            repository.upsert(DriverAvailabilityRecord(oldest, available = true))
+            // Forced far into the past so this row is deterministically
+            // older than anything this shared pios_dispatch_test table
+            // already holds from other test runs -- the only way to make
+            // this assertion reliable without depending on the table's
+            // full history. Randomized (see farPastTimestamp's own KDoc),
+            // and still deleted in the finally block below regardless --
+            // both defenses, not either/or.
+            jdbcTemplate.update(
+                "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
+                farPastTimestamp(),
+                oldest.driverId
+            )
+            repository.upsert(DriverAvailabilityRecord(newer, available = true))
+
+            assertEquals(oldest, repository.findLongestIdleAvailable())
+        } finally {
+            deleteDriverAvailability(listOf(oldest, newer))
+        }
+    }
+
+    @Test
+    fun `findLongestIdleAvailable never returns an unavailable driver, even if it is the oldest`() {
+        val jdbcTemplate = JdbcTemplate(PostgreSQLTestDatabase.dataSource)
+        val oldestButUnavailable = DriverReference("repo-driver-oldest-unavail-${UUID.randomUUID()}")
+
+        try {
+            repository.upsert(DriverAvailabilityRecord(oldestButUnavailable, available = false))
+            jdbcTemplate.update(
+                "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
+                farPastTimestamp(),
+                oldestButUnavailable.driverId
+            )
+
+            assertNotEquals(oldestButUnavailable, repository.findLongestIdleAvailable())
+        } finally {
+            deleteDriverAvailability(listOf(oldestButUnavailable))
+        }
     }
 }

@@ -2,6 +2,7 @@ package com.pios.dispatch.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.dispatch.application.DriverAvailabilityRecord
+import com.pios.dispatch.application.FallbackDispatchApplicationService
 import com.pios.dispatch.application.FirstRefusalApplicationService
 import com.pios.dispatch.application.PrimaryDriverRecord
 import com.pios.dispatch.application.PrimaryDriverRepository
@@ -41,7 +42,9 @@ class OrderSubmittedFirstRefusalConsumerIntegrationTest {
         ProposalApplicationService(proposalRepository, transactionRunner, driverAvailabilityRepository)
     private val firstRefusalApplicationService =
         FirstRefusalApplicationService(primaryDriverRepository, proposalApplicationService, driverAvailabilityRepository)
-    private val listener = OrderSubmittedFirstRefusalListener(firstRefusalApplicationService, ObjectMapper())
+    private val fallbackDispatchApplicationService =
+        FallbackDispatchApplicationService(driverAvailabilityRepository, proposalApplicationService)
+    private val listener = OrderSubmittedFirstRefusalListener(firstRefusalApplicationService, fallbackDispatchApplicationService, ObjectMapper())
     private val publisher = OrderSubmittedMessagePublisher(RabbitMQTestConnection.connectionFactory)
     private val harness = OrderSubmittedFirstRefusalTestListenerHarness(RabbitMQTestConnection.connectionFactory, listener)
 
@@ -87,31 +90,50 @@ class OrderSubmittedFirstRefusalConsumerIntegrationTest {
     }
 
     @Test
-    fun `Test B -- a real OrderSubmitted message with no primary driver creates no proposal and processes without error`() {
+    fun `Test B -- FR-003A -- a real OrderSubmitted message with no primary driver but an available driver produces exactly one Fallback Dispatch proposal for that driver`() {
+        // Pre-FR-003A this scenario produced no proposal at all -- see this
+        // module's own FirstRefusalApplicationServiceTest ("Test G", still
+        // unchanged, still proves First Refusal itself creates nothing here)
+        // for that unit-level guarantee. What changes at the *pipeline*
+        // level (this file's own concern) is what OrderSubmittedFirstRefusalListener
+        // does *after* First Refusal returns NoPrimaryDriver: Fallback
+        // Dispatch now runs and, since a driver is available, proposes to it.
         val orderId = "order-${UUID.randomUUID()}"
         val passengerReference = "passenger-${UUID.randomUUID()}"
-        // No PrimaryDriverRecord upserted for this passenger at all.
+        val fallbackDriver = DriverReference("driver-fallback-${UUID.randomUUID()}")
+        try {
+            // No PrimaryDriverRecord upserted for this passenger at all.
+            driverAvailabilityRepository.upsert(DriverAvailabilityRecord(fallbackDriver, available = true))
+            // Forced far into the past (randomized, not a shared literal --
+            // two tests forcing the identical instant would tie under
+            // ORDER BY updated_at ASC LIMIT 1) so this driver is
+            // deterministically the "longest idle" candidate regardless of
+            // any other available-driver row other tests in this shared
+            // pios_dispatch_test database may have left behind -- same
+            // technique PostgreSQLDriverAvailabilityRepositoryTest's own
+            // FR-003A test uses. This row is deleted in the finally block
+            // below (same file's own test) -- left in place forever, it
+            // would become a permanent contender against every future run's
+            // own "oldest" row, an accumulating collision risk across
+            // repeated runs of this test itself, which is exactly the
+            // failure mode discovered and fixed here.
+            JdbcTemplate(dataSource).update(
+                "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
+                java.sql.Timestamp.from(java.time.Instant.parse("2000-01-01T00:00:00Z").minusSeconds((0..3_000_000_000L).random())),
+                fallbackDriver.driverId
+            )
 
-        publisher.publish(orderId = orderId, passengerReference = passengerReference)
+            publisher.publish(orderId = orderId, passengerReference = passengerReference)
 
-        // No proposal will ever appear -- awaitUntilNotNull would time out
-        // waiting for something that never arrives, so instead prove the
-        // *negative* by giving the (real, asynchronous) consumer ample time
-        // to have processed the message, then asserting nothing was created.
-        // A second, real message for a *different* order is published and
-        // awaited afterward -- its own successful, fast processing is what
-        // proves the listener's own queue was not stuck or backed up by
-        // this test's own message.
-        val canaryOrderId = "order-canary-${UUID.randomUUID()}"
-        val canaryPassenger = "passenger-canary-${UUID.randomUUID()}"
-        val canaryDriver = DriverReference("driver-canary-${UUID.randomUUID()}")
-        primaryDriverRepository.upsert(PrimaryDriverRecord(PassengerReference(canaryPassenger), canaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(canaryDriver, available = true))
-        publisher.publish(orderId = canaryOrderId, passengerReference = canaryPassenger)
-        val canaryProposal = awaitUntilNotNull { proposalRepository.findByOrder(OrderReference(canaryOrderId)).firstOrNull() }
-        kotlin.test.assertNotNull(canaryProposal, "the canary message must have been processed -- proves the queue is not stuck")
+            val proposal = awaitUntilNotNull { proposalRepository.findByOrder(OrderReference(orderId)).firstOrNull() }
 
-        assertEquals(emptyList(), proposalRepository.findByOrder(OrderReference(orderId)))
+            kotlin.test.assertNotNull(proposal)
+            assertEquals(fallbackDriver, proposal.driver)
+            assertEquals(ProposalStatus.OPEN, proposal.status)
+            assertEquals(1, proposalRepository.findByOrder(OrderReference(orderId)).size)
+        } finally {
+            JdbcTemplate(dataSource).update("DELETE FROM driver_availability WHERE driver_reference = ?", fallbackDriver.driverId)
+        }
     }
 
     @Test

@@ -1,7 +1,9 @@
 package com.pios.dispatch.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.pios.dispatch.application.FallbackDispatchApplicationService
 import com.pios.dispatch.application.FirstRefusalApplicationService
+import com.pios.dispatch.application.FirstRefusalOutcome
 import com.pios.dispatch.domain.OrderReference
 import com.pios.dispatch.domain.PassengerReference
 import org.slf4j.LoggerFactory
@@ -79,10 +81,24 @@ import org.springframework.stereotype.Component
  * ADR-062 and this task's own Phase 0 finding (Task 15C omitted `isTest`)
  * justify, nothing from Order Management's own domain types. Never
  * imports any Order Management type.
+ *
+ * ## Fallback Dispatch (FR-003A)
+ *
+ * After [firstRefusalApplicationService] returns, [fallbackDispatchApplicationService]
+ * is attempted for exactly the two outcomes that mean "no Proposal exists
+ * yet and none is coming from First Refusal itself":
+ * [FirstRefusalOutcome.NoPrimaryDriver] and
+ * [FirstRefusalOutcome.PrimaryDriverIneligible]. The other three outcomes
+ * skip it: [FirstRefusalOutcome.Proposed] and
+ * [FirstRefusalOutcome.AlreadyAttempted] already mean a Proposal exists;
+ * [FirstRefusalOutcome.ExplicitDriverIntentDeclared] means the passenger is
+ * choosing their own driver through a separate flow, which Fallback Dispatch
+ * must not preempt.
  */
 @Component
 class OrderSubmittedFirstRefusalListener(
     private val firstRefusalApplicationService: FirstRefusalApplicationService,
+    private val fallbackDispatchApplicationService: FallbackDispatchApplicationService,
     private val objectMapper: ObjectMapper
 ) {
     private val logger = LoggerFactory.getLogger(OrderSubmittedFirstRefusalListener::class.java)
@@ -119,9 +135,12 @@ class OrderSubmittedFirstRefusalListener(
         val explicitDriverIntent = data.get("explicitDriverIntent")?.asBoolean() ?: false
         val isTest = data.get("isTest")?.asBoolean() ?: false
 
+        val orderReference = OrderReference(orderId)
+        val passengerRef = PassengerReference(passengerReference)
+
         val outcome = firstRefusalApplicationService.attempt(
-            order = OrderReference(orderId),
-            passengerReference = PassengerReference(passengerReference),
+            order = orderReference,
+            passengerReference = passengerRef,
             isTest = isTest,
             explicitDriverIntentDeclared = explicitDriverIntent
         )
@@ -131,6 +150,20 @@ class OrderSubmittedFirstRefusalListener(
             orderId,
             outcome::class.simpleName
         )
+
+        if (outcome is FirstRefusalOutcome.NoPrimaryDriver || outcome is FirstRefusalOutcome.PrimaryDriverIneligible) {
+            val fallbackOutcome = fallbackDispatchApplicationService.attempt(
+                order = orderReference,
+                passengerReference = passengerRef,
+                isTest = isTest
+            )
+            logger.info(
+                "OrderSubmitted (eventId {}) order {}: Fallback Dispatch outcome {}",
+                eventId,
+                orderId,
+                fallbackOutcome::class.simpleName
+            )
+        }
     }
 
     companion object {

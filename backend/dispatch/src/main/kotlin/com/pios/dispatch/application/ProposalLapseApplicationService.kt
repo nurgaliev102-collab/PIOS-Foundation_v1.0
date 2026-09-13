@@ -59,11 +59,52 @@ import java.time.Instant
  * outcome rather than a failure."* That is what [lapseIfStillOpen] does —
  * ordinary implementation handling of an already-disclosed architectural
  * gap, not a new decision.
+ *
+ * ## FR-003A (Fallback Dispatch) after a primary driver's own lapse
+ *
+ * The product requirement [FallbackDispatchApplicationService]'s own KDoc
+ * did not yet close: *"если primary/eligible driver не принял заказ в
+ * предусмотренный срок — корректно запускать fallback"* — a primary
+ * driver who never responds must produce the same fallback attempt as one
+ * who was never eligible to begin with. [OrderSubmittedFirstRefusalListener]
+ * already covers the *immediate* half (`NoPrimaryDriver`/
+ * `PrimaryDriverIneligible`, decided the instant `OrderSubmitted` arrives);
+ * this class is the only place the *delayed* half can be decided, since it
+ * is the only place that already knows a Proposal has just, genuinely,
+ * transitioned to `LAPSED`.
+ *
+ * [attemptFallbackAfterLapse] identifies "was this the primary driver's own
+ * proposal" the same way [FirstRefusalApplicationService.attempt] itself
+ * decides who the primary driver is — reading
+ * [primaryDriverRepository.findByPassenger] fresh, right now, and comparing
+ * its [PrimaryDriverRecord.primaryDriverId] against [Proposal.driver] —
+ * rather than adding a new "how was this Proposal created" field to
+ * [Proposal] itself, which no other case in this module needs and which
+ * `CLAUDE.md`'s own "smallest correct change" principle rules out here.
+ * This naturally, correctly excludes exactly the cases
+ * [FallbackDispatchApplicationService]'s own "No retry on decline/lapse"
+ * KDoc already declines to retry: a driver Fallback Dispatch itself
+ * selected is never the passenger's primary driver (Fallback Dispatch only
+ * ever runs when First Refusal already found no *eligible* primary), so
+ * its own Proposal lapsing here never re-triggers [fallbackDispatchApplicationService] —
+ * without this class needing to know that reasoning explicitly.
+ *
+ * [primaryDriverRepository]/[fallbackDispatchApplicationService] default to
+ * `null`, mirroring [FirstRefusalApplicationService]'s own identical
+ * `driverAvailabilityRepository: DriverAvailabilityRepository? = null`
+ * precedent exactly: every existing caller/test of this class, none of
+ * which has any interest in fallback-after-lapse, continues to compile and
+ * behave exactly as before this parameter pair's own addition. A `null`
+ * either collaborator makes [attemptFallbackAfterLapse] a no-op — the same
+ * "missing collaborator disables the enhancement, never the base behavior"
+ * shape already established.
  */
 @Service
 class ProposalLapseApplicationService(
     private val proposalRepository: ProposalRepository,
     private val proposalApplicationService: ProposalApplicationService,
+    private val primaryDriverRepository: PrimaryDriverRepository? = null,
+    private val fallbackDispatchApplicationService: FallbackDispatchApplicationService? = null,
     @Value("\${pios.proposal.lapse.timeout-minutes:5}") private val timeoutMinutes: Long
 ) {
     private val logger = LoggerFactory.getLogger(ProposalLapseApplicationService::class.java)
@@ -92,6 +133,7 @@ class ProposalLapseApplicationService(
     private fun lapseIfStillOpen(proposal: Proposal) {
         try {
             proposalApplicationService.lapseProposal(LapseProposalCommand(proposal.id))
+            attemptFallbackAfterLapse(proposal)
         } catch (ex: IllegalStateException) {
             logger.debug(
                 "Proposal {} was no longer OPEN when the lapse sweep reached it; " +
@@ -99,5 +141,24 @@ class ProposalLapseApplicationService(
                 proposal.id.value
             )
         }
+    }
+
+    /** See this class's own "FR-003A after a primary driver's own lapse" KDoc for the full reasoning. */
+    private fun attemptFallbackAfterLapse(proposal: Proposal) {
+        val fallback = fallbackDispatchApplicationService ?: return
+        val primaryDriverRepository = this.primaryDriverRepository ?: return
+        val passengerReference = proposal.passengerReference ?: return
+        val primary = primaryDriverRepository.findByPassenger(passengerReference) ?: return
+        if (primary.primaryDriverId != proposal.driver) {
+            return
+        }
+        val outcome = fallback.attempt(proposal.order, passengerReference, proposal.isTest)
+        logger.info(
+            "Proposal {} (primary driver {}) lapsed without a response for order {}: Fallback Dispatch outcome {}",
+            proposal.id.value,
+            proposal.driver.driverId,
+            proposal.order.orderId,
+            outcome::class.simpleName
+        )
     }
 }

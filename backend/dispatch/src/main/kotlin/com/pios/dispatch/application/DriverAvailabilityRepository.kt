@@ -31,4 +31,23 @@ interface DriverAvailabilityRepository {
 
     /** The current local record for [driverReference], if one has ever been recorded. */
     fun findByDriverReference(driverReference: DriverReference): DriverAvailabilityRecord?
+
+    /**
+     * The currently available driver whose record has held `available = true`
+     * for the longest (FR-003A, Fallback Dispatch — the "future routing
+     * task" [com.pios.dispatch.application.FirstRefusalApplicationService]'s
+     * own KDoc deferred: what happens when First Refusal finds no eligible
+     * primary driver). `null` if no driver is currently available at all.
+     *
+     * Defaults to `null` so every existing implementation of this interface
+     * — none of which has any interest in fallback selection — continues to
+     * compile and behave exactly as before this method's own addition
+     * (mirrors [ProposalApplicationService]'s own reasoning for defaulting
+     * its `driverAvailabilityRepository` constructor parameter to `null`:
+     * forcing every unrelated test double to implement this would be an
+     * out-of-scope change to each of them). Only
+     * [com.pios.dispatch.persistence.PostgreSQLDriverAvailabilityRepository]
+     * overrides it with a real query.
+     */
+    fun findLongestIdleAvailable(): DriverReference? = null
 }
