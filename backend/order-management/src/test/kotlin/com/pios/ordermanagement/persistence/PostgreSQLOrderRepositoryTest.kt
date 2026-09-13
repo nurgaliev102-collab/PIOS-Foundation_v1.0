@@ -193,4 +193,36 @@ class PostgreSQLOrderRepositoryTest {
 
         assertEquals(4, freshRepository.findById(submitted.order.id)?.passengerCount)
     }
+
+    // --- Notes (Product Cycle: Passenger Ride Requirements) ---
+
+    @Test
+    fun `an order saved to PostgreSQL with notes can be loaded back with them preserved`() {
+        val submitted = Order.submit(origin, notes = "Детское кресло, встретить у подъезда")
+
+        repository.save(submitted.order)
+        val loaded = repository.findById(submitted.order.id)
+
+        assertEquals("Детское кресло, встретить у подъезда", loaded?.notes)
+    }
+
+    @Test
+    fun `an order saved to PostgreSQL without notes loads back with null notes`() {
+        val submitted = Order.submit(origin)
+
+        repository.save(submitted.order)
+        val loaded = repository.findById(submitted.order.id)
+
+        assertNull(loaded?.notes)
+    }
+
+    @Test
+    fun `notes survive a fresh read through a brand new repository instance -- proving real persistence`() {
+        val submitted = Order.submit(origin, notes = "Много багажа")
+        repository.save(submitted.order)
+
+        val freshRepository = PostgreSQLOrderRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
+
+        assertEquals("Много багажа", freshRepository.findById(submitted.order.id)?.notes)
+    }
 }

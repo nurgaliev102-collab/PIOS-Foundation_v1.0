@@ -348,4 +348,47 @@ class OrderTest {
             Order.submit(origin, passengerCount = -1)
         }
     }
+
+    // --- Notes (Product Cycle: Passenger Ride Requirements) ---
+
+    @Test
+    fun `a submitted order carries the notes it was submitted with`() {
+        val submitted = Order.submit(origin, notes = "Детское кресло, встретить у подъезда")
+
+        assertEquals("Детское кресло, встретить у подъезда", submitted.order.notes)
+    }
+
+    @Test
+    fun `a submitted order without notes has null notes`() {
+        val submitted = Order.submit(origin)
+
+        assertEquals(null, submitted.order.notes)
+    }
+
+    @Test
+    fun `notes survive completion unchanged`() {
+        val order = Order.submit(origin, notes = "Много багажа").order
+
+        order.complete()
+
+        assertEquals("Много багажа", order.notes)
+    }
+
+    @Test
+    fun `submitting with notes at exactly the length limit succeeds`() {
+        val notes = "a".repeat(Order.MAX_NOTES_LENGTH)
+
+        val submitted = Order.submit(origin, notes = notes)
+
+        assertEquals(Order.MAX_NOTES_LENGTH, submitted.order.notes?.length)
+    }
+
+    @Test
+    fun `submitting with notes longer than the length limit is rejected`() {
+        val tooLong = "a".repeat(Order.MAX_NOTES_LENGTH + 1)
+
+        assertFailsWith<IllegalArgumentException> {
+            Order.submit(origin, notes = tooLong)
+        }
+    }
 }

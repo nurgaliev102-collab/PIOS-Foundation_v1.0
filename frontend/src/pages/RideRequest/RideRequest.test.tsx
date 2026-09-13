@@ -265,6 +265,90 @@ describe('RideRequest', () => {
     expect(mockedRequest.mock.calls.some(([path]) => path === '/v1/orders')).toBe(false)
   })
 
+  // --- Notes (Product Cycle: Passenger Ride Requirements) ---
+
+  it('sends notes on POST /v1/orders when the passenger enters some', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+    await userEvent.type(screen.getByLabelText('Пожелания к поездке'), 'Детское кресло, встретить у подъезда')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-notes' }) // POST /v1/orders
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
+    mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
+
+    const submitCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/orders')
+    const body = JSON.parse((submitCall?.[1] as RequestInit).body as string)
+    expect(body.notes).toBe('Детское кресло, встретить у подъезда')
+  })
+
+  it('omits notes on POST /v1/orders when left blank', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-no-notes' }) // POST /v1/orders
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
+    mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
+
+    const submitCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/orders')
+    const body = JSON.parse((submitCall?.[1] as RequestInit).body as string)
+    expect(body.notes).toBeUndefined()
+  })
+
+  it('truncates notes to 500 characters before sending, defensively, even though the field itself caps input at that length', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    const notesField = screen.getByLabelText('Пожелания к поездке') as HTMLTextAreaElement
+    const tooLong = 'a'.repeat(600)
+    // fireEvent bypasses the textarea's own `maxLength` truncation (unlike
+    // a real keystroke-by-keystroke userEvent.type, which the browser
+    // itself would already cap at 500) -- this is exactly the "some caller
+    // bypasses the control" case handleSubmit's own defensive slice exists
+    // for; see NOTES_MAX_LENGTH's own KDoc in RideRequest.tsx.
+    fireEvent.change(notesField, { target: { value: tooLong } })
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-notes-long' }) // POST /v1/orders
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
+    mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
+
+    const submitCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/orders')
+    const body = JSON.parse((submitCall?.[1] as RequestInit).body as string)
+    expect(body.notes).toHaveLength(500)
+  })
+
   // --- Order provenance / authentication (P0, docs/PIOS_DATA_FLOW_CODE_AUDIT.md Section 5) ---
 
   it('sends this passenger\'s own Bearer token on POST /v1/orders, since that endpoint now requires authentication', async () => {

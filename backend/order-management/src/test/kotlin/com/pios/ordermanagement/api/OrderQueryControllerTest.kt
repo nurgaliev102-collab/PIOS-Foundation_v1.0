@@ -341,4 +341,28 @@ class OrderQueryControllerTest {
         val order = assertNotNull(response.body).first()
         assertEquals(4, order.passengerCount)
     }
+
+    // --- Notes (Product Cycle: Passenger Ride Requirements) ---
+
+    @Test
+    fun `a returned order carries its own notes`() {
+        val submitted = Order.submit(origin = OrderOrigin(passengerAId), notes = "Детское кресло")
+        repository.save(submitted.order)
+
+        val response = controller.listOrders(passengerAToken, passengerAId, null)
+
+        val order = assertNotNull(response.body).first()
+        assertEquals("Детское кресло", order.notes)
+    }
+
+    @Test
+    fun `a returned order without notes carries null notes`() {
+        val submitted = Order.submit(origin = OrderOrigin(passengerAId))
+        repository.save(submitted.order)
+
+        val response = controller.listOrders(passengerAToken, passengerAId, null)
+
+        val order = assertNotNull(response.body).first()
+        assertNull(order.notes)
+    }
 }

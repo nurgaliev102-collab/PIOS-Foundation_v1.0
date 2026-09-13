@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, SelectHTMLAttributes } from 'react'
+import type { InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
 import styles from './Input.module.css'
 
 export interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'className'> {
@@ -6,6 +6,10 @@ export interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 
 }
 
 export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'className'> {
+  invalid?: boolean
+}
+
+export interface TextareaProps extends Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'className'> {
   invalid?: boolean
 }
 
@@ -24,5 +28,23 @@ export function Select({ invalid, children, ...rest }: SelectProps) {
     <select className={`${styles.control}${invalid ? ` ${styles.invalid}` : ''}`} aria-invalid={invalid || undefined} {...rest}>
       {children}
     </select>
+  )
+}
+
+/**
+ * Same styled-primitive contract as {@link Input}, for genuinely
+ * multi-line free text (Product Cycle: Passenger Ride Requirements --
+ * "Пожелания к поездке"). Reuses `.control`'s own base styling exactly
+ * (padding, border, focus ring, touch target) with only the multi-line-
+ * specific overrides (`.textarea`) layered on -- no parallel input style
+ * to keep in sync with `Input`/`Select`.
+ */
+export function Textarea({ invalid, ...rest }: TextareaProps) {
+  return (
+    <textarea
+      className={`${styles.control} ${styles.textarea}${invalid ? ` ${styles.invalid}` : ''}`}
+      aria-invalid={invalid || undefined}
+      {...rest}
+    />
   )
 }

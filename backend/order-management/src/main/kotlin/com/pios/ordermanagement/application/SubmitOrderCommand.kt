@@ -35,6 +35,10 @@ import java.time.Instant
  * Carries [passengerCount] (PIOS Group and Long-Distance Rides Roadmap,
  * Stage 2), defaulting to `null` for the same reason [pickupAddress]
  * does — see [com.pios.ordermanagement.domain.Order]'s own KDoc.
+ *
+ * Carries [notes] (Product Cycle: Passenger Ride Requirements), defaulting
+ * to `null` for the same reason [pickupAddress] does — see
+ * [com.pios.ordermanagement.domain.Order]'s own KDoc.
  */
 class SubmitOrderCommand(
     val origin: OrderOrigin,
@@ -44,5 +48,6 @@ class SubmitOrderCommand(
     val requestedPickupAt: Instant? = null,
     val isTest: Boolean = false,
     val explicitDriverIntent: Boolean = false,
-    val passengerCount: Int? = null
+    val passengerCount: Int? = null,
+    val notes: String? = null
 )

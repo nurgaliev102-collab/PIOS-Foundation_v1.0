@@ -196,6 +196,15 @@ interface OrderListItem {
   // this driver reads it next to their own declared vehicle seat count
   // ("Моя машина", Profile tab) and judges it themselves.
   passengerCount?: number | null
+  // Product Cycle (Passenger Ride Requirements) -- "Пожелания к поездке":
+  // the passenger's own free-text statement of anything about this
+  // specific ride PIOS has no dedicated field for (a child seat, extra
+  // luggage, a pet, help boarding, a meeting-point landmark). Rendered
+  // conditionally in [ProposalDetails] below exactly like `pickupAddress`
+  // -- an order submitted before this field existed, or with nothing
+  // typed, has none, and the block is omitted entirely rather than shown
+  // empty.
+  notes?: string | null
 }
 
 /**
@@ -292,6 +301,24 @@ function ProposalDetails({
       {order?.pickupAddress && <Text role="body">Откуда: {order.pickupAddress}</Text>}
       {order?.destination && <Text role="body">Куда: {order.destination}</Text>}
       {order?.passengerCount && <Text role="body">Пассажиров: {order.passengerCount}</Text>}
+      {/* Product Cycle (Passenger Ride Requirements): the passenger's own
+          "Пожелания к поездке" -- shown only when actually present (an
+          order submitted before this field existed, or with nothing
+          typed, has none: no empty block, per this cycle's own explicit
+          requirement). Placed among the other trip-context facts, above
+          [proposal.statedPrice]/[proposal.statedEtaMinutes] below -- this
+          function is itself rendered before the price/ETA inputs in
+          `RequestCard` for an OPEN proposal (see that call site), so a
+          driver always reads this before naming a price, never after.
+          `strong`, like the "Водитель предлагает" price line elsewhere in
+          this file: this can be the one fact that decides whether the
+          driver can even take the ride (a child seat they don't have, a
+          pet, help boarding), not a passive detail to skim past. */}
+      {order?.notes && (
+        <Text role="body" strong>
+          Пожелания: {order.notes}
+        </Text>
+      )}
       {time && (
         <Text role="caption" tone="secondary">
           Заказ создан: {time}

@@ -40,6 +40,14 @@ package com.pios.ordermanagement.api
  * count (`DriverResponse.vehicleSeatCount`), whether a car fits a group —
  * a fact this response merely carries, never a comparison this module
  * performs (see [com.pios.ordermanagement.domain.Order]'s own KDoc).
+ *
+ * [notes] (Product Cycle: Passenger Ride Requirements) carries
+ * [com.pios.ordermanagement.domain.Order.notes] unchanged — nullable for
+ * the same reason [destination] is. This is what lets a driver, reading
+ * this same list before deciding on a price, see whatever the passenger
+ * stated about this specific ride (a child seat, extra luggage, a pet,
+ * help boarding, a meeting-point landmark) — a fact this response merely
+ * carries, exactly like [pickupAddress]/[destination].
  */
 data class OrderResponse(
     val id: String,
@@ -51,5 +59,6 @@ data class OrderResponse(
     val pickupAddress: String?,
     val requestedPickupAt: String? = null,
     val isTest: Boolean = false,
-    val passengerCount: Int? = null
+    val passengerCount: Int? = null,
+    val notes: String? = null
 )

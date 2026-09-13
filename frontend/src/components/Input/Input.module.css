@@ -29,6 +29,19 @@
   border-color: var(--pios-color-error);
 }
 
+/* Product Cycle (Passenger Ride Requirements): the one multi-line
+   override `Textarea` needs on top of `.control`'s own base styling --
+   min-height taller than a single 44px touch target (genuinely multi-line
+   text needs room to show more than one line at rest), vertical-only
+   resize (horizontal resize would let a phone-width card grow wider than
+   its own column), and the body font family since a bare <textarea>
+   defaults to the browser's monospace/system UI font, not this app's own. */
+.textarea {
+  min-height: calc(var(--pios-touch-target-min) * 2);
+  font-family: var(--pios-font-family);
+  resize: vertical;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .control {
     transition: none;

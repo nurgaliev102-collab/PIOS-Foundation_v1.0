@@ -466,6 +466,70 @@ describe('DriverHome', () => {
     expect(screen.queryByText(/Предварительный заказ/)).not.toBeInTheDocument()
   })
 
+  // --- Ride notes (Product Cycle: Passenger Ride Requirements) ---
+
+  it("shows the passenger's ride notes before the driver names a price", async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'OPEN', statedPrice: null, statedEtaMinutes: null },
+    ])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections (fired right after proposals, before it resolves)
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([
+      {
+        id: 'o1',
+        origin: 'passenger-1',
+        destination: 'Аэропорт Уфа',
+        passengerName: 'Аня',
+        createdAt: '2026-08-15T10:00:00Z',
+        pickupAddress: 'Агидель',
+        requestedPickupAt: null,
+        notes: 'Детское кресло, встретить у подъезда',
+      },
+    ]) // GET /v1/orders?ids=o1 (chained after proposals resolves -- ADR-060)
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
+    const notesText = await screen.findByText('Пожелания: Детское кресло, встретить у подъезда')
+    const priceField = screen.getByLabelText('Ваша цена')
+    // "до блока цены" (Product Cycle's own explicit requirement): the
+    // notes line's DOM position precedes the price input's, so a driver
+    // reading top-to-bottom sees it before deciding on a price.
+    expect(
+      notesText.compareDocumentPosition(priceField) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it('shows no ride-notes block when the order has none', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'OPEN', statedPrice: null, statedEtaMinutes: null },
+    ])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections (fired right after proposals, before it resolves)
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([
+      {
+        id: 'o1',
+        origin: 'passenger-1',
+        destination: 'Аэропорт Уфа',
+        passengerName: 'Аня',
+        createdAt: '2026-08-15T10:00:00Z',
+        pickupAddress: 'Агидель',
+        requestedPickupAt: null,
+        notes: null,
+      },
+    ]) // GET /v1/orders?ids=o1 (chained after proposals resolves -- ADR-060)
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
+    await screen.findByText('Куда: Аэропорт Уфа')
+    expect(screen.queryByText(/Пожелания/)).not.toBeInTheDocument()
+  })
+
   // --- Referral visibility (ADR-064): lifetime clients via the driver's own link ---
 
   it("shows the lifetime count of clients who connected through this driver's own link, not just today's", async () => {

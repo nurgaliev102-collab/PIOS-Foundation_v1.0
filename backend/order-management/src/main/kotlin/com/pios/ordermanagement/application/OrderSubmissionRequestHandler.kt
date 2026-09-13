@@ -36,6 +36,11 @@ import java.time.format.DateTimeParseException
  * the same optional, defaulting-to-`null`, appended-last shape for the same
  * backward-compatibility reason.
  *
+ * [notes] (Product Cycle: Passenger Ride Requirements) follows the same
+ * optional, defaulting-to-`null`, appended-last shape for the same
+ * backward-compatibility reason — see
+ * [com.pios.ordermanagement.domain.Order]'s own KDoc for its length bound.
+ *
  * This handler makes no call into any other module (ADR-027); its
  * compatibility with Passenger Experience's provider representation
  * (`OrderSubmissionRequestedPublisher`) is verified only from test code
@@ -53,7 +58,8 @@ class OrderSubmissionRequestHandler(
         requestedPickupAt: String? = null,
         isTest: Boolean = false,
         explicitDriverIntent: Boolean = false,
-        passengerCount: Int? = null
+        passengerCount: Int? = null,
+        notes: String? = null
     ): String {
         val submitted = orderLifecycleApplicationService.submitOrder(
             SubmitOrderCommand(
@@ -64,7 +70,8 @@ class OrderSubmissionRequestHandler(
                 requestedPickupAt = parseRequestedPickupAt(requestedPickupAt),
                 isTest = isTest,
                 explicitDriverIntent = explicitDriverIntent,
-                passengerCount = passengerCount
+                passengerCount = passengerCount,
+                notes = notes
             )
         )
         return submitted.order.id.value

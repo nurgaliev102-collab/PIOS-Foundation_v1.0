@@ -126,6 +126,26 @@ import java.util.UUID
  * decides" convention for dispatch (ADR-002, ADR-034). Set once, at
  * submission, and never changes for the rest of the order's lifecycle,
  * mirroring every other optional field's own immutability.
+ *
+ * [notes] (Product Cycle: Passenger Ride Requirements) is the passenger's
+ * own free-text statement of anything about this specific ride PIOS has no
+ * dedicated field for -- a child seat, extra luggage, a pet, help boarding,
+ * a meeting-point landmark, or anything else. Follows [pickupAddress]'s own
+ * precedent exactly: a plain, unvalidated `String?` (not a typed value
+ * object, since -- like [destination]/[pickupAddress] -- nothing in
+ * ratified documentation says anything about its shape), `null` meaning
+ * "nothing stated," never a default PIOS invents on the passenger's behalf.
+ * Unlike [destination]/[pickupAddress], this is genuinely open-ended text
+ * a passenger fully controls, so [submit] bounds only its *length*
+ * ([MAX_NOTES_LENGTH], see that constant's own KDoc) -- content itself is
+ * asserted nowhere, carried opaquely, exactly like every other passenger-
+ * supplied string on this aggregate. Never compared, matched, or acted on
+ * by any code in this module -- purely a fact carried through to whichever
+ * driver this order is proposed to, for a human to read and decide on, the
+ * same "no algorithm, human decides" convention [passengerCount] already
+ * establishes. Set once, at submission, and never changes for the rest of
+ * the order's lifecycle, mirroring every other optional field's own
+ * immutability.
  */
 class Order private constructor(
     val id: OrderId,
@@ -138,7 +158,8 @@ class Order private constructor(
     val requestedPickupAt: Instant?,
     val isTest: Boolean = false,
     val explicitDriverIntent: Boolean = false,
-    val passengerCount: Int? = null
+    val passengerCount: Int? = null,
+    val notes: String? = null
 ) {
     var status: OrderStatus = status
         private set
@@ -198,9 +219,13 @@ class Order private constructor(
             requestedPickupAt: Instant? = null,
             isTest: Boolean = false,
             explicitDriverIntent: Boolean = false,
-            passengerCount: Int? = null
+            passengerCount: Int? = null,
+            notes: String? = null
         ): SubmittedOrder {
             require(passengerCount == null || passengerCount > 0) { "passengerCount must be positive" }
+            require(notes == null || notes.length <= MAX_NOTES_LENGTH) {
+                "notes must be at most $MAX_NOTES_LENGTH characters"
+            }
             val order = Order(
                 id = OrderId(UUID.randomUUID().toString()),
                 status = OrderStatus.SUBMITTED,
@@ -212,7 +237,8 @@ class Order private constructor(
                 requestedPickupAt = requestedPickupAt,
                 isTest = isTest,
                 explicitDriverIntent = explicitDriverIntent,
-                passengerCount = passengerCount
+                passengerCount = passengerCount,
+                notes = notes
             )
             return SubmittedOrder(
                 order = order,
@@ -224,6 +250,22 @@ class Order private constructor(
                 )
             )
         }
+
+        /**
+         * The one bound Order Management asserts on [Order.notes] (see that
+         * property's own KDoc) — the caller-facing product requirement
+         * ("Пожелания к поездке," Product Cycle: Passenger Ride
+         * Requirements), enforced once, here, rather than only trusted from
+         * the frontend's own `maxLength`/truncation (RideRequest.tsx):
+         * nothing stops a caller other than that one screen from posting a
+         * longer value directly to `POST /v1/orders`. A value longer than
+         * this is rejected the same way an invalid [passengerCount] already
+         * is — [IllegalArgumentException], mapped by
+         * [com.pios.ordermanagement.api.OrderSubmissionController] to the
+         * same 400 every other invalid input on this contract already
+         * produces.
+         */
+        const val MAX_NOTES_LENGTH = 500
     }
 }
 

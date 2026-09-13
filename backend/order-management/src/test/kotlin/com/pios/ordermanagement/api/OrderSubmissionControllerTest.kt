@@ -183,6 +183,56 @@ class OrderSubmissionControllerTest {
         assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
     }
 
+    // --- Notes (Product Cycle: Passenger Ride Requirements) ---
+
+    @Test
+    fun `a request with notes persists them`() {
+        val response = controller.submitOrder(
+            SubmitOrderRequest("passenger-with-notes", notes = "Детское кресло, встретить у подъезда"),
+            authorization = passengerToken("passenger-with-notes")
+        )
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        val orderId = assertNotNull(response.body).orderId
+        assertEquals("Детское кресло, встретить у подъезда", repository.findById(OrderId(orderId))?.notes)
+    }
+
+    @Test
+    fun `a request without notes still succeeds -- regression for the existing contract`() {
+        val response = controller.submitOrder(
+            SubmitOrderRequest("passenger-no-notes"),
+            authorization = passengerToken("passenger-no-notes")
+        )
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        val orderId = assertNotNull(response.body).orderId
+        assertNull(repository.findById(OrderId(orderId))?.notes)
+    }
+
+    @Test
+    fun `a request with notes at exactly the length limit persists them`() {
+        val notes = "a".repeat(500)
+        val response = controller.submitOrder(
+            SubmitOrderRequest("passenger-notes-max-length", notes = notes),
+            authorization = passengerToken("passenger-notes-max-length")
+        )
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        val orderId = assertNotNull(response.body).orderId
+        assertEquals(500, repository.findById(OrderId(orderId))?.notes?.length)
+    }
+
+    @Test
+    fun `a request with notes longer than the length limit returns 400`() {
+        val tooLong = "a".repeat(501)
+        val response = controller.submitOrder(
+            SubmitOrderRequest("passenger-notes-too-long", notes = tooLong),
+            authorization = passengerToken("passenger-notes-too-long")
+        )
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
     // --- Requested pickup time (ADR-058, Scheduled Pickup Time) ---
 
     @Test

@@ -119,6 +119,28 @@ abstract class OrderRepositoryContractTest {
     }
 
     @Test
+    fun `a saved order's notes survive a round trip`() {
+        val repository = createRepository()
+        val submitted = Order.submit(contractOrigin, notes = "Детское кресло")
+
+        repository.save(submitted.order)
+        val reloaded = repository.findById(submitted.order.id)
+
+        assertEquals("Детское кресло", reloaded?.notes)
+    }
+
+    @Test
+    fun `a saved order without notes reloads with null notes`() {
+        val repository = createRepository()
+        val submitted = Order.submit(contractOrigin)
+
+        repository.save(submitted.order)
+        val reloaded = repository.findById(submitted.order.id)
+
+        assertNull(reloaded?.notes)
+    }
+
+    @Test
     fun `findAll includes every saved order`() {
         val repository = createRepository()
         val first = Order.submit(OrderOrigin("contract-test-findall-1"))

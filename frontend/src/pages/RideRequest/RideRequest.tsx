@@ -9,7 +9,7 @@ import { Heading } from '../../components/Heading'
 import { Text } from '../../components/Text'
 import { Card } from '../../components/Card'
 import { FormField } from '../../components/FormField'
-import { Input, Select } from '../../components/Input'
+import { Input, Select, Textarea } from '../../components/Input'
 import { Divider } from '../../components/Divider'
 import { DriverTrustIndicator } from '../../components/DriverTrustIndicator'
 import { RideStatus } from '../../components/RideStatus'
@@ -145,6 +145,16 @@ interface OrderListItem {
 // Driver Home's own order-list polling uses.
 const STATUS_POLL_INTERVAL_MS = 3000
 
+// Product Cycle (Passenger Ride Requirements): the one bound this screen
+// itself enforces on "Пожелания к поездке" -- matches Order.MAX_NOTES_LENGTH
+// (Order Management) exactly, so a value this form lets a passenger type
+// never gets silently rejected by the backend after submission. Enforced
+// twice, deliberately: the textarea's own `maxLength` stops most input at
+// the source, and [handleSubmit] truncates defensively before sending, in
+// case any caller bypasses the control itself (e.g. a pasted value some
+// browser does not truncate on paste).
+const NOTES_MAX_LENGTH = 500
+
 /**
  * The passenger-facing ride chain (ADR-040, Assignment Ride Lifecycle):
  * "Водитель принял заказ → Водитель прибыл → Поездка началась → Поездка
@@ -271,6 +281,18 @@ function rideStatusLabel(status: PassengerRideStatus): string {
  * kept as a known gap; the API and data model are unchanged, only what
  * this screen renders.
  *
+ * Product Cycle (Passenger Ride Requirements) reintroduces a "Пожелания к
+ * поездке" field under the same local variable name ([notes]) the removed
+ * one above used — deliberately not the same mistake twice: Order
+ * Management's own contract now genuinely accepts and persists `notes`
+ * (`SubmitOrderRequest.kt`/`Order.kt`/`PostgreSQLOrderRepository.kt`, a new
+ * `notes` column via `V13__add_order_notes.sql`), and it is read back by
+ * `DriverHome.tsx`'s own `GET /v1/orders?ids=` the exact same way
+ * `pickupAddress`/`destination`/`passengerCount` already are, rendered in
+ * `ProposalDetails` before a driver names a price. Bounded to
+ * `NOTES_MAX_LENGTH` (500) both here and, independently, in
+ * `Order.MAX_NOTES_LENGTH` on the backend.
+ *
  * Submission is guarded against double-clicks
  * (`isSubmitting`): Order Management's own docs flag Submit Order as not
  * idempotent, so a duplicate request could create a duplicate order.
@@ -373,6 +395,16 @@ export function RideRequest() {
   // driver/Coordinator can see it next to a group's own request.
   const [passengerCount, setPassengerCount] = useState('')
   const [passengerCountError, setPassengerCountError] = useState<string | null>(null)
+  // Product Cycle (Passenger Ride Requirements): "Пожелания к поездке" --
+  // free text a passenger controls, kept in plain component state only
+  // (no `localCurrentOrder.ts`/localStorage entry, unlike `orderId` itself)
+  // so it never resumes across a page reload or a repeat order the way
+  // that file's own per-driver order id does; it behaves exactly like the
+  // pre-existing `pickupAddress`/`destination` fields, which
+  // [handleOrderAgain] already leaves untouched for the same reason (a
+  // passenger reordering the same trip should not have to retype
+  // everything, but nothing here is persisted beyond this one page visit).
+  const [notes, setNotes] = useState('')
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [orderId, setOrderId] = useState<string | null>(null)
@@ -717,6 +749,10 @@ export function RideRequest() {
     }
   }
 
+  function handleNotesChange(value: string) {
+    setNotes(value)
+  }
+
   async function handleSubmit() {
     if (isSubmitting) {
       return
@@ -761,6 +797,13 @@ export function RideRequest() {
       }
       requestedPickupAt = parsed.toISOString()
     }
+    // Product Cycle (Passenger Ride Requirements): trimmed and defensively
+    // truncated (see [NOTES_MAX_LENGTH]'s own KDoc) -- omitted from the
+    // payload entirely when blank, same optional-field convention
+    // [parsedPassengerCount] just above already establishes, rather than
+    // sending an empty string Order Management would have to treat as
+    // "notes: ''" vs "no notes at all."
+    const trimmedNotes = notes.trim().slice(0, NOTES_MAX_LENGTH)
 
     setSubmitError(null)
     setIsSubmitting(true)
@@ -784,6 +827,7 @@ export function RideRequest() {
           passengerName,
           ...(requestedPickupAt ? { requestedPickupAt } : {}),
           ...(parsedPassengerCount ? { passengerCount: parsedPassengerCount } : {}),
+          ...(trimmedNotes ? { notes: trimmedNotes } : {}),
           // Task 17 (First Refusal Explicit Driver Intent Integration):
           // every order this screen ever creates is already tied to one
           // specific, already-known driver -- `driverCode`, taken verbatim
@@ -1377,6 +1421,25 @@ export function RideRequest() {
                 />
               </FormField>
             )}
+
+            {/* Product Cycle (Passenger Ride Requirements): optional, free
+                text -- a child seat, extra luggage, a pet, help boarding, a
+                meeting-point landmark, or anything else this form has no
+                dedicated field for. Placed last among the structured trip
+                fields, right before submission: everything else on this
+                form is a specific fact (address, count, timing) the driver
+                needs to plan the trip at all; this is supplementary context
+                for a driver already deciding on a price. */}
+            <FormField label="Пожелания к поездке" htmlFor="notes">
+              <Textarea
+                id="notes"
+                value={notes}
+                maxLength={NOTES_MAX_LENGTH}
+                rows={3}
+                placeholder="Например: детское кресло, много багажа, встретить у подъезда…"
+                onChange={(event) => handleNotesChange(event.target.value)}
+              />
+            </FormField>
 
             {submitError && <StatusMessage tone="error">{submitError}</StatusMessage>}
 

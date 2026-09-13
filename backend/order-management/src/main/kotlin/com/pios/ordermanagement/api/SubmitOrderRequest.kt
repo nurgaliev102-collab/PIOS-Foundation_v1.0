@@ -53,6 +53,17 @@ package com.pios.ordermanagement.api
  * value surfaces as the domain's own [IllegalArgumentException], mapped
  * by [OrderSubmissionController] to the same 400 every other invalid
  * input on this contract already produces.
+ *
+ * [notes] (Product Cycle: Passenger Ride Requirements) follows the same
+ * optional, defaulting-to-`null` shape — the passenger's own free-text
+ * statement of anything about this specific ride PIOS has no dedicated
+ * field for (a child seat, extra luggage, a pet, help boarding, a
+ * meeting-point landmark). See
+ * [com.pios.ordermanagement.domain.Order]'s own KDoc for why this is a
+ * plain, unvalidated `String?` rather than a typed value, and for its one
+ * bound: a value longer than [com.pios.ordermanagement.domain.Order.MAX_NOTES_LENGTH]
+ * surfaces as the domain's own [IllegalArgumentException], mapped the
+ * same way [passengerCount]'s own invalid value already is.
  */
 data class SubmitOrderRequest(
     val passengerReference: String,
@@ -62,5 +73,6 @@ data class SubmitOrderRequest(
     val requestedPickupAt: String? = null,
     val isTest: Boolean = false,
     val explicitDriverIntent: Boolean = false,
-    val passengerCount: Int? = null
+    val passengerCount: Int? = null,
+    val notes: String? = null
 )
