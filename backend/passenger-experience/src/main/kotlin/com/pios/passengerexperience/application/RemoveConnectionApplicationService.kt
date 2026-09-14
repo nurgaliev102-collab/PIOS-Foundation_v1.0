@@ -2,6 +2,7 @@ package com.pios.passengerexperience.application
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.passengerexperience.domain.ConnectionId
+import com.pios.passengerexperience.domain.ConnectionRemoved
 import com.pios.passengerexperience.domain.PrimaryConnectionCleared
 import org.springframework.stereotype.Service
 import java.util.UUID
@@ -34,6 +35,17 @@ import java.util.UUID
  * primary (no event, exactly as before this task). Removing an unknown
  * [connectionId] still succeeds silently with no event, preserving the
  * pre-existing idempotent-DELETE contract exactly.
+ *
+ * ## Event publication (ADR-068, Relationship-Ordered Fallback Dispatch —
+ * Trusted → Network → Open Marketplace, Part 1)
+ *
+ * [handle] also publishes [ConnectionRemoved] whenever an existing
+ * [connectionId] is actually deleted -- **unconditionally**, regardless of
+ * [wasPrimary], unlike [PrimaryConnectionCleared] which fires only for the
+ * primary-connection case. A passenger's trusted circle (Dispatch's own
+ * `TrustedDriverRecord` projection) needs to learn of every removal, not
+ * only a primary-driver change. Removing an unknown [connectionId]
+ * publishes neither event, exactly as before.
  */
 @Service
 class RemoveConnectionApplicationService(
@@ -50,6 +62,14 @@ class RemoveConnectionApplicationService(
 
         connectionRepository.deleteById(connectionId)
 
+        if (connection != null) {
+            val removed = ConnectionRemoved(
+                passengerReference = connection.passengerReference,
+                driverId = connection.driverId
+            )
+            outboxRepository.save(outboxRecordFor(connection.passengerReference.passengerId, removed))
+        }
+
         if (wasPrimary && connection != null) {
             val event = PrimaryConnectionCleared(passengerReference = connection.passengerReference)
             outboxRepository.save(outboxRecordFor(connection.passengerReference.passengerId, event))
@@ -64,6 +84,20 @@ class RemoveConnectionApplicationService(
             eventType = "PrimaryConnectionCleared",
             occurredAt = event.occurredAt.toString(),
             payload = mapOf("passengerReference" to event.passengerReference.passengerId)
+        )
+    )
+
+    private fun outboxRecordFor(aggregateId: String, event: ConnectionRemoved): OutboxRecord = OutboxRecord(
+        aggregateId = aggregateId,
+        eventType = "ConnectionRemoved",
+        routingKey = "connection.removed",
+        payload = envelopeFor(
+            eventType = "ConnectionRemoved",
+            occurredAt = event.occurredAt.toString(),
+            payload = mapOf(
+                "passengerReference" to event.passengerReference.passengerId,
+                "driverId" to event.driverId.driverId
+            )
         )
     )
 

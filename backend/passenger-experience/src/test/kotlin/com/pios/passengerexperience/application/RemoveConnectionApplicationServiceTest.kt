@@ -17,6 +17,10 @@ import kotlin.test.assertTrue
  * publishes the correct event -- and only when the removed connection was
  * actually the passenger's own primary, never otherwise. Also proves the
  * pre-existing idempotent-DELETE behavior (ADR-054) is unaffected.
+ *
+ * Extended by ADR-068 (Relationship-Ordered Fallback Dispatch): every
+ * actual removal, primary or not, now also publishes [ConnectionRemoved]
+ * -- see the tests below updated/added for that behavior.
  */
 class RemoveConnectionApplicationServiceTest {
 
@@ -52,10 +56,27 @@ class RemoveConnectionApplicationServiceTest {
 
         service.handle(primary.id)
 
-        val record = outboxRepository.records.single()
+        // ADR-068: removing the primary now also publishes ConnectionRemoved
+        // first, so PrimaryConnectionCleared is the second, not the only, record.
+        assertEquals(2, outboxRepository.records.size)
+        val record = outboxRepository.records.last()
         assertEquals("PrimaryConnectionCleared", record.eventType)
         assertEquals("primary.connection.cleared", record.routingKey)
         assertTrue(record.payload.contains("\"passengerReference\":\"passenger-1\""))
+    }
+
+    @Test
+    fun `removing the passenger's primary connection also publishes a ConnectionRemoved outbox record`() {
+        connectionRepository.save(primary)
+        setPrimaryService.handle(primary.id)
+
+        service.handle(primary.id)
+
+        val record = outboxRepository.records.first()
+        assertEquals("ConnectionRemoved", record.eventType)
+        assertEquals("connection.removed", record.routingKey)
+        assertTrue(record.payload.contains("\"passengerReference\":\"passenger-1\""))
+        assertTrue(record.payload.contains("\"driverId\":\"driver-1\""))
     }
 
     @Test
@@ -69,25 +90,40 @@ class RemoveConnectionApplicationServiceTest {
     }
 
     @Test
-    fun `removing a non-primary connection publishes no event at all`() {
+    fun `removing a non-primary connection publishes no PrimaryConnectionCleared event, exactly as before`() {
         connectionRepository.save(primary)
         connectionRepository.save(nonPrimary)
         setPrimaryService.handle(primary.id)
 
         service.handle(nonPrimary.id)
 
-        assertEquals(emptyList(), outboxRepository.records)
+        assertTrue(outboxRepository.records.none { it.eventType == "PrimaryConnectionCleared" })
         // Unaffected -- the real primary is untouched.
         assertEquals(primary.id, primaryConnectionRepository.findByPassenger(primary.passengerReference))
     }
 
     @Test
-    fun `removing a connection when the passenger never had any primary publishes no event, exactly as before`() {
+    fun `removing a non-primary connection still publishes ConnectionRemoved (ADR-068)`() {
+        connectionRepository.save(primary)
+        connectionRepository.save(nonPrimary)
+        setPrimaryService.handle(primary.id)
+
+        service.handle(nonPrimary.id)
+
+        val record = outboxRepository.records.single()
+        assertEquals("ConnectionRemoved", record.eventType)
+        assertEquals("connection.removed", record.routingKey)
+        assertTrue(record.payload.contains("\"passengerReference\":\"passenger-1\""))
+        assertTrue(record.payload.contains("\"driverId\":\"driver-2\""))
+    }
+
+    @Test
+    fun `removing a connection when the passenger never had any primary publishes no PrimaryConnectionCleared event, exactly as before`() {
         connectionRepository.save(nonPrimary)
 
         service.handle(nonPrimary.id)
 
-        assertEquals(emptyList(), outboxRepository.records)
+        assertTrue(outboxRepository.records.none { it.eventType == "PrimaryConnectionCleared" })
     }
 
     @Test

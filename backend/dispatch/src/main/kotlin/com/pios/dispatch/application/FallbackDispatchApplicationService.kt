@@ -32,14 +32,41 @@ import org.springframework.stereotype.Service
  * instead of one, for no benefit — the caller ([OrderSubmittedFirstRefusalListener],
  * unchanged apart from one new call) already sequences them.
  *
- * ## Driver selection (Product Owner instruction, FR-003A)
+ * ## Driver selection (Product Owner instruction, FR-003A; extended by
+ * ADR-068, Relationship-Ordered Fallback Dispatch — Trusted → Open only)
  *
- * The single available driver whose local availability record has stood
- * `available = true` the longest ([DriverAvailabilityRepository.findLongestIdleAvailable]) —
- * deliberately not geographic, not rated, not weighted: exactly the "not
- * complex matching" boundary FR-003A's own scope draws. No driver currently
- * available at all is not an error — [FallbackDispatchOutcome.NoAvailableDriver],
+ * ADR-068 Part 2 states the algorithm exactly: tiers are evaluated
+ * strictly in order, stopping at the first that yields a driver.
+ *
+ * - **Tier 1 (Trusted).** Among [passengerReference]'s trusted drivers
+ *   (Dispatch's own local [TrustedDriverRepository] projection, fed by
+ *   Passenger Experience's `ConnectionEstablished`/`ConnectionRemoved`),
+ *   excluding [excludeDrivers], the one whose availability record has
+ *   stood `available = true` the longest
+ *   ([TrustedDriverRepository.findLongestIdleTrustedAvailable]) — the
+ *   identical tie-break Tier 3 already uses, applied to a narrower
+ *   candidate set. No new comparison between drivers is introduced (ADR-068
+ *   Part 2, property 1).
+ * - **Tier 2 (Network) is not implemented.** ADR-068 Part 3: no candidate
+ *   set is computable from any data PIOS holds today; this tier is skipped
+ *   entirely, never guessed at.
+ * - **Tier 3 (Open Marketplace), unchanged.** The single available driver
+ *   whose local availability record has stood `available = true` the
+ *   longest platform-wide
+ *   ([DriverAvailabilityRepository.findLongestIdleAvailable]) —
+ *   deliberately not geographic, not rated, not weighted: exactly the "not
+ *   complex matching" boundary FR-003A's own scope draws.
+ *
+ * No driver in any tier is not an error — [FallbackDispatchOutcome.NoAvailableDriver],
  * mirroring how [FirstRefusalOutcome.NoPrimaryDriver] is not an error either.
+ *
+ * [trustedDriverRepository] defaults to `null` so every existing caller and
+ * test that constructs this service with only its original two
+ * constructor arguments continues to compile and behave exactly as
+ * before ADR-068 — a `null` repository means "no Tier 1 candidate is ever
+ * found," which degrades this service to its pre-ADR-068 Tier-3-only
+ * behavior, exactly the "stale/absent projection degrades to today's
+ * behavior" guarantee ADR-068 Part 1 requires.
  *
  * ## No retry on decline/lapse (FR-003A's own scope boundary)
  *
@@ -63,7 +90,8 @@ import org.springframework.stereotype.Service
 @Service
 class FallbackDispatchApplicationService(
     private val driverAvailabilityRepository: DriverAvailabilityRepository,
-    private val proposalApplicationService: ProposalApplicationService
+    private val proposalApplicationService: ProposalApplicationService,
+    private val trustedDriverRepository: TrustedDriverRepository? = null
 ) {
 
     /**
@@ -85,6 +113,13 @@ class FallbackDispatchApplicationService(
      * `available = true`. Defaults to empty for the immediate,
      * no-primary-was-ever-proposed-to path, where no driver has yet said
      * no to this particular order.
+     *
+     * ADR-068 Part 2, property 2: [excludeDrivers] applies identically to
+     * every tier, including Tier 1 -- a primary driver who just declined
+     * or lapsed is, by definition, also a member of the passenger's own
+     * trusted circle (ADR-054 Part 2's composite foreign key), so without
+     * this exclusion reaching Tier 1, that same driver would be the
+     * *first* candidate re-selected.
      */
     fun attempt(
         order: OrderReference,
@@ -92,7 +127,9 @@ class FallbackDispatchApplicationService(
         isTest: Boolean = false,
         excludeDrivers: Set<DriverReference> = emptySet()
     ): FallbackDispatchOutcome {
-        val driver = driverAvailabilityRepository.findLongestIdleAvailable(excludeDrivers)
+        val trustedDriver = trustedDriverRepository?.findLongestIdleTrustedAvailable(passengerReference, excludeDrivers)
+        val driver = trustedDriver
+            ?: driverAvailabilityRepository.findLongestIdleAvailable(excludeDrivers)
             ?: return FallbackDispatchOutcome.NoAvailableDriver
 
         return try {

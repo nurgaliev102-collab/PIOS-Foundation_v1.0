@@ -140,3 +140,165 @@ class FallbackDispatchApplicationServiceTest {
         assertEquals(true, outcome.proposal.isTest)
     }
 }
+
+/**
+ * ADR-068 (Relationship-Ordered Fallback Dispatch — Trusted → Network →
+ * Open Marketplace), Part 2: Tier 1 (Trusted) selection, and its
+ * fall-through to the existing, unchanged Tier 3 (Open Marketplace) query
+ * when Tier 1 yields nothing. A separate class from
+ * [FallbackDispatchApplicationServiceTest] so the pre-existing,
+ * `trustedDriverRepository`-absent behavior above stays proven completely
+ * unaffected by this ADR (that class's own `service` is still constructed
+ * with only its original two constructor arguments), while this class
+ * exercises the new three-argument constructor explicitly.
+ */
+class FallbackDispatchApplicationServiceTrustedTierTest {
+
+    /**
+     * Identical fake to [FallbackDispatchApplicationServiceTest]'s own
+     * private `InMemoryDriverAvailabilityRepository`, plus an
+     * [orderedAvailableDrivers] accessor [FakeTrustedDriverRepository]
+     * needs -- duplicated here rather than shared, since the original is
+     * `private` to its own test class, mirroring this codebase's own
+     * per-test-class fake convention (no shared test-fixture module
+     * exists for this).
+     */
+    private class InMemoryDriverAvailabilityRepository : DriverAvailabilityRepository {
+        private val recordsInOrder = mutableListOf<DriverAvailabilityRecord>()
+
+        override fun markProcessed(eventId: String): Boolean = throw UnsupportedOperationException("not used by this test")
+
+        override fun upsert(record: DriverAvailabilityRecord) {
+            recordsInOrder.removeAll { it.driverReference == record.driverReference }
+            recordsInOrder.add(record)
+        }
+
+        override fun findByDriverReference(driverReference: DriverReference): DriverAvailabilityRecord? =
+            recordsInOrder.lastOrNull { it.driverReference == driverReference }
+
+        override fun findLongestIdleAvailable(excluding: Set<DriverReference>): DriverReference? =
+            recordsInOrder.firstOrNull { it.available && it.driverReference !in excluding }?.driverReference
+
+        fun orderedAvailableDrivers(): List<DriverReference> =
+            recordsInOrder.filter { it.available }.map { it.driverReference }
+    }
+
+    private class FakeTrustedDriverRepository(
+        private val driverAvailabilityRepository: InMemoryDriverAvailabilityRepository
+    ) : TrustedDriverRepository {
+        private val trustedPairs = mutableSetOf<Pair<PassengerReference, DriverReference>>()
+
+        override fun markProcessed(eventId: String): Boolean = throw UnsupportedOperationException("not used by this test")
+
+        override fun add(record: TrustedDriverRecord) {
+            trustedPairs.add(record.passengerReference to record.driverId)
+        }
+
+        override fun remove(passengerReference: PassengerReference, driverId: DriverReference) {
+            trustedPairs.remove(passengerReference to driverId)
+        }
+
+        override fun findLongestIdleTrustedAvailable(
+            passengerReference: PassengerReference,
+            excluding: Set<DriverReference>
+        ): DriverReference? =
+            driverAvailabilityRepository.orderedAvailableDrivers()
+                .firstOrNull { (passengerReference to it) in trustedPairs && it !in excluding }
+    }
+
+    private val proposalRepository = InMemoryProposalRepository()
+    private val driverAvailabilityRepository = InMemoryDriverAvailabilityRepository()
+    private val trustedDriverRepository = FakeTrustedDriverRepository(driverAvailabilityRepository)
+    private val proposalApplicationService = ProposalApplicationService(
+        proposalRepository,
+        driverAvailabilityRepository = driverAvailabilityRepository
+    )
+    private val service = FallbackDispatchApplicationService(
+        driverAvailabilityRepository,
+        proposalApplicationService,
+        trustedDriverRepository
+    )
+
+    private val order = OrderReference("order-1")
+    private val passenger = PassengerReference("passenger-1")
+
+    @Test
+    fun `a trusted driver is selected over a stranger, even one who has been idle longer`() {
+        val stranger = DriverReference("driver-stranger")
+        val trusted = DriverReference("driver-trusted")
+        // The stranger is recorded available first, so by Tier 3's own
+        // longest-idle rule alone they would win -- proving Tier 1 takes
+        // priority is exactly what this test is for.
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(stranger, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(trusted, available = true))
+        trustedDriverRepository.add(TrustedDriverRecord(passenger, trusted))
+
+        val outcome = service.attempt(order, passenger)
+
+        val proposed = assertIs<FallbackDispatchOutcome.Proposed>(outcome)
+        assertEquals(trusted, proposed.proposal.driver)
+    }
+
+    @Test
+    fun `no trusted driver falls through to the existing longest-idle-available query unchanged`() {
+        val stranger = DriverReference("driver-stranger")
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(stranger, available = true))
+        // No TrustedDriverRecord for this passenger at all -- Tier 1 is
+        // empty, and Tier 3's own existing query must still run and
+        // select the only available driver, exactly as it did before
+        // ADR-068.
+        val outcome = service.attempt(order, passenger)
+
+        val proposed = assertIs<FallbackDispatchOutcome.Proposed>(outcome)
+        assertEquals(stranger, proposed.proposal.driver)
+    }
+
+    @Test
+    fun `a trusted driver who is not currently available also falls through to Tier 3, unchanged`() {
+        val unavailableTrusted = DriverReference("driver-trusted-offline")
+        val availableStranger = DriverReference("driver-stranger")
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(unavailableTrusted, available = false))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(availableStranger, available = true))
+        trustedDriverRepository.add(TrustedDriverRecord(passenger, unavailableTrusted))
+
+        val outcome = service.attempt(order, passenger)
+
+        val proposed = assertIs<FallbackDispatchOutcome.Proposed>(outcome)
+        assertEquals(availableStranger, proposed.proposal.driver)
+    }
+
+    @Test
+    fun `the primary driver who just declined is excluded from Tier 1, even though they are also in the trusted set`() {
+        // The primary driver is, by ADR-054 Part 2's own composite foreign
+        // key, always a member of the passenger's own trusted circle too
+        // -- this is exactly the ADR-068 Part 2, property 2 scenario:
+        // without excludeDrivers reaching Tier 1, the just-declined
+        // primary driver would be re-selected as their own trusted-circle
+        // fallback.
+        val primaryDriver = DriverReference("driver-primary")
+        val otherTrustedDriver = DriverReference("driver-other-trusted")
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(otherTrustedDriver, available = true))
+        trustedDriverRepository.add(TrustedDriverRecord(passenger, primaryDriver))
+        trustedDriverRepository.add(TrustedDriverRecord(passenger, otherTrustedDriver))
+
+        val outcome = service.attempt(order, passenger, excludeDrivers = setOf(primaryDriver))
+
+        val proposed = assertIs<FallbackDispatchOutcome.Proposed>(outcome)
+        assertEquals(otherTrustedDriver, proposed.proposal.driver)
+    }
+
+    @Test
+    fun `the primary driver who just declined, with no other trusted driver available, falls through to Tier 3`() {
+        val primaryDriver = DriverReference("driver-primary")
+        val stranger = DriverReference("driver-stranger")
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(stranger, available = true))
+        trustedDriverRepository.add(TrustedDriverRecord(passenger, primaryDriver))
+
+        val outcome = service.attempt(order, passenger, excludeDrivers = setOf(primaryDriver))
+
+        val proposed = assertIs<FallbackDispatchOutcome.Proposed>(outcome)
+        assertEquals(stranger, proposed.proposal.driver)
+    }
+}

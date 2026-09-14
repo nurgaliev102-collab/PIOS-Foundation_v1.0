@@ -35,3 +35,37 @@ class CreateConnectionApplicationServiceTest {
         assertEquals(1, handler.handle(DriverReference("artur")).size)
     }
 }
+
+/**
+ * ADR-068 (Relationship-Ordered Fallback Dispatch, Part 1): Create
+ * Connection now publishes [com.pios.passengerexperience.domain.ConnectionEstablished]
+ * -- but only on an actual creation, never on the idempotent
+ * already-exists path. A separate class, mirroring
+ * [SetPrimaryConnectionApplicationServiceTest]'s own convention of keeping
+ * event-publication assertions apart from the pre-existing behavioral
+ * tests above.
+ */
+class CreateConnectionApplicationServiceEventPublicationTest {
+    private val repository = InMemoryConnectionRepository()
+    private val outboxRepository = RecordingOutboxRepository()
+    private val service = CreateConnectionApplicationService(repository, outboxRepository = outboxRepository)
+
+    @Test
+    fun `creating a new connection publishes a ConnectionEstablished outbox record`() {
+        service.handle(CreateConnectionCommand(DriverReference("artur"), PassengerReference("regina")))
+
+        val record = outboxRepository.records.single()
+        assertEquals("ConnectionEstablished", record.eventType)
+        assertEquals("connection.established", record.routingKey)
+        assertTrue(record.payload.contains("\"passengerReference\":\"regina\""))
+        assertTrue(record.payload.contains("\"driverId\":\"artur\""))
+    }
+
+    @Test
+    fun `opening the same invitation link twice publishes only one ConnectionEstablished event`() {
+        service.handle(CreateConnectionCommand(DriverReference("artur"), PassengerReference("regina")))
+        service.handle(CreateConnectionCommand(DriverReference("artur"), PassengerReference("regina")))
+
+        assertEquals(1, outboxRepository.records.size)
+    }
+}
