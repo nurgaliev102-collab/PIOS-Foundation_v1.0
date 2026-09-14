@@ -17,6 +17,7 @@ import { FormField } from '../../components/FormField'
 import { Input, Select, Textarea } from '../../components/Input'
 import { StatusMessage } from '../../components/StatusMessage'
 import { MessageBubble } from '../../components/MessageBubble'
+import { RideHistoryCard } from '../../components/RideHistoryCard'
 import { ApiError, request, resolveBackendBaseUrl } from '../../api/apiClient'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
 import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
@@ -273,6 +274,42 @@ function formatOrderTime(createdAt: string | null): string | null {
     return null
   }
   return parsed.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+}
+
+/**
+ * History (MVP completion): renders a completed ride's own real "when" --
+ * the Assignment/Trip's own `statusChangedAt` at the moment it reached
+ * COMPLETED (falls back to the order's own `createdAt` only if that is
+ * somehow absent, which should not happen for a ride that reached this
+ * state). Same `toLocaleString('ru-RU', ...)` shape as
+ * [formatRequestedPickupAt] immediately below -- one date/time convention
+ * for this whole screen, not a second one invented for this list.
+ */
+function formatHistoryDateTime(instant: string | null): string | null {
+  if (!instant) {
+    return null
+  }
+  const parsed = new Date(instant)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+  return parsed.toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+}
+
+/**
+ * History (MVP completion): "Откуда → Куда", either side present or not --
+ * an order submitted before Sprint H5 (pickupAddress) or with no
+ * destination typed has neither, in which case this returns `null` (no
+ * fabricated route text) rather than an empty arrow.
+ */
+function formatHistoryRoute(order: OrderListItem | undefined): string | null {
+  if (!order) {
+    return null
+  }
+  if (order.pickupAddress && order.destination) {
+    return `${order.pickupAddress} → ${order.destination}`
+  }
+  return order.pickupAddress ?? order.destination ?? null
 }
 
 /**
@@ -1542,6 +1579,25 @@ export function DriverHome() {
   // own item 5. No history screen exists yet to move it to; it simply
   // stops appearing here.
   const visibleProposals = proposals.filter((p) => assignments[p.orderId]?.status !== 'COMPLETED')
+  /**
+   * History (MVP completion, §1): the exact inverse of [visibleProposals]
+   * above -- reuses the same already-loaded [proposals]/[assignments]
+   * state (`loadProposals`/`loadAssignments`, no new request, no new
+   * model), rather than the ride simply vanishing with nowhere to go
+   * (ADR-040's own "экран освобождается", previously a genuine dead end
+   * here). Newest first, matching every other list on this screen's own
+   * convention (most-recent-first is never re-derived per list). A
+   * proposal never reaches `ACCEPTED` without a `statedPrice` (ADR-042,
+   * mandatory) and [assignments] only ever holds a real fetched
+   * Assignment, so every entry here has both a real price and a real
+   * Assignment to read a completion time from.
+   */
+  const completedRides = proposals
+    .filter((p) => p.status === 'ACCEPTED' && assignments[p.orderId]?.status === 'COMPLETED')
+    .sort(
+      (a, b) =>
+        (assignments[b.orderId]?.statusChangedAt ?? '').localeCompare(assignments[a.orderId]?.statusChangedAt ?? '')
+    )
   // Product owner request, 2026-09-07 (business tabs): a badge on the
   // "Маршруты" tab so a driver on "Обзор"/"Клиенты" still notices a ride
   // waiting on them -- OPEN (needs Accept/Decline) or ACCEPTED (needs
@@ -2033,19 +2089,53 @@ export function DriverHome() {
             )}
 
             {activeBusinessTab === 'routes' && (
-            /* No separate route-history data source exists yet -- a
-                completed ride already stops appearing in "Ваши заказы"
-                above (ADR-040's own "экран освобождается") with nowhere
-                else it goes today. Honest placeholder, not a duplicate of
-                the list above: same "disclosed gap" convention this file
-                already uses elsewhere rather than fabricating a history
-                view the data cannot support. */
+            /**
+             * History (MVP completion, §1): real completed rides, built
+             * from [completedRides] above -- the same [proposals]/
+             * [assignments]/[orderDetails] state this screen already loads
+             * for the active-work list, never a second, parallel fetch or
+             * model. Shares [proposalsStatus] for loading/error exactly:
+             * [completedRides] is derived from the same request that state
+             * already tracks, so a second, independent loading/error state
+             * for the identical underlying data would only be able to
+             * drift from it, never add real information.
+             */
             <section className={styles.growthCard} role="tabpanel">
-              <p className={styles.growthTitle}>Маршруты</p>
-              <p className={styles.hint}>
-                История поездок появится здесь позже. Заказы, которые ждут вашего ответа или уже приняты — в разделе
-                «Ваши заказы» выше.
-              </p>
+              <p className={styles.growthTitle}>История поездок</p>
+              {proposalsStatus === 'loading' && <Spinner label="Загружаем историю…" />}
+              {proposalsStatus === 'error' && (
+                <div className={styles.errorBlock}>
+                  <p className={styles.error}>Не удалось загрузить историю. Проверьте соединение.</p>
+                  <Button
+                    label="Повторить"
+                    variant="secondary"
+                    onClick={() => loadProposals(true, identity.driverId!, identity.token)}
+                  />
+                </div>
+              )}
+              {proposalsStatus === 'ready' && completedRides.length === 0 && (
+                <p className={styles.hint}>
+                  Здесь появятся ваши завершённые поездки. Заказы, которые ждут вашего ответа или уже приняты — в
+                  разделе «Ваши заказы» выше.
+                </p>
+              )}
+              {proposalsStatus === 'ready' && completedRides.length > 0 && (
+                <div className={styles.historyList}>
+                  {completedRides.map((proposal) => {
+                    const order = orderDetails[proposal.orderId]
+                    const assignment = assignments[proposal.orderId]
+                    return (
+                      <RideHistoryCard
+                        key={proposal.proposalId}
+                        dateTime={formatHistoryDateTime(assignment?.statusChangedAt ?? null)}
+                        route={formatHistoryRoute(order)}
+                        counterpart={order?.passengerName?.trim() || 'Пассажир'}
+                        price={proposal.statedPrice}
+                      />
+                    )
+                  })}
+                </div>
+              )}
             </section>
             )}
           </>

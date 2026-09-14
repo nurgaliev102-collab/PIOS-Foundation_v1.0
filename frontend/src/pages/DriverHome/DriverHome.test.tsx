@@ -640,6 +640,83 @@ describe('DriverHome', () => {
     expect(await screen.findByText('Пассажир: Для второго заказа')).toBeInTheDocument()
   })
 
+  // --- History (MVP completion, §1): "Маршруты" tab, real completed rides ---
+
+  it('shows a completed ride in the История tab, built from already-loaded proposal/order/assignment data', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'ACCEPTED', statedPrice: '450', statedEtaMinutes: 5 },
+    ])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 1, currentStreakWeeks: 1 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([
+      { assignmentId: 'a1', orderId: 'o1', driverId: 'driver-1', status: 'COMPLETED', statusChangedAt: '2026-09-14T12:30:00Z' },
+    ]) // GET /v1/assignments?orderId=o1 -- loadAssignments fires before loadOrderDetails/loadMessages
+    mockedRequest.mockResolvedValueOnce([
+      {
+        id: 'o1',
+        origin: 'passenger-1',
+        destination: 'ул. Ленина, 10',
+        passengerName: 'Мария',
+        createdAt: '2026-09-14T12:00:00Z',
+        pickupAddress: 'ул. Пушкина, 5',
+        requestedPickupAt: null,
+      },
+    ]) // GET /v1/orders?ids=o1
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals/p1/messages
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Бизнес' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Маршруты' }))
+
+    expect(await screen.findByText('Мария')).toBeInTheDocument()
+    expect(screen.getByText('ул. Пушкина, 5 → ул. Ленина, 10')).toBeInTheDocument()
+    expect(screen.getByText('450')).toBeInTheDocument()
+    expect(screen.getByText('Завершена')).toBeInTheDocument()
+    // The completed ride must not also still show in "Ваши заказы" (Работа) --
+    // ADR-040's own "экран освобождается" is unchanged by this feature.
+    await userEvent.click(await screen.findByRole('tab', { name: 'Главное' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
+    expect(screen.getByText(/Пока нет заказов\./)).toBeInTheDocument()
+  })
+
+  it('shows an honest empty state in История when nothing has been completed yet', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([]) // no proposals at all
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 })
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Бизнес' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Маршруты' }))
+
+    expect(await screen.findByText(/Здесь появятся ваши завершённые поездки/)).toBeInTheDocument()
+  })
+
+  it('shows an error state in История with a working retry when the underlying request fails', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockRejectedValueOnce(new Error('network error'))
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 })
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Бизнес' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Маршруты' }))
+
+    expect(await screen.findByText('Не удалось загрузить историю. Проверьте соединение.')).toBeInTheDocument()
+
+    mockedRequest.mockResolvedValueOnce([]) // retry succeeds with nothing yet
+    await userEvent.click(screen.getByRole('button', { name: 'Повторить' }))
+
+    expect(await screen.findByText(/Здесь появятся ваши завершённые поездки/)).toBeInTheDocument()
+  })
+
   // --- Referral visibility (ADR-064): lifetime clients via the driver's own link ---
 
   it("shows the lifetime count of clients who connected through this driver's own link, not just today's", async () => {

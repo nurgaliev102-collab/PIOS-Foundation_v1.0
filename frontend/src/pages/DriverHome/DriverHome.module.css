@@ -105,7 +105,7 @@
 
 .driverCodeInput {
   width: 100%;
-  min-height: 44px;
+  min-height: var(--pios-touch-target-min);
   margin-top: 0.5rem;
   padding: 0.625rem 0.875rem;
   font-size: 1rem;
@@ -115,11 +115,28 @@
   border: 1px solid var(--pios-color-border-strong);
   border-radius: var(--pios-radius-sm);
   box-sizing: border-box;
+  /* Redesign 2.0: brought into line with the shared `Input` component's
+     own `.control` (this screen predates that component and never picked
+     up its focus-visible ring or transition -- a real accessibility gap,
+     docs/PIOS_DESIGN_SYSTEM.md Section 13: "never removed for aesthetic
+     reasons," it simply was never added here). */
+  transition: border-color var(--pios-motion-fast) var(--pios-motion-ease-out);
+}
+
+.driverCodeInput:focus-visible {
+  outline: 2px solid var(--pios-color-focus-ring);
+  outline-offset: 1px;
+  border-color: var(--pios-color-accent);
 }
 
 .driverCodeInput:focus {
-  outline: none;
   border-color: var(--pios-color-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .driverCodeInput {
+    transition: none;
+  }
 }
 
 .welcomeCard {
@@ -438,6 +455,16 @@
 
 .errorBlock .error {
   text-align: center;
+}
+
+/* History (MVP completion, §1): a plain vertical stack of RideHistoryCard,
+   same gap scale as every other list on this screen (`.list`-shaped, no
+   dedicated grid needed for a single-column record list). */
+.historyList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pios-space-3);
+  width: 100%;
 }
 
 /* Redesign 2.0 (Messaging): the message-bubble list container --
