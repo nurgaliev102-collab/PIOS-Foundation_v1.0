@@ -9,7 +9,14 @@
   border: 1px solid var(--pios-color-border);
   border-radius: var(--pios-radius-md);
   box-sizing: border-box;
-  box-shadow: var(--pios-shadow-none);
+  /* Redesign 2.0: the ordinary, resting card now carries the faintest
+     possible lift (was --pios-shadow-none) -- still paired with the same
+     border as before, never shadow replacing it, so this stays visually
+     distinct from .elevated below; it only stops every card in the app
+     reading as perfectly flush with the page background, the single
+     biggest contributor to the "generic dashboard" flatness the redesign
+     brief calls out. */
+  box-shadow: var(--pios-shadow-resting);
   text-align: left;
 }
 
@@ -21,4 +28,13 @@
 .center {
   align-items: center;
   text-align: center;
+}
+
+/* Redesign 2.0 (Card's own `tone` prop) — a grouped-inside-its-surroundings
+   surface: no border of its own (the parent card's border already frames
+   it), no shadow (still resting inside the parent, not above the page). */
+.muted {
+  background: var(--pios-color-surface-secondary);
+  border-color: transparent;
+  box-shadow: none;
 }

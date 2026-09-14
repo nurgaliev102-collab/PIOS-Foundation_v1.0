@@ -93,6 +93,17 @@
   outline-offset: 2px;
 }
 
+/* Redesign 2.0 (Messaging): see DriverHome.module.css's own identical
+   class for the full rationale -- the same bubble-list container, mirrored
+   here since this screen renders the same `ProposalMessage` thread from
+   the passenger's own side. */
+.messageThread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pios-space-2);
+  width: 100%;
+}
+
 @media (min-width: 640px) {
   .content {
     gap: var(--pios-space-3);

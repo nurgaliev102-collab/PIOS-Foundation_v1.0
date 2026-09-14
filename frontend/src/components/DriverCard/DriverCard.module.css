@@ -6,15 +6,21 @@
   background: var(--pios-color-surface);
   border: 1px solid var(--pios-color-border);
   border-radius: var(--pios-radius-md);
+  box-shadow: var(--pios-shadow-resting);
+  transition: transform var(--pios-motion-fast) var(--pios-motion-ease-out), box-shadow var(--pios-motion-fast) var(--pios-motion-ease-out);
 }
 
 .clickable {
   cursor: pointer;
 }
 
+.clickable:active {
+  transform: scale(0.99);
+}
+
 .selected {
   border-color: var(--pios-color-accent);
-  box-shadow: 0 0 0 1px var(--pios-color-accent);
+  box-shadow: 0 0 0 1.5px var(--pios-color-accent);
 }
 
 .avatar {
@@ -29,6 +35,7 @@
   color: var(--pios-color-surface);
   font-size: 1.25rem;
   font-weight: 700;
+  box-shadow: var(--pios-shadow-resting);
 }
 
 .details {

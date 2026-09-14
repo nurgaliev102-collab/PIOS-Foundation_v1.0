@@ -5,7 +5,7 @@
   display: flex;
   flex-direction: column;
   background: var(--pios-color-background);
-  padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  padding: 20px 20px calc(20px + var(--pios-safe-area-bottom));
   box-sizing: border-box;
 }
 
@@ -50,7 +50,11 @@
   justify-content: center;
   text-align: center;
   gap: 16px;
-  animation: fadeSlideIn 0.4s ease;
+  /* Redesign 2.0: restrained ease-out, this system's own standard "entering"
+     curve (docs/PIOS_DESIGN_SYSTEM.md §3 Motion), replacing the plain
+     linear `ease` this scene transition used before -- and now actually
+     respects prefers-reduced-motion (below), which it never did. */
+  animation: fadeSlideIn var(--pios-motion-base) var(--pios-motion-ease-out);
 }
 
 @keyframes fadeSlideIn {
@@ -61,6 +65,12 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sceneContent {
+    animation: none;
   }
 }
 

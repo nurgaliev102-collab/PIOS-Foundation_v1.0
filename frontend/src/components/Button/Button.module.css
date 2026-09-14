@@ -3,8 +3,8 @@
   align-items: center;
   justify-content: center;
   gap: var(--pios-space-2);
-  min-height: var(--pios-touch-target-min);
-  padding: 0.625rem var(--pios-space-5);
+  min-height: 48px;
+  padding: 0.75rem var(--pios-space-5);
   border-radius: var(--pios-radius-full);
   border: 1px solid transparent;
   font-family: var(--pios-font-family);
@@ -12,7 +12,7 @@
   font-weight: var(--pios-font-weight-button);
   cursor: pointer;
   transition: transform var(--pios-motion-fast) var(--pios-motion-ease-out), opacity var(--pios-motion-fast) var(--pios-motion-ease-out),
-    background-color var(--pios-motion-fast) var(--pios-motion-ease-out);
+    background-color var(--pios-motion-fast) var(--pios-motion-ease-out), box-shadow var(--pios-motion-fast) var(--pios-motion-ease-out);
   flex: 1;
 }
 
@@ -33,20 +33,29 @@
 .primary {
   background: var(--pios-color-accent);
   color: var(--pios-color-surface);
+  /* Redesign 2.0: the one primary action per screen (docs/PIOS_DESIGN_SYSTEM.md
+     §2.8) now carries a soft, accent-tinted contact shadow -- a small,
+     deliberate cue that this is the button a thumb should reach for,
+     without a gradient or a second color. */
+  box-shadow: 0 6px 16px -6px rgba(217, 122, 47, 0.55);
 }
 
 .primary:hover:not(:disabled) {
   background: var(--pios-color-accent-hover);
 }
 
+.primary:active:not(:disabled) {
+  box-shadow: 0 2px 8px -4px rgba(217, 122, 47, 0.5);
+}
+
 .secondary {
-  background: var(--pios-color-background);
+  background: var(--pios-color-surface);
   color: var(--pios-color-text-primary);
-  border-color: var(--pios-color-border);
+  border-color: var(--pios-color-border-strong);
 }
 
 .secondary:hover:not(:disabled) {
-  background: var(--pios-color-border);
+  background: var(--pios-color-surface-secondary);
 }
 
 .destructive {

@@ -1,4 +1,7 @@
 .message {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pios-space-2);
   width: 100%;
   padding: var(--pios-space-3) var(--pios-space-4);
   border-radius: var(--pios-radius-sm);
@@ -9,10 +12,32 @@
   box-sizing: border-box;
 }
 
+.icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-top: 0.0625rem;
+}
+
+.icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
 .information {
   background: var(--pios-color-information-surface);
   border-left-color: var(--pios-color-information);
   color: var(--pios-color-text-primary);
+}
+
+.information .icon {
+  color: var(--pios-color-information);
 }
 
 .success {
@@ -21,10 +46,18 @@
   color: var(--pios-color-text-primary);
 }
 
+.success .icon {
+  color: var(--pios-color-success);
+}
+
 .warning {
   background: var(--pios-color-warning-surface);
   border-left-color: var(--pios-color-warning);
   color: var(--pios-color-text-primary);
+}
+
+.warning .icon {
+  color: var(--pios-color-warning);
 }
 
 .error {
@@ -32,4 +65,8 @@
   border-left-color: var(--pios-color-error);
   color: var(--pios-color-error);
   font-weight: var(--pios-font-weight-body-strong);
+}
+
+.error .icon {
+  color: var(--pios-color-error);
 }

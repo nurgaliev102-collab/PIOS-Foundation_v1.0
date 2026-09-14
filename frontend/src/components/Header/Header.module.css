@@ -9,11 +9,18 @@
   position: sticky;
   top: 0;
   z-index: 10;
+  padding-top: var(--pios-safe-area-top);
 }
 
 .brand {
   font-family: var(--pios-font-family-display);
-  font-size: 1.125rem;
+  font-size: 1.0625rem;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  /* Redesign 2.0: brief §2.1 — the PIOS mark never styled larger/bolder
+     than a screen's own identity element (a driver's/passenger's name).
+     Letter-spaced and slightly reduced from the earlier 1.125rem so it
+     reads as a quiet, confident wordmark rather than a competing headline. */
+  letter-spacing: 0.08em;
+  color: var(--pios-color-text-secondary);
+  text-transform: uppercase;
 }

@@ -16,6 +16,7 @@ import { Heading } from '../../components/Heading'
 import { FormField } from '../../components/FormField'
 import { Input, Select, Textarea } from '../../components/Input'
 import { StatusMessage } from '../../components/StatusMessage'
+import { MessageBubble } from '../../components/MessageBubble'
 import { ApiError, request, resolveBackendBaseUrl } from '../../api/apiClient'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
 import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
@@ -392,11 +393,18 @@ function ProposalDetails({
           <Text role="label" tone="muted">
             Сообщения по этой поездке
           </Text>
-          {messages.map((message) => (
-            <Text key={message.id} role="body">
-              {message.senderRole === 'DRIVER' ? 'Вы' : 'Пассажир'}: {message.body}
-            </Text>
-          ))}
+          {messages.length > 0 && (
+            <div className={styles.messageThread}>
+              {messages.map((message) => (
+                <MessageBubble
+                  key={message.id}
+                  own={message.senderRole === 'DRIVER'}
+                  text={`${message.senderRole === 'DRIVER' ? 'Вы' : 'Пассажир'}: ${message.body}`}
+                  sentAt={message.sentAt}
+                />
+              ))}
+            </div>
+          )}
           {isMessagingOpen ? (
             <>
               <FormField label="Ответ пассажиру" htmlFor={`message-${proposal.proposalId}`}>

@@ -17,6 +17,27 @@
  * direct value swap, not a light/dark toggle -- PIOS ships one committed
  * theme at a time, exactly as the 2026-09-05 decision did.
  *
+ * UI/UX REDESIGN 2.0, 2026-09-14 (product owner: a "premium mobile
+ * product" quality bar, Apple HIG as a quality reference -- not a palette
+ * change). Same identity as the two decisions above: warm graphite ground,
+ * amber accent, Fraunces/Work Sans -- untouched. What changes here is
+ * depth and hierarchy, the exact gap the product owner's own brief named
+ * ("много одинаковых прямоугольных коробок"): a second surface tier
+ * (`--pios-color-surface-secondary`) so a card can hold a visually distinct
+ * inset region without a new component; a genuine three-tier elevation
+ * scale (was two) with softer, more diffuse shadows (two stacked layers —
+ * a tight contact shadow plus a wider ambient one — still restrained, never
+ * the "огромные тени" anti-pattern this brief explicitly rules out); a
+ * `--pios-font-size-title` role for a screen's own top-level heading,
+ * distinct from `--pios-font-size-display` (still reserved for a person's
+ * own name, unchanged); a `--pios-radius-lg`/`--pios-radius-xs` pair
+ * bracketing the existing sm/md scale, for panels and small chips
+ * respectively; and explicit safe-area tokens so every bottom-anchored
+ * surface reads `env(safe-area-inset-*)` from one place. No color hue
+ * changes, no new accent, no gradient/glass token — this section only adds
+ * the structure a "native-quality" interface needs on top of the palette
+ * already decided.
+ *
  * The palette is warm rather than the cold slate/blue every generic
  * dashboard defaults to — PIOS is about a personal relationship between a
  * driver and their own client, not a cold enterprise console — and the
@@ -40,9 +61,14 @@
      generic admin dashboard" reasoning as the light palette, inverted. */
   --pios-color-background: #1c1712;
   --pios-color-surface: #272019;
-  /* Elevation is expressed via --pios-shadow-raised (below), not a
-     distinct surface color, per PIOS_DESIGN_SYSTEM.md Section 3 (Color →
-     surface-elevated: "elevation via shadow, not a separate color"). */
+  /* Redesign 2.0: a second, distinct surface for an inset region *within*
+     a card (a quote block, a stat tile, a message bubble's own "other
+     sender" fill) -- one step between background and surface rather than
+     reusing either, so nested content reads as "grouped," not as another
+     identical card stacked inside the first one. Elevation itself is still
+     expressed via shadow (below), never a color -- this token is about
+     grouping, not depth. */
+  --pios-color-surface-secondary: #211b15;
   --pios-color-text-primary: #f6f1e7;
   --pios-color-text-secondary: #b8ab97;
   --pios-color-text-muted: #8a7d6b;
@@ -98,6 +124,18 @@
   --pios-font-family: 'Work Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --pios-font-family-display: 'Fraunces', Georgia, 'Segoe UI', serif;
 
+  /* Redesign 2.0: a screen's own top-level title (e.g. "Мой бизнес",
+     "Профиль") is a distinct role from --pios-font-size-display, which
+     PIOS_DESIGN_SYSTEM.md Section 3 reserves specifically for a person's
+     own name as the page's lead identity element (brief §2.1) -- reusing
+     display for both would blur that reservation. Sized above display,
+     since a screen title carries no competing identity element on the
+     same screen to stay subordinate to. */
+  --pios-font-size-title: 1.75rem;
+  --pios-font-weight-title: 700;
+  --pios-line-height-title: 1.2;
+  --pios-letter-spacing-title: -0.01em;
+
   --pios-font-size-display: 1.625rem;
   --pios-font-weight-display: 700;
   --pios-line-height-display: 1.25;
@@ -137,16 +175,35 @@
   --pios-space-6: 1.5rem;   /* 24px */
   --pios-space-8: 2rem;     /* 32px */
 
-  /* ---- Radius ------------------------------------------------------- */
+  /* ---- Radius -------------------------------------------------------
+     Redesign 2.0 brackets the original sm/md pair with one step on each
+     side, same reasoning as before (never a universal radius -- see the
+     KDoc below): --pios-radius-xs for small chips/bubble corners (a
+     message bubble's own "tail" corner, a compact badge), --pios-radius-lg
+     for a genuinely large surface (a bottom sheet, a hero panel) that would
+     look clipped-feeling at md. */
+  --pios-radius-xs: 6px;
   --pios-radius-sm: 8px;
   --pios-radius-md: 16px;
+  --pios-radius-lg: 22px;
   --pios-radius-full: 999px;
 
   /* ---- Elevation -------------------------------------------------------
-     Two levels only, per docs/PIOS_DESIGN_SYSTEM.md Section 3 — a
-     restrained ceiling, deliberately not a multi-layer shadow scale. */
+     Redesign 2.0: three levels, one more than the original two -- still a
+     restrained ceiling (brief §4: "never as a default card treatment"),
+     not an open-ended shadow scale. Each value stacks a tight, low-opacity
+     contact shadow with a wider, softer ambient one -- reads as a genuine
+     surface lifted off the page rather than a single hard-edged blur,
+     while staying well short of the "огромные тени" anti-pattern this
+     brief explicitly rules out (total opacity and blur both stay modest).
+     --pios-shadow-resting replaces the plain border-only "no elevation"
+     default with the faintest possible lift for an ordinary card -- still
+     paired with --pios-color-border (never shadow alone) so the "no
+     elevation" default and true elevation stay visually distinct. */
   --pios-shadow-none: none;
-  --pios-shadow-raised: 0 4px 20px rgba(0, 0, 0, 0.45);
+  --pios-shadow-resting: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --pios-shadow-raised: 0 2px 6px rgba(0, 0, 0, 0.28), 0 12px 28px rgba(0, 0, 0, 0.32);
+  --pios-shadow-floating: 0 4px 10px rgba(0, 0, 0, 0.32), 0 20px 44px rgba(0, 0, 0, 0.4);
 
   /* ---- Motion --------------------------------------------------------- */
   --pios-motion-fast: 100ms;
@@ -157,4 +214,12 @@
 
   /* ---- Touch target ------------------------------------------------- */
   --pios-touch-target-min: 44px;
+
+  /* ---- Safe area (Redesign 2.0) ---------------------------------------
+     One place every bottom-anchored surface (BottomNav, a bottom-anchored
+     primary action, a future Sheet) reads the inset from, instead of each
+     repeating its own `env(safe-area-inset-bottom, 0px)` call -- same
+     value, same fallback, defined once. */
+  --pios-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --pios-safe-area-top: env(safe-area-inset-top, 0px);
 }

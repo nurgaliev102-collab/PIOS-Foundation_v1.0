@@ -1,12 +1,14 @@
 .wrap {
   width: 100%;
   border-left: 3px solid var(--pios-color-success);
-  border-radius: var(--pios-radius-md);
+  border-radius: var(--pios-radius-lg);
 }
 
 .wrap > * {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
+  border-top-right-radius: var(--pios-radius-lg);
+  border-bottom-right-radius: var(--pios-radius-lg);
 }
 
 .header {

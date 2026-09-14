@@ -9,7 +9,10 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  /* Redesign 2.0: one step up the spacing scale (was a bare 1rem) -- more
+     air between stacked sections, the exact "не занимать половину экрана,
+     но визуально очевидно" balance the brief asks for. */
+  gap: var(--pios-space-5);
   width: 100%;
   max-width: 480px;
   margin: 0 auto;
@@ -17,7 +20,7 @@
      2026-09-07) -- roughly its own height (icon + label + vertical
      padding) plus the safe-area inset BottomNav.module.css already adds
      for itself, so content never renders underneath it. */
-  padding: 1.25rem 1rem calc(4.25rem + env(safe-area-inset-bottom, 0px));
+  padding: var(--pios-space-5) var(--pios-space-4) calc(4.25rem + var(--pios-safe-area-bottom));
   box-sizing: border-box;
 }
 
@@ -33,9 +36,12 @@
 .pageTitle {
   margin: 0;
   font-family: var(--pios-font-family-display);
-  font-size: 1.375rem;
-  font-weight: 600;
+  font-size: var(--pios-font-size-title);
+  font-weight: var(--pios-font-weight-title);
+  line-height: var(--pios-line-height-title);
+  letter-spacing: var(--pios-letter-spacing-title);
   color: var(--pios-color-text-primary);
+  text-wrap: balance;
 }
 
 .passengerList {
@@ -153,35 +159,44 @@
 /* Product owner request, 2026-09-07: "Мой бизнес" as three tabs
    (Обзор/Клиенты/Маршруты) instead of one long scroll -- an underline
    tab bar, matching the concept mockup's own treatment. */
+/* Redesign 2.0: a native-feeling segmented control (was a plain underline
+   tab bar) -- one continuous track, the active segment as a solid pill
+   riding inside it, matching the same "selected state as a filled shape,
+   not just a color change" language BottomNav's own active-tab pill
+   already establishes elsewhere in this app. */
 .tabBar {
   display: flex;
-  gap: var(--pios-space-5);
-  border-bottom: 1px solid var(--pios-color-border);
+  gap: 2px;
+  padding: 3px;
+  background: var(--pios-color-surface-secondary);
+  border-radius: var(--pios-radius-full);
 }
 
 .tabButton {
   display: flex;
+  flex: 1;
   align-items: center;
-  /* UI/UX redesign, Stage 5 (2026-09-12): this is the one interactive
-     control in "Мой бизнес" without the app-standard 44px touch target
-     (BottomNav's own `.tab` already sets this same token) -- the padding
-     alone left it a few pixels short. */
+  justify-content: center;
+  /* Accessibility floor (docs/PIOS_DESIGN_SYSTEM.md Section 12/13):
+     44x44px minimum, required, not optional -- unchanged by this
+     segmented-control restyle. */
   min-height: var(--pios-touch-target-min);
   gap: var(--pios-space-1);
-  padding: var(--pios-space-2) 0 var(--pios-space-3);
-  margin-bottom: -1px;
-  font-size: 0.9375rem;
+  padding: 0 var(--pios-space-2);
+  font-size: 0.8125rem;
   font-weight: 600;
   color: var(--pios-color-text-secondary);
   background: none;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-radius: var(--pios-radius-full);
   cursor: pointer;
+  transition: background-color var(--pios-motion-fast) var(--pios-motion-ease-out), color var(--pios-motion-fast) var(--pios-motion-ease-out);
 }
 
 .tabButtonActive {
-  color: var(--pios-color-accent);
-  border-bottom-color: var(--pios-color-accent);
+  color: var(--pios-color-text-primary);
+  background: var(--pios-color-surface);
+  box-shadow: var(--pios-shadow-resting);
 }
 
 .tabBadge {
@@ -265,16 +280,29 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.125rem;
-  padding: var(--pios-space-3) var(--pios-space-4);
-  background: var(--pios-color-background);
-  border: 1px solid var(--pios-color-border);
+  gap: var(--pios-space-2);
+  padding: var(--pios-space-4);
+  background: var(--pios-color-surface-secondary);
+  border: 1px solid transparent;
   border-radius: var(--pios-radius-sm);
   color: var(--pios-color-text-primary);
 }
 
+/* Redesign 2.0: each stat's own icon now sits in a small tinted circle
+   (was a bare glyph) -- the same "icon as a small badge, not a floating
+   symbol" treatment a native iOS stat tile uses, and it's what actually
+   lets the four tiles read as distinct facts at a glance instead of four
+   identical grey boxes. */
 .growthTile .growthIcon {
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 6px;
+  border-radius: var(--pios-radius-full);
+  background: var(--pios-color-background);
   color: var(--pios-color-text-muted);
+  box-sizing: border-box;
 }
 
 .growthTile .growthCount {
@@ -292,6 +320,7 @@
 
 .growthTileAccent .growthIcon {
   color: var(--pios-color-accent);
+  background: var(--pios-color-information-surface);
 }
 
 .growthTileSuccess {
@@ -300,6 +329,7 @@
 
 .growthTileSuccess .growthIcon {
   color: var(--pios-color-success);
+  background: var(--pios-color-success-surface);
 }
 
 .growthTileTrust {
@@ -308,6 +338,7 @@
 
 .growthTileTrust .growthIcon {
   color: var(--pios-color-trust);
+  background: var(--pios-color-trust-surface);
 }
 
 .growthIcon {
@@ -407,6 +438,17 @@
 
 .errorBlock .error {
   text-align: center;
+}
+
+/* Redesign 2.0 (Messaging): the message-bubble list container --
+   `MessageBubble` owns its own alignment (`align-self`), this just stacks
+   them with a chat-appropriate gap, tighter than this card's own general
+   `--pios-space-4` content gap. */
+.messageThread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pios-space-2);
+  width: 100%;
 }
 
 /* Mobile-first: the base rules above already target small screens.

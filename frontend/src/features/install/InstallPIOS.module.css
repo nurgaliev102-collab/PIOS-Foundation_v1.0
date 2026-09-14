@@ -59,7 +59,7 @@
   width: 100%;
   max-width: 420px;
   margin: 0 auto;
-  padding: 1.25rem 1.25rem calc(1.25rem + env(safe-area-inset-bottom, 0px));
+  padding: 1.25rem 1.25rem calc(1.25rem + var(--pios-safe-area-bottom));
   box-sizing: border-box;
 }
 

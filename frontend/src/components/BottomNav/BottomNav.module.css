@@ -10,7 +10,11 @@
   margin: 0 auto;
   background: var(--pios-color-surface);
   border-top: 1px solid var(--pios-color-border);
-  padding: 0.375rem 0.5rem calc(0.375rem + env(safe-area-inset-bottom, 0px));
+  /* Redesign 2.0: a soft upward-cast shadow (the surface sits above the
+     scrolling content behind it) plus the single shared safe-area token,
+     replacing this file's own repeated `env()` call. */
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.28);
+  padding: 0.375rem 0.5rem calc(0.375rem + var(--pios-safe-area-bottom));
   box-sizing: border-box;
 }
 
@@ -28,6 +32,7 @@
   background: none;
   border: none;
   cursor: pointer;
+  transition: color var(--pios-motion-fast) var(--pios-motion-ease-out);
 }
 
 .tabActive {
@@ -37,13 +42,30 @@
 .icon {
   position: relative;
   display: inline-flex;
-  width: 22px;
-  height: 22px;
+  align-items: center;
+  justify-content: center;
+  /* Redesign 2.0: fixed at all times -- only the background pill (below)
+     grows for the active state, so the glyph itself is never stretched
+     non-uniformly. */
+  width: 40px;
+  height: 26px;
+  border-radius: var(--pios-radius-full);
+  background: transparent;
+  transition: background-color var(--pios-motion-fast) var(--pios-motion-ease-out);
+}
+
+/* Redesign 2.0: the active tab's own icon sits inside a soft, pill-shaped
+   tint instead of only changing the glyph's own color -- reads as a real
+   selected state at a glance (matching native tab-bar convention), not
+   just a color swap easy to miss on a small icon. */
+.tabActive .icon {
+  background: var(--pios-color-information-surface);
 }
 
 .icon svg {
-  width: 100%;
-  height: 100%;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
 }
 
 .badge {

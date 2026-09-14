@@ -13,6 +13,7 @@ import { Input, Select, Textarea } from '../../components/Input'
 import { Divider } from '../../components/Divider'
 import { DriverTrustIndicator } from '../../components/DriverTrustIndicator'
 import { RideStatus } from '../../components/RideStatus'
+import { MessageBubble } from '../../components/MessageBubble'
 import { getInvitationByDriverCode } from '../PassengerLanding/invitationSource'
 import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
 import type { StoredIdentity } from '../../identity/IdentityProvider'
@@ -2002,11 +2003,18 @@ export function RideRequest() {
                     <Text role="label" tone="muted">
                       Сообщения по этой поездке
                     </Text>
-                    {messages.map((message) => (
-                      <Text key={message.id} role="body">
-                        {message.senderRole === 'PASSENGER' ? 'Вы' : 'Водитель'}: {message.body}
-                      </Text>
-                    ))}
+                    {messages.length > 0 && (
+                      <div className={styles.messageThread}>
+                        {messages.map((message) => (
+                          <MessageBubble
+                            key={message.id}
+                            own={message.senderRole === 'PASSENGER'}
+                            text={`${message.senderRole === 'PASSENGER' ? 'Вы' : 'Водитель'}: ${message.body}`}
+                            sentAt={message.sentAt}
+                          />
+                        ))}
+                      </div>
+                    )}
                     {isMessagingOpen ? (
                       <>
                         <FormField label="Сообщение водителю" htmlFor="message-to-driver">
