@@ -103,7 +103,9 @@ class OrderSubmittedFirstRefusalConsumerIntegrationTest {
         val fallbackDriver = DriverReference("driver-fallback-${UUID.randomUUID()}")
         try {
             // No PrimaryDriverRecord upserted for this passenger at all.
-            driverAvailabilityRepository.upsert(DriverAvailabilityRecord(fallbackDriver, available = true))
+            // ADR-069 Part 3: this order's own isTest defaults to false, so
+            // the fallback candidate must be an explicitly real driver.
+            driverAvailabilityRepository.upsert(DriverAvailabilityRecord(fallbackDriver, available = true, isTest = false))
             // Forced far into the past (randomized, not a shared literal --
             // two tests forcing the identical instant would tie under
             // ORDER BY updated_at ASC LIMIT 1) so this driver is

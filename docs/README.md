@@ -74,6 +74,7 @@ Architecture Decision Records. Every change to an architectural decision is reco
 | [ADR-063](ADR/ADR-063-Trip-as-a-New-Dispatch-Owned-Aggregate.md) | Trip as a New Dispatch-Owned Aggregate, Distinct from Assignment | **Accepted** |
 | [ADR-067](ADR/ADR-067-PIOS-Core-Bounded-Context-Slice-01.md) | PIOS Core Bounded Context — Slice 01 (Participant History Projection) | **Ratified** |
 | [ADR-068](ADR/ADR-068-Relationship-Ordered-Fallback-Dispatch.md) | Relationship-Ordered Fallback Dispatch — Trusted → Open (Network tier deferred) | **Accepted, narrowed scope** |
+| [ADR-069](ADR/ADR-069-Test-Real-Segregation-In-Fallback-Driver-Selection.md) | Test/Real Segregation in Fallback Driver Selection — `is_test` on Dispatch's Availability Projection | **Accepted** |
 
 Note (Sprint 1 — Foundation Stabilization): this table is also missing ADR-027 through ADR-034, which exist as real files under `docs/ADR/` but were never added here — a pre-existing indexing gap found during this sprint's own documentation-sync work, left uncorrected here since it is outside this sprint's authorized scope; recorded for Sprint 2.
 
@@ -84,6 +85,8 @@ Note (Task 10B — Architecture Ratification & Document Reconciliation, 2026-09-
 Note (ADR-067 ratification, 2026-09-10): the gap above still stands (ADR-043–061, ADR-064–066 remain unindexed). This task added only the single ADR-067 row it directly ratified, following the same narrow-scope precedent, and did not rebuild the index. The ADR files themselves, not this table, remain authoritative.
 
 Note (ADR-068 ratification, 2026-09-15): the gap above still stands (ADR-043–061, ADR-064–066 remain unindexed). This task added only the single ADR-068 row it directly ratified, following the same narrow-scope precedent, and did not rebuild the index.
+
+Note (ADR-069 implementation, 2026-09-15): the gap above still stands (ADR-043–061, ADR-064–066 remain unindexed). This task added the ADR-069 row alongside the ADR-068 row added moments earlier in the same day's work, following the same narrow-scope precedent, and did not rebuild the index. The ADR files themselves, not this table, remain authoritative.
 
 ## Domain
 

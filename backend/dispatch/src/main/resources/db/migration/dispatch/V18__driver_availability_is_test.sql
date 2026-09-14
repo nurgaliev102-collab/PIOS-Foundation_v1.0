@@ -1,0 +1,27 @@
+-- ADR-069 (Test/Real Segregation in Fallback Driver Selection), Part 2 and
+-- Part 4. Projects Driver Management's own `Driver.isTest` classification
+-- onto Dispatch's local `driver_availability` projection so Fallback
+-- Dispatch's selection predicate (Part 3) can partition real orders from
+-- test orders.
+--
+-- MUST NOT be `BOOLEAN NOT NULL DEFAULT FALSE` -- the single most important
+-- line in ADR-069 (Part 4). `driver_availability.is_test` is not metadata
+-- about a historical row (unlike `proposals.is_test`/`assignments.is_test`,
+-- V11, or `drivers.is_test`, V5, all of which safely used DEFAULT FALSE for
+-- their own, different reasons); it is a LIVE predicate meaning "eligible
+-- to receive real passengers' orders." Applying DEFAULT FALSE here would
+-- write `false` onto every existing row -- including the exact test-fixture
+-- row that caused the confirmed production defect this ADR fixes -- and
+-- would ratify that defect in the schema while appearing to fix it.
+--
+-- `is_test BOOLEAN NULL`, no default: every pre-existing row becomes
+-- explicitly *unknown*. ADR-069 Part 3's selection predicate fails closed
+-- on NULL (`is_test IS NOT NULL AND is_test = :orderIsTest`), so an unknown
+-- driver is ineligible for every order, real or test, until Driver
+-- Management's owner-side replay backfill (V6__backfill_driver_availability_changed_outbox.sql)
+-- republishes each driver's current classification through the ordinary
+-- consumer path. See ADR-069 Part 4 for the required deployment ordering
+-- (migration, then publish/project, then backfill, then a verification
+-- gate, then the predicate ships) -- not repeated here, since this file is
+-- only step one of that sequence.
+ALTER TABLE driver_availability ADD COLUMN is_test BOOLEAN NULL;

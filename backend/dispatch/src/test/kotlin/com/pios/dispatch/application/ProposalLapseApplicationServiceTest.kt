@@ -131,8 +131,10 @@ class ProposalLapseApplicationServiceTest {
         override fun findByDriverReference(driverReference: DriverReference): DriverAvailabilityRecord? =
             recordsInOrder.lastOrNull { it.driverReference == driverReference }
 
-        override fun findLongestIdleAvailable(excluding: Set<DriverReference>): DriverReference? =
-            recordsInOrder.firstOrNull { it.available && it.driverReference !in excluding }?.driverReference
+        // ADR-069 Part 3: fail-closed, strict-equality predicate, mirroring
+        // FallbackDispatchApplicationServiceTest's own fake exactly.
+        override fun findLongestIdleAvailable(orderIsTest: Boolean, excluding: Set<DriverReference>): DriverReference? =
+            recordsInOrder.firstOrNull { it.available && it.driverReference !in excluding && it.isTest == orderIsTest }?.driverReference
     }
 
     private val passenger = PassengerReference("passenger-1")
@@ -143,7 +145,7 @@ class ProposalLapseApplicationServiceTest {
         primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, driver))
         val driverAvailabilityRepository = InMemoryDriverAvailabilityRepository()
         val fallbackDriver = DriverReference("driver-fallback")
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(fallbackDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(fallbackDriver, available = true, isTest = false))
         val fallbackDispatchApplicationService = FallbackDispatchApplicationService(driverAvailabilityRepository, proposalApplicationService)
         val proposal = proposalApplicationService.handle(ProposeDriverCommand(order, driver, passengerReference = passenger)).proposal
         val service = ProposalLapseApplicationService(
@@ -169,7 +171,7 @@ class ProposalLapseApplicationServiceTest {
         val primaryDriverRepository = InMemoryPrimaryDriverRepository()
         primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, DriverReference("driver-actual-primary")))
         val driverAvailabilityRepository = InMemoryDriverAvailabilityRepository()
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-would-be-fallback"), available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-would-be-fallback"), available = true, isTest = false))
         val fallbackDispatchApplicationService = FallbackDispatchApplicationService(driverAvailabilityRepository, proposalApplicationService)
         // `driver` ("driver-1") is not the passenger's primary above.
         val proposal = proposalApplicationService.handle(ProposeDriverCommand(order, driver, passengerReference = passenger)).proposal
@@ -187,7 +189,7 @@ class ProposalLapseApplicationServiceTest {
     fun `a lapsed proposal with no passengerReference does not attempt Fallback Dispatch`() {
         val primaryDriverRepository = InMemoryPrimaryDriverRepository()
         val driverAvailabilityRepository = InMemoryDriverAvailabilityRepository()
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-fallback"), available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-fallback"), available = true, isTest = false))
         val fallbackDispatchApplicationService = FallbackDispatchApplicationService(driverAvailabilityRepository, proposalApplicationService)
         val proposal = proposalApplicationService.handle(ProposeDriverCommand(order, driver)).proposal // no passengerReference
         val service = ProposalLapseApplicationService(

@@ -65,4 +65,46 @@ class DriverAvailabilityConsumerIntegrationTest {
         assertNotNull(record)
         assertEquals(false, record.available)
     }
+
+    // --- ADR-069: is_test projection, real broker + real DB ---
+
+    @Test
+    fun `a message with payload isTest omitted projects a null (unknown) classification`() {
+        val driverReference = "consumer-driver-${UUID.randomUUID()}"
+
+        publisher.publishDriverAvailabilityChanged(driverReference = driverReference, available = true)
+
+        val record = awaitUntilNotNull { repository.findByDriverReference(DriverReference(driverReference)) }
+
+        assertNotNull(record)
+        assertEquals(null, record.isTest)
+    }
+
+    @Test
+    fun `a message with payload isTest true projects true`() {
+        val driverReference = "consumer-driver-${UUID.randomUUID()}"
+
+        publisher.publishDriverAvailabilityChanged(driverReference = driverReference, available = true, isTest = true)
+
+        val record = awaitUntilNotNull {
+            repository.findByDriverReference(DriverReference(driverReference))?.takeIf { it.isTest == true }
+        }
+
+        assertNotNull(record)
+        assertEquals(true, record.isTest)
+    }
+
+    @Test
+    fun `a message with payload isTest false projects false`() {
+        val driverReference = "consumer-driver-${UUID.randomUUID()}"
+
+        publisher.publishDriverAvailabilityChanged(driverReference = driverReference, available = true, isTest = false)
+
+        val record = awaitUntilNotNull {
+            repository.findByDriverReference(DriverReference(driverReference))?.takeIf { it.isTest == false }
+        }
+
+        assertNotNull(record)
+        assertEquals(false, record.isTest)
+    }
 }

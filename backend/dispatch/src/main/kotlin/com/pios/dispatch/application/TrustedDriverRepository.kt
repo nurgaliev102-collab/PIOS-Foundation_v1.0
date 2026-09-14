@@ -43,9 +43,20 @@ interface TrustedDriverRepository {
      * set instead of across the whole platform. `null` if the passenger
      * has no trusted driver who is both a member of this projection and
      * currently available.
+     *
+     * [orderIsTest] (ADR-069 Part 3 and Part 5) applies the identical
+     * fail-closed, strict-equality predicate
+     * [DriverAvailabilityRepository.findLongestIdleAvailable] applies to
+     * Tier 3: a candidate's `driver_availability.is_test` must be
+     * non-null and equal to [orderIsTest], or it is never returned --
+     * "both queries carry the identical predicate, in one change" (ADR-069
+     * Part 5). No default value, for the identical reason
+     * [DriverAvailabilityRepository.findLongestIdleAvailable]'s own
+     * [orderIsTest] has none.
      */
     fun findLongestIdleTrustedAvailable(
         passengerReference: PassengerReference,
+        orderIsTest: Boolean,
         excluding: Set<DriverReference> = emptySet()
     ): DriverReference?
 }

@@ -34,6 +34,7 @@ class InMemoryTrustedDriverRepository : TrustedDriverRepository {
 
     override fun findLongestIdleTrustedAvailable(
         passengerReference: PassengerReference,
+        orderIsTest: Boolean,
         excluding: Set<DriverReference>
     ): DriverReference? = null
 

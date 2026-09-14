@@ -23,24 +23,37 @@ internal class DriverAvailabilityChangedMessagePublisher(connectionFactory: Conn
     private val rabbitTemplate = RabbitTemplate(connectionFactory)
     private val objectMapper = ObjectMapper()
 
+    /**
+     * [isTest] (ADR-069) defaults to `null` -- meaning "omit `payload.isTest`
+     * entirely," the exact shape a not-yet-upgraded Driver Management
+     * publisher would send, and the case
+     * [com.pios.dispatch.persistence.DriverAvailabilityChangedListener]'s
+     * own tolerant-parse must turn into "unknown," not "false." Passing
+     * `true`/`false` explicitly includes the field with that value instead.
+     */
     fun publishDriverAvailabilityChanged(
         driverReference: String,
         available: Boolean,
+        isTest: Boolean? = null,
         eventId: String = java.util.UUID.randomUUID().toString(),
         eventVersion: Int = 1,
         eventType: String = "DriverAvailabilityChanged",
         routingKey: String = RabbitMQTopologyConfiguration.DRIVER_AVAILABILITY_CHANGED_ROUTING_KEY
     ) {
+        val payload = mutableMapOf<String, Any>(
+            "driverId" to driverReference,
+            "availability" to if (available) "AVAILABLE" else "UNAVAILABLE"
+        )
+        if (isTest != null) {
+            payload["isTest"] = isTest
+        }
         val envelope = objectMapper.writeValueAsString(
             mapOf(
                 "eventId" to eventId,
                 "eventType" to eventType,
                 "eventVersion" to eventVersion,
                 "occurredAt" to Instant.now().toString(),
-                "payload" to mapOf(
-                    "driverId" to driverReference,
-                    "availability" to if (available) "AVAILABLE" else "UNAVAILABLE"
-                )
+                "payload" to payload
             )
         )
         publishRaw(envelope, routingKey)

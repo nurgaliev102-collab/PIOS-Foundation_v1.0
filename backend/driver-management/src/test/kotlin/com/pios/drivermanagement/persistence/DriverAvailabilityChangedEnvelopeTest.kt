@@ -49,9 +49,24 @@ class DriverAvailabilityChangedEnvelopeTest {
         assertEquals(event.occurredAt.toString(), envelope.get("occurredAt").asText())
         assertEquals(driverId.value, envelope.get("payload").get("driverId").asText())
         assertEquals("AVAILABLE", envelope.get("payload").get("availability").asText())
+        // ADR-069 Part 1: additive payload field, eventVersion stays 1.
+        assertEquals(false, envelope.get("payload").get("isTest").asBoolean())
 
         assertNotNull(record.createdAt)
         assertNotEquals(record.createdAt.toString(), envelope.get("occurredAt").asText())
+    }
+
+    @Test
+    fun `a test driver's own declaration carries isTest true on the published envelope`() {
+        val driverId = DriverId("envelope-driver-${java.util.UUID.randomUUID()}")
+        val driver = Driver(id = driverId, availability = Availability.UNAVAILABLE, isTest = true)
+
+        service.handle(driver, DeclareAvailabilityCommand(driverId, Availability.AVAILABLE))
+
+        val record = outboxRepository.findUnpublished().single { it.aggregateId == driverId.value }
+        val envelope = objectMapper.readTree(record.payload)
+
+        assertEquals(true, envelope.get("payload").get("isTest").asBoolean())
     }
 
     @Test

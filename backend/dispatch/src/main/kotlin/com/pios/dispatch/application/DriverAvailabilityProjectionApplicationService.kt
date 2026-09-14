@@ -43,7 +43,8 @@ class DriverAvailabilityProjectionApplicationService(
             driverAvailabilityRepository.upsert(
                 DriverAvailabilityRecord(
                     driverReference = DriverReference(command.driverReference),
-                    available = command.available
+                    available = command.available,
+                    isTest = command.isTest
                 )
             )
         }

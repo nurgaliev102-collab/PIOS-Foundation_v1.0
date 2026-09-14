@@ -1141,7 +1141,7 @@ class ProposalControllerTest {
     @Test
     fun `creating a proposal for a driver marked unavailable returns 409`() {
         val fixture = GatedFixture()
-        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-unavailable"), available = false))
+        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-unavailable"), available = false, isTest = false))
 
         val response = fixture.controller.createProposal(
             ProposeDriverRequest("order-avail-2", "driver-unavailable", passengerReference = "gated-fixture-passenger"),
@@ -1154,7 +1154,7 @@ class ProposalControllerTest {
     @Test
     fun `creating a proposal for a driver marked available returns 201`() {
         val fixture = GatedFixture()
-        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-available"), available = true))
+        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-available"), available = true, isTest = false))
 
         val response = fixture.controller.createProposal(
             ProposeDriverRequest("order-avail-3", "driver-available", passengerReference = "gated-fixture-passenger"),
@@ -1200,8 +1200,10 @@ class ProposalControllerTest {
         override fun findByDriverReference(driverReference: DriverReference): DriverAvailabilityRecord? =
             recordsInOrder.lastOrNull { it.driverReference == driverReference }
 
-        override fun findLongestIdleAvailable(excluding: Set<DriverReference>): DriverReference? =
-            recordsInOrder.firstOrNull { it.available && it.driverReference !in excluding }?.driverReference
+        // ADR-069 Part 3: fail-closed, strict-equality predicate, mirroring
+        // FallbackDispatchApplicationServiceTest's own fake exactly.
+        override fun findLongestIdleAvailable(orderIsTest: Boolean, excluding: Set<DriverReference>): DriverReference? =
+            recordsInOrder.firstOrNull { it.available && it.driverReference !in excluding && it.isTest == orderIsTest }?.driverReference
     }
 
     /**
@@ -1269,8 +1271,8 @@ class ProposalControllerTest {
         fixture.primaryDriverRepository.upsert(
             com.pios.dispatch.application.PrimaryDriverRecord(PassengerReference(passenger), DriverReference(primaryDriver))
         )
-        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference(primaryDriver), available = true))
-        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(fallbackDriver, available = true))
+        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference(primaryDriver), available = true, isTest = false))
+        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(fallbackDriver, available = true, isTest = false))
         val created = fixture.controller.createProposal(
             ProposeDriverRequest("order-decline-fallback", primaryDriver, passengerReference = passenger),
             authorization = fixture.passengerAuthorization()
@@ -1297,8 +1299,8 @@ class ProposalControllerTest {
         fixture.primaryDriverRepository.upsert(
             com.pios.dispatch.application.PrimaryDriverRecord(PassengerReference(passenger), DriverReference("driver-actual-primary"))
         )
-        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-not-primary"), available = true))
-        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-would-be-fallback"), available = true))
+        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-not-primary"), available = true, isTest = false))
+        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-would-be-fallback"), available = true, isTest = false))
         val created = fixture.controller.createProposal(
             ProposeDriverRequest("order-decline-no-fallback", "driver-not-primary", passengerReference = passenger),
             authorization = fixture.passengerAuthorization()

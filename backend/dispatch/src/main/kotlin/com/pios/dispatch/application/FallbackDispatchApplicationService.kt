@@ -60,6 +60,21 @@ import org.springframework.stereotype.Service
  * No driver in any tier is not an error — [FallbackDispatchOutcome.NoAvailableDriver],
  * mirroring how [FirstRefusalOutcome.NoPrimaryDriver] is not an error either.
  *
+ * ## Test/real segregation (ADR-069, applied identically to Tier 1 and Tier 3)
+ *
+ * [isTest] is passed through to both
+ * [TrustedDriverRepository.findLongestIdleTrustedAvailable] and
+ * [DriverAvailabilityRepository.findLongestIdleAvailable] as their own
+ * mandatory `orderIsTest` argument: a candidate is eligible only if its
+ * local availability record's classification is known (non-null) and
+ * strictly equal to [isTest] — a real order is never offered to a test
+ * driver, a test order is never offered to a real driver (it yields
+ * [FallbackDispatchOutcome.NoAvailableDriver] instead), and a driver whose
+ * classification is still unknown is never selected for either kind of
+ * order. This is a second, independent eligibility gate alongside
+ * availability itself (ADR-068 Part 2, property 3, as narrowed by
+ * ADR-069) — it narrows the candidate set further, it never overrides it.
+ *
  * [trustedDriverRepository] defaults to `null` so every existing caller and
  * test that constructs this service with only its original two
  * constructor arguments continues to compile and behave exactly as
@@ -127,9 +142,9 @@ class FallbackDispatchApplicationService(
         isTest: Boolean = false,
         excludeDrivers: Set<DriverReference> = emptySet()
     ): FallbackDispatchOutcome {
-        val trustedDriver = trustedDriverRepository?.findLongestIdleTrustedAvailable(passengerReference, excludeDrivers)
+        val trustedDriver = trustedDriverRepository?.findLongestIdleTrustedAvailable(passengerReference, isTest, excludeDrivers)
         val driver = trustedDriver
-            ?: driverAvailabilityRepository.findLongestIdleAvailable(excludeDrivers)
+            ?: driverAvailabilityRepository.findLongestIdleAvailable(isTest, excludeDrivers)
             ?: return FallbackDispatchOutcome.NoAvailableDriver
 
         return try {

@@ -61,6 +61,26 @@ class DriverTest {
         assertNull(event)
     }
 
+    // --- isTest carried on DriverAvailabilityChanged (ADR-069) ---
+
+    @Test
+    fun `a real driver's declaration carries isTest false on the produced event`() {
+        val driver = Driver(id = DriverId("driver-1"), availability = Availability.UNAVAILABLE, isTest = false)
+
+        val event = driver.declareAvailability(Availability.AVAILABLE)
+
+        assertEquals(false, assertNotNull(event).isTest)
+    }
+
+    @Test
+    fun `a test driver's declaration carries isTest true on the produced event`() {
+        val driver = Driver(id = DriverId("driver-1"), availability = Availability.UNAVAILABLE, isTest = true)
+
+        val event = driver.declareAvailability(Availability.AVAILABLE)
+
+        assertEquals(true, assertNotNull(event).isTest)
+    }
+
     @Test
     fun `a driver has exactly one current availability state at any time`() {
         val driver = Driver(id = DriverId("driver-1"), availability = Availability.UNAVAILABLE)

@@ -92,7 +92,9 @@ class DriverAvailabilityApplicationService(
      * timestamps ([OutboxRecord.createdAt]/[OutboxRecord.publishedAt]);
      * and only the event-specific data EVENT_CATALOG.md's own
      * DriverAvailabilityChanged entry already attributes to it — the
-     * driver's identity and its new availability state, nothing else.
+     * driver's identity, its new availability state, and (ADR-069)
+     * its `isTest` classification, nothing else. `isTest` is additive:
+     * `eventVersion` stays `1` (ADR-030 lines 33-36, 58).
      */
     private fun envelopeFor(event: DriverAvailabilityChanged): String =
         objectMapper.writeValueAsString(
@@ -103,7 +105,8 @@ class DriverAvailabilityApplicationService(
                 "occurredAt" to event.occurredAt.toString(),
                 "payload" to mapOf(
                     "driverId" to event.driverId.value,
-                    "availability" to event.availability.name
+                    "availability" to event.availability.name,
+                    "isTest" to event.isTest
                 )
             )
         )

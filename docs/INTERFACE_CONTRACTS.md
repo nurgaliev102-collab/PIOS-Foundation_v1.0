@@ -97,6 +97,7 @@ No method, payload, or schema is defined for any contract below.
 - **Consumer Module.** Dispatch.
 - **Purpose.** Make a driver's current availability known so Dispatch can determine an assignment.
 - **Conceptual interaction.** Dispatch relies on DriverAvailabilityChanged (EVENT_CATALOG.md Sections 7, 9) to know which drivers are currently available.
+- **Extension ([ADR-069: Test/Real Segregation in Fallback Driver Selection](ADR/ADR-069-Test-Real-Segregation-In-Fallback-Driver-Selection.md), Accepted).** DriverAvailabilityChanged's payload gains one additional field, `isTest` (boolean) — Driver Management's own `Driver.isTest` classification, published by the owning module on its own event, additive and non-breaking (`eventVersion` stays `1`; ADR-030 lines 33–36, 58). Dispatch projects it into its local `driver_availability` projection as a nullable, three-valued column (`NULL` meaning "not yet told," never coerced to `false`) and uses it, alongside availability, as a second eligibility gate on Fallback Dispatch's own selection queries (ADR-068 Part 2, property 3, as narrowed by ADR-069) — a real order is never offered to a test driver and a test order is never offered to a real driver. It carries no profile, rating, or reputation data, and grants Dispatch no new authority over Driver Management's own record.
 
 ### Contract: Dispatch → Order Management
 

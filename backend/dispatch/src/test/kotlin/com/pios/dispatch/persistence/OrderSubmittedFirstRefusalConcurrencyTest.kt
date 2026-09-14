@@ -118,7 +118,9 @@ class OrderSubmittedFirstRefusalConcurrencyTest {
         // reach FallbackDispatchApplicationService.attempt on equal footing.
         val fallbackDriver = DriverReference("driver-fallback-${UUID.randomUUID()}")
         try {
-            driverAvailabilityRepository.upsert(DriverAvailabilityRecord(fallbackDriver, available = true))
+            // ADR-069 Part 3: this order's own isTest defaults to false, so
+            // the fallback candidate must be an explicitly real driver.
+            driverAvailabilityRepository.upsert(DriverAvailabilityRecord(fallbackDriver, available = true, isTest = false))
             // Forced far into the past (randomized -- see this module's own
             // OrderSubmittedFirstRefusalConsumerIntegrationTest "Test B"
             // KDoc for why a shared literal would collide) so this driver is

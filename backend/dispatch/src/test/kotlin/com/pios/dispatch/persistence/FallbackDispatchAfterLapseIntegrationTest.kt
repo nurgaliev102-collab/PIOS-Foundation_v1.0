@@ -71,7 +71,10 @@ class FallbackDispatchAfterLapseIntegrationTest {
      * already hold from other tests.
      */
     private fun markAvailableSinceFarPast(driver: DriverReference) {
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(driver, available = true))
+        // ADR-069 Part 3: `attempt`'s own default isTest is `false`, and
+        // every call in this file relies on that default, so the fallback
+        // candidate itself must be an explicitly real driver.
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(driver, available = true, isTest = false))
         JdbcTemplate(dataSource).update(
             "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
             java.sql.Timestamp.from(Instant.parse("2000-01-01T00:00:00Z").minusSeconds((0..3_000_000_000L).random())),

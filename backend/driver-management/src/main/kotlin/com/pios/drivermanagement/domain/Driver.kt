@@ -136,6 +136,10 @@ class Driver(
      *
      * Returns null when the declared availability matches the current
      * state, since no change occurred to report.
+     *
+     * Carries this driver's own [isTest] on the produced event (ADR-069) --
+     * this aggregate's own field, sourced by the owning module, never
+     * inferred or fetched by any consumer.
      */
     fun declareAvailability(newAvailability: Availability): DriverAvailabilityChanged? {
         if (newAvailability == availability) {
@@ -144,7 +148,8 @@ class Driver(
         availability = newAvailability
         return DriverAvailabilityChanged(
             driverId = id,
-            availability = newAvailability
+            availability = newAvailability,
+            isTest = isTest
         )
     }
 }

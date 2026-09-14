@@ -49,6 +49,17 @@ interface DriverAvailabilityRepository {
      * `available = true` and happens to be the longest-standing one.
      * Defaults to empty so every other, unrelated caller is unaffected.
      *
+     * [orderIsTest] (ADR-069 Part 3) is a second, mandatory eligibility
+     * gate applied identically to `excluding`: a candidate is returned
+     * only if [DriverAvailabilityRecord.isTest] is **not null** and
+     * exactly equals [orderIsTest] -- strict equality in both directions
+     * (a real order never matches a test driver and vice versa), and a
+     * driver whose classification is still unknown (`null`) is never
+     * returned for either kind of order. No default value: every caller
+     * must state explicitly which population this order belongs to,
+     * mirroring [excluding]'s own load-bearing, never-silently-omitted
+     * role in this same method.
+     *
      * Defaults to `null` so every existing implementation of this interface
      * — none of which has any interest in fallback selection — continues to
      * compile and behave exactly as before this method's own addition
@@ -59,5 +70,5 @@ interface DriverAvailabilityRepository {
      * [com.pios.dispatch.persistence.PostgreSQLDriverAvailabilityRepository]
      * overrides it with a real query.
      */
-    fun findLongestIdleAvailable(excluding: Set<DriverReference> = emptySet()): DriverReference? = null
+    fun findLongestIdleAvailable(orderIsTest: Boolean, excluding: Set<DriverReference> = emptySet()): DriverReference? = null
 }

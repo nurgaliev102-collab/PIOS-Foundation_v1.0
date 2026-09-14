@@ -25,12 +25,19 @@ import org.springframework.stereotype.Component
  * Dispatch's own dead-letter queue rather than discarding or
  * misinterpreting it.
  *
- * Extracts only `payload.driverId` and `payload.availability` -- the
- * fields the Driver Management -> Dispatch contract
+ * Extracts `payload.driverId`, `payload.availability`, and (ADR-069)
+ * `payload.isTest` -- the fields the Driver Management -> Dispatch contract
  * (INTERFACE_CONTRACTS.md Section 5) actually justifies -- and translates
  * them, together with the envelope's own `eventId`, into a primitive-typed
  * [DriverAvailabilityUpdateCommand] before calling the application
  * service. Never imports any Driver Management type.
+ *
+ * `payload.isTest` is read **tolerantly** (ADR-069 Part 2): present and a
+ * boolean -> that value; absent, `null`, or any non-boolean JSON node ->
+ * `null` ("unknown"), never coerced to `false`. This is the whole safety
+ * property the projection depends on -- a message published by a
+ * not-yet-upgraded Driver Management instance (missing the field
+ * entirely) must produce "unknown," never silently "real."
  *
  * Not catching any exception here is deliberate: letting it propagate is
  * what lets the container's retry-then-recoverer advice
@@ -77,11 +84,18 @@ class DriverAvailabilityChangedListener(
             else -> throw IllegalArgumentException("Unsupported payload.availability value: '$availability'")
         }
 
+        // ADR-069 Part 2: tolerant read -- present and boolean -> that
+        // value; anything else (missing field, null, non-boolean) -> null
+        // ("unknown"), never `false`.
+        val isTestNode = data.get("isTest")
+        val isTest = if (isTestNode != null && isTestNode.isBoolean) isTestNode.asBoolean() else null
+
         applicationService.handle(
             DriverAvailabilityUpdateCommand(
                 eventId = eventId,
                 driverReference = driverReference,
-                available = available
+                available = available,
+                isTest = isTest
             )
         )
     }

@@ -28,7 +28,7 @@ class PostgreSQLDriverAvailabilityRepositoryTest {
     fun `upserting a record makes it findable`() {
         val driverReference = DriverReference("repo-driver-${UUID.randomUUID()}")
 
-        repository.upsert(DriverAvailabilityRecord(driverReference, available = true))
+        repository.upsert(DriverAvailabilityRecord(driverReference, available = true, isTest = false))
 
         assertEquals(true, repository.findByDriverReference(driverReference)?.available)
     }
@@ -37,8 +37,8 @@ class PostgreSQLDriverAvailabilityRepositoryTest {
     fun `upserting the same driver reference again replaces the previous value`() {
         val driverReference = DriverReference("repo-driver-${UUID.randomUUID()}")
 
-        repository.upsert(DriverAvailabilityRecord(driverReference, available = true))
-        repository.upsert(DriverAvailabilityRecord(driverReference, available = false))
+        repository.upsert(DriverAvailabilityRecord(driverReference, available = true, isTest = false))
+        repository.upsert(DriverAvailabilityRecord(driverReference, available = false, isTest = false))
 
         assertEquals(false, repository.findByDriverReference(driverReference)?.available)
     }
@@ -66,6 +66,16 @@ class PostgreSQLDriverAvailabilityRepositoryTest {
         java.sql.Timestamp.from(java.time.Instant.parse("2000-01-01T00:00:00Z").minusSeconds((0..3_000_000_000L).random()))
 
     /**
+     * Strictly older than anything [farPastTimestamp] can ever produce
+     * (whose own range never reaches earlier than ~1905) -- used only where
+     * a row must deterministically outrank *every* other `available = true`
+     * row this shared table may already hold from any other test in this
+     * suite, not merely the one or two rows a single test itself creates.
+     */
+    private fun evenFurtherPastTimestamp(): java.sql.Timestamp =
+        java.sql.Timestamp.from(java.time.Instant.parse("1800-01-01T00:00:00Z").minusSeconds((0..3_000_000_000L).random()))
+
+    /**
      * `driver_availability` is never cleaned between test runs anywhere in
      * this suite (every existing test relies only on unique UUIDs per row,
      * never on the table's overall contents or order) -- harmless until a
@@ -89,7 +99,7 @@ class PostgreSQLDriverAvailabilityRepositoryTest {
         val newer = DriverReference("repo-driver-newer-${UUID.randomUUID()}")
 
         try {
-            repository.upsert(DriverAvailabilityRecord(oldest, available = true))
+            repository.upsert(DriverAvailabilityRecord(oldest, available = true, isTest = false))
             // Forced far into the past so this row is deterministically
             // older than anything this shared pios_dispatch_test table
             // already holds from other test runs -- the only way to make
@@ -102,9 +112,9 @@ class PostgreSQLDriverAvailabilityRepositoryTest {
                 farPastTimestamp(),
                 oldest.driverId
             )
-            repository.upsert(DriverAvailabilityRecord(newer, available = true))
+            repository.upsert(DriverAvailabilityRecord(newer, available = true, isTest = false))
 
-            assertEquals(oldest, repository.findLongestIdleAvailable())
+            assertEquals(oldest, repository.findLongestIdleAvailable(orderIsTest = false))
         } finally {
             deleteDriverAvailability(listOf(oldest, newer))
         }
@@ -116,14 +126,14 @@ class PostgreSQLDriverAvailabilityRepositoryTest {
         val oldestButUnavailable = DriverReference("repo-driver-oldest-unavail-${UUID.randomUUID()}")
 
         try {
-            repository.upsert(DriverAvailabilityRecord(oldestButUnavailable, available = false))
+            repository.upsert(DriverAvailabilityRecord(oldestButUnavailable, available = false, isTest = false))
             jdbcTemplate.update(
                 "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
                 farPastTimestamp(),
                 oldestButUnavailable.driverId
             )
 
-            assertNotEquals(oldestButUnavailable, repository.findLongestIdleAvailable())
+            assertNotEquals(oldestButUnavailable, repository.findLongestIdleAvailable(orderIsTest = false))
         } finally {
             deleteDriverAvailability(listOf(oldestButUnavailable))
         }
@@ -152,13 +162,13 @@ class PostgreSQLDriverAvailabilityRepositoryTest {
             // farPastTimestamp() on its own would give each independently
             // (which could tie or invert their relative order).
             val referenceInstant = Instant.parse("1995-01-01T00:00:00Z").minusSeconds((0..1_000_000_000L).random())
-            repository.upsert(DriverAvailabilityRecord(excluded, available = true))
+            repository.upsert(DriverAvailabilityRecord(excluded, available = true, isTest = false))
             jdbcTemplate.update(
                 "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
                 java.sql.Timestamp.from(referenceInstant.minusSeconds(10_000_000)),
                 excluded.driverId
             )
-            repository.upsert(DriverAvailabilityRecord(nextOldest, available = true))
+            repository.upsert(DriverAvailabilityRecord(nextOldest, available = true, isTest = false))
             jdbcTemplate.update(
                 "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
                 java.sql.Timestamp.from(referenceInstant),
@@ -166,8 +176,8 @@ class PostgreSQLDriverAvailabilityRepositoryTest {
             )
 
             // Without the exclusion, `excluded` (forced strictly older) would win.
-            assertEquals(excluded, repository.findLongestIdleAvailable())
-            assertEquals(nextOldest, repository.findLongestIdleAvailable(excluding = setOf(excluded)))
+            assertEquals(excluded, repository.findLongestIdleAvailable(orderIsTest = false))
+            assertEquals(nextOldest, repository.findLongestIdleAvailable(orderIsTest = false, excluding = setOf(excluded)))
         } finally {
             deleteDriverAvailability(listOf(excluded, nextOldest))
         }
@@ -183,16 +193,114 @@ class PostgreSQLDriverAvailabilityRepositoryTest {
         val onlyDriver = DriverReference("repo-driver-only-${UUID.randomUUID()}")
 
         try {
-            repository.upsert(DriverAvailabilityRecord(onlyDriver, available = true))
+            repository.upsert(DriverAvailabilityRecord(onlyDriver, available = true, isTest = false))
             jdbcTemplate.update(
                 "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
                 farPastTimestamp(),
                 onlyDriver.driverId
             )
 
-            assertNotEquals(onlyDriver, repository.findLongestIdleAvailable(excluding = setOf(onlyDriver)))
+            assertNotEquals(onlyDriver, repository.findLongestIdleAvailable(orderIsTest = false, excluding = setOf(onlyDriver)))
         } finally {
             deleteDriverAvailability(listOf(onlyDriver))
+        }
+    }
+
+    // --- ADR-069: test/real segregation ---
+
+    @Test
+    fun `findLongestIdleAvailable never returns a test driver for a real order, even as the only available candidate`() {
+        val jdbcTemplate = JdbcTemplate(PostgreSQLTestDatabase.dataSource)
+        val testDriver = DriverReference("repo-driver-test-${UUID.randomUUID()}")
+
+        try {
+            repository.upsert(DriverAvailabilityRecord(testDriver, available = true, isTest = true))
+            jdbcTemplate.update(
+                "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
+                farPastTimestamp(),
+                testDriver.driverId
+            )
+
+            assertNotEquals(testDriver, repository.findLongestIdleAvailable(orderIsTest = false))
+        } finally {
+            deleteDriverAvailability(listOf(testDriver))
+        }
+    }
+
+    @Test
+    fun `findLongestIdleAvailable never returns a real driver for a test order, even as the only available candidate`() {
+        val jdbcTemplate = JdbcTemplate(PostgreSQLTestDatabase.dataSource)
+        val realDriver = DriverReference("repo-driver-real-${UUID.randomUUID()}")
+
+        try {
+            repository.upsert(DriverAvailabilityRecord(realDriver, available = true, isTest = false))
+            jdbcTemplate.update(
+                "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
+                farPastTimestamp(),
+                realDriver.driverId
+            )
+
+            assertNotEquals(realDriver, repository.findLongestIdleAvailable(orderIsTest = true))
+        } finally {
+            deleteDriverAvailability(listOf(realDriver))
+        }
+    }
+
+    @Test
+    fun `findLongestIdleAvailable never returns a driver with unknown (null) test classification, for either a real or a test order`() {
+        val jdbcTemplate = JdbcTemplate(PostgreSQLTestDatabase.dataSource)
+        val unknownDriver = DriverReference("repo-driver-unknown-${UUID.randomUUID()}")
+
+        try {
+            // No isTest supplied -- upsert's own default is null ("unknown"),
+            // exactly ADR-069 Part 4's post-migration, pre-backfill state.
+            repository.upsert(DriverAvailabilityRecord(unknownDriver, available = true))
+            jdbcTemplate.update(
+                "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
+                farPastTimestamp(),
+                unknownDriver.driverId
+            )
+
+            assertNotEquals(unknownDriver, repository.findLongestIdleAvailable(orderIsTest = false))
+            assertNotEquals(unknownDriver, repository.findLongestIdleAvailable(orderIsTest = true))
+        } finally {
+            deleteDriverAvailability(listOf(unknownDriver))
+        }
+    }
+
+    @Test
+    fun `findLongestIdleAvailable selects the matching-classification driver, skipping an older candidate of the other classification`() {
+        val jdbcTemplate = JdbcTemplate(PostgreSQLTestDatabase.dataSource)
+        val oldestTestDriver = DriverReference("repo-driver-oldest-test-${UUID.randomUUID()}")
+        val evenOlderRealDriver = DriverReference("repo-driver-even-older-real-${UUID.randomUUID()}")
+
+        try {
+            repository.upsert(DriverAvailabilityRecord(oldestTestDriver, available = true, isTest = true))
+            jdbcTemplate.update(
+                "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
+                farPastTimestamp(),
+                oldestTestDriver.driverId
+            )
+            // Forced even further into the past than farPastTimestamp() can
+            // ever reach (see evenFurtherPastTimestamp's own KDoc) -- this
+            // real candidate must deterministically outrank every other
+            // available, is_test = false row this shared table may hold at
+            // this moment, from this test or any other concurrently running
+            // one, not merely [oldestTestDriver] (which is excluded by
+            // classification alone, regardless of its own timestamp).
+            repository.upsert(DriverAvailabilityRecord(evenOlderRealDriver, available = true, isTest = false))
+            jdbcTemplate.update(
+                "UPDATE driver_availability SET updated_at = ? WHERE driver_reference = ?",
+                evenFurtherPastTimestamp(),
+                evenOlderRealDriver.driverId
+            )
+
+            // Without the predicate, the test driver would win under
+            // ORDER BY updated_at ASC LIMIT 1 alone -- it is not the oldest
+            // row here, only the oldest row of the *wrong* classification.
+            assertEquals(evenOlderRealDriver, repository.findLongestIdleAvailable(orderIsTest = false))
+        } finally {
+            deleteDriverAvailability(listOf(oldestTestDriver, evenOlderRealDriver))
         }
     }
 }

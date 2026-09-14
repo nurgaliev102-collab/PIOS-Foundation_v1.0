@@ -64,8 +64,17 @@ class PostgreSQLTrustedDriverRepository(
         )
     }
 
+    /**
+     * ADR-069 Part 3 and Part 5: `a.is_test IS NOT NULL AND a.is_test = ?`
+     * is the identical predicate
+     * [PostgreSQLDriverAvailabilityRepository.findLongestIdleAvailable]
+     * applies to Tier 3 -- ratified as one change, not a follow-up,
+     * since a real passenger with a test driver in their trusted circle
+     * would otherwise hit ADR-069's defect *first and preferentially*.
+     */
     override fun findLongestIdleTrustedAvailable(
         passengerReference: PassengerReference,
+        orderIsTest: Boolean,
         excluding: Set<DriverReference>
     ): DriverReference? {
         val sql = if (excluding.isEmpty()) {
@@ -74,6 +83,7 @@ class PostgreSQLTrustedDriverRepository(
             FROM trusted_driver_records t
             JOIN driver_availability a ON a.driver_reference = t.driver_reference
             WHERE t.passenger_reference = ? AND a.available = true
+            AND a.is_test IS NOT NULL AND a.is_test = ?
             ORDER BY a.updated_at ASC LIMIT 1
             """.trimIndent()
         } else {
@@ -82,11 +92,13 @@ class PostgreSQLTrustedDriverRepository(
             SELECT t.driver_reference
             FROM trusted_driver_records t
             JOIN driver_availability a ON a.driver_reference = t.driver_reference
-            WHERE t.passenger_reference = ? AND a.available = true AND t.driver_reference NOT IN ($placeholders)
+            WHERE t.passenger_reference = ? AND a.available = true
+            AND a.is_test IS NOT NULL AND a.is_test = ?
+            AND t.driver_reference NOT IN ($placeholders)
             ORDER BY a.updated_at ASC LIMIT 1
             """.trimIndent()
         }
-        val args = (listOf(passengerReference.passengerId) + excluding.map { it.driverId }).toTypedArray()
+        val args = (listOf(passengerReference.passengerId, orderIsTest) + excluding.map { it.driverId }).toTypedArray()
         val rows = jdbcTemplate.query(sql, { rs, _ -> DriverReference(rs.getString("driver_reference")) }, *args)
         return rows.firstOrNull()
     }

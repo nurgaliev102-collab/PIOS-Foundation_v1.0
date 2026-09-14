@@ -34,25 +34,37 @@ class PostgreSQLDriverAvailabilityRepository(
         return rowsInserted > 0
     }
 
+    /**
+     * ADR-069 Part 2: `is_test` is carried through on **every** upsert,
+     * including when [DriverAvailabilityRecord.isTest] is `null` -- never
+     * `COALESCE`d against the previous value -- so a driver's
+     * classification is refreshed on every availability change rather than
+     * being written once and trusted forever. Passing a Kotlin `null`
+     * through to `jdbcTemplate.update`'s vararg `args` writes SQL `NULL`,
+     * the same pattern already used for nullable columns elsewhere in this
+     * codebase (e.g. `PostgreSQLDriverRepository.save`'s `displayName`).
+     */
     override fun upsert(record: DriverAvailabilityRecord) {
         jdbcTemplate.update(
             """
-            INSERT INTO driver_availability (driver_reference, available)
-            VALUES (?, ?)
-            ON CONFLICT (driver_reference) DO UPDATE SET available = EXCLUDED.available, updated_at = now()
+            INSERT INTO driver_availability (driver_reference, available, is_test)
+            VALUES (?, ?, ?)
+            ON CONFLICT (driver_reference) DO UPDATE SET available = EXCLUDED.available, is_test = EXCLUDED.is_test, updated_at = now()
             """.trimIndent(),
             record.driverReference.driverId,
-            record.available
+            record.available,
+            record.isTest
         )
     }
 
     override fun findByDriverReference(driverReference: DriverReference): DriverAvailabilityRecord? {
         val rows = jdbcTemplate.query(
-            "SELECT driver_reference, available FROM driver_availability WHERE driver_reference = ?",
+            "SELECT driver_reference, available, is_test FROM driver_availability WHERE driver_reference = ?",
             { rs, _ ->
                 DriverAvailabilityRecord(
                     driverReference = DriverReference(rs.getString("driver_reference")),
-                    available = rs.getBoolean("available")
+                    available = rs.getBoolean("available"),
+                    isTest = rs.getObject("is_test") as Boolean?
                 )
             },
             driverReference.driverId
@@ -66,15 +78,30 @@ class PostgreSQLDriverAvailabilityRepository(
      * true` rows is the driver whose availability has stood unchanged the
      * longest, i.e. is currently the most idle. See [DriverAvailabilityRepository.findLongestIdleAvailable]'s
      * own KDoc for why [excluding] exists.
+     *
+     * ADR-069 Part 3: `is_test IS NOT NULL AND is_test = ?` is the same
+     * fail-closed, strict-equality predicate applied identically to
+     * [com.pios.dispatch.persistence.PostgreSQLTrustedDriverRepository.findLongestIdleTrustedAvailable]'s
+     * Tier 1 query -- a driver whose classification is still unknown
+     * (`NULL`) is never returned for either a real or a test order.
      */
-    override fun findLongestIdleAvailable(excluding: Set<DriverReference>): DriverReference? {
+    override fun findLongestIdleAvailable(orderIsTest: Boolean, excluding: Set<DriverReference>): DriverReference? {
         val sql = if (excluding.isEmpty()) {
-            "SELECT driver_reference FROM driver_availability WHERE available = true ORDER BY updated_at ASC LIMIT 1"
+            """
+            SELECT driver_reference FROM driver_availability
+            WHERE available = true AND is_test IS NOT NULL AND is_test = ?
+            ORDER BY updated_at ASC LIMIT 1
+            """.trimIndent()
         } else {
             val placeholders = excluding.joinToString(", ") { "?" }
-            "SELECT driver_reference FROM driver_availability WHERE available = true AND driver_reference NOT IN ($placeholders) ORDER BY updated_at ASC LIMIT 1"
+            """
+            SELECT driver_reference FROM driver_availability
+            WHERE available = true AND is_test IS NOT NULL AND is_test = ?
+            AND driver_reference NOT IN ($placeholders)
+            ORDER BY updated_at ASC LIMIT 1
+            """.trimIndent()
         }
-        val args = excluding.map { it.driverId }.toTypedArray()
+        val args = (listOf(orderIsTest) + excluding.map { it.driverId }).toTypedArray()
         val rows = jdbcTemplate.query(sql, { rs, _ -> DriverReference(rs.getString("driver_reference")) }, *args)
         return rows.firstOrNull()
     }
