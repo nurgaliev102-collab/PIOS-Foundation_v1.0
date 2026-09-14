@@ -28,10 +28,14 @@ export function RideHistoryCard({ dateTime, route, counterpart, price }: RideHis
   return (
     <Card tone="muted">
       <div className={styles.header}>
-        <Text role="body" strong>
-          {counterpart}
-        </Text>
-        <RideStatus status="COMPLETED" label="Завершена" />
+        <div className={styles.name}>
+          <Text role="body" strong>
+            {counterpart}
+          </Text>
+        </div>
+        <div className={styles.statusBadge}>
+          <RideStatus status="COMPLETED" label="Завершена" />
+        </div>
       </div>
       {route && <Text role="body">{route}</Text>}
       <div className={styles.footer}>

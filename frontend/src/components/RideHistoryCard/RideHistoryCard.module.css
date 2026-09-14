@@ -6,6 +6,24 @@
   width: 100%;
 }
 
+.name {
+  min-width: 0;
+  flex: 1;
+}
+
+/* `RideStatus` → `StatusMessage` sets `width: 100%` for its own primary
+   use case (a full-width standalone banner) -- composed here as a header
+   badge next to a name, that 100% would otherwise resolve against this
+   flex row itself and claim the entire header width, squeezing the name
+   down to nothing (observed: it broke mid-word, one letter per line).
+   `width: max-content` makes this wrapper (and so the badge inside it)
+   shrink to the badge's own natural size instead. */
+.statusBadge {
+  flex-shrink: 0;
+  width: max-content;
+  max-width: 60%;
+}
+
 .footer {
   display: flex;
   align-items: baseline;
