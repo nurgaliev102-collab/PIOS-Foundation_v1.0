@@ -563,8 +563,13 @@ export function PassengerLanding() {
               <h2 className={styles.stepsTitle}>Как работает PIOS</h2>
 
               <div className={styles.stepRow}>
-                <span className={styles.stepEmoji} aria-hidden="true">
-                  🚖
+                <span className={styles.stepIcon} aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 16v-3.5l1.7-4A2 2 0 0 1 7.6 7h8.8a2 2 0 0 1 1.9 1.4l1.4 4.1V16" />
+                    <path d="M4 16h16" />
+                    <circle cx="7.5" cy="16" r="1.6" />
+                    <circle cx="16.5" cy="16" r="1.6" />
+                  </svg>
                 </span>
                 <div>
                   <p className={styles.stepTitle}>Заказывайте поездки</p>
@@ -573,8 +578,11 @@ export function PassengerLanding() {
               </div>
 
               <div className={styles.stepRow}>
-                <span className={styles.stepEmoji} aria-hidden="true">
-                  👤
+                <span className={styles.stepIcon} aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="8.5" r="3.25" />
+                    <path d="M5 20c1-3.5 4-5.5 7-5.5s6 2 7 5.5" />
+                  </svg>
                 </span>
                 <div>
                   <p className={styles.stepTitle}>Заказ получает {invitation.driverName}</p>
@@ -714,7 +722,11 @@ export function PassengerLanding() {
         )}
       </main>
       {showOnboarding && (
-        <PassengerOnboarding onComplete={handleOnboardingDismiss} onSkip={handleOnboardingDismiss} />
+        <PassengerOnboarding
+          driverName={invitation?.driverName}
+          onComplete={handleOnboardingDismiss}
+          onSkip={handleOnboardingDismiss}
+        />
       )}
       {showInstall && <InstallPIOS onClose={() => setShowInstall(false)} />}
     </div>

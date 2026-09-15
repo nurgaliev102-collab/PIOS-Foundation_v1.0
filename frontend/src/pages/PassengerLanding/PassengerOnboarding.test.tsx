@@ -11,10 +11,16 @@ describe('PassengerOnboarding', () => {
     vi.useRealTimers()
   })
 
-  it('opens on the invitation scene', () => {
+  it('opens on the invitation scene, personalized with the real inviting driver\'s name', () => {
+    render(<PassengerOnboarding driverName="Алексей" onComplete={vi.fn()} onSkip={vi.fn()} />)
+
+    expect(screen.getByText('Вас пригласил Алексей')).toBeInTheDocument()
+  })
+
+  it('falls back to a neutral driver reference when no real name is available', () => {
     render(<PassengerOnboarding onComplete={vi.fn()} onSkip={vi.fn()} />)
 
-    expect(screen.getByText('Вас пригласил Артур')).toBeInTheDocument()
+    expect(screen.getByText('Вас пригласил ваш водитель')).toBeInTheDocument()
   })
 
   it('reaches the conclusion scene with its call to action after all scenes elapse', () => {

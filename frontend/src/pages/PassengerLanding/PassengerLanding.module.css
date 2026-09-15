@@ -145,10 +145,19 @@
   padding: var(--pios-space-2) 0;
 }
 
-.stepEmoji {
+.stepIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  font-size: 1.375rem;
-  line-height: 1.5rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--pios-color-text-secondary);
+}
+
+.stepIcon svg {
+  width: 1.375rem;
+  height: 1.375rem;
 }
 
 .stepTitle {

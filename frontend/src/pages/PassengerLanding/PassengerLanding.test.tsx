@@ -472,7 +472,7 @@ describe('PassengerLanding', () => {
 
     renderAt('driver-1')
 
-    expect(await screen.findByText('Вас пригласил Артур')).toBeInTheDocument() // onboarding auto-shown
+    expect(await screen.findByText('Вас пригласил Иван')).toBeInTheDocument() // onboarding auto-shown, real driver name
     await userEvent.click(screen.getByText('Пропустить'))
 
     expect(await screen.findByRole('button', { name: 'Позже' })).toBeInTheDocument() // install chained in next
