@@ -1,0 +1,58 @@
+spring:
+  application:
+    name: billing
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:5432/pios_billing
+    username: postgres
+    password:
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/billing
+
+server:
+  port: 8088
+
+# T-1 (ENGINEERING_EXECUTION_PLAN_SPRINT_1_PLATFORM_OPERATIONS_MVP.md): a
+# rolling log file, so one exists before this module becomes a Windows
+# service (ADR-049 Decision 5). Shared directory: `backend/logs/`, one
+# level above every module's own working directory, mirroring every other
+# module's identical logging configuration.
+logging:
+  file:
+    name: ../logs/billing.log
+  logback:
+    rollingpolicy:
+      max-file-size: 20MB
+      max-history: 14
+      total-size-cap: 500MB
+
+# ADR-044 (Owner Authentication): the one credential `GET /v1/health` and
+# `POST /v1/subscriptions/{driverId}/periods` both check. Deliberately left
+# unset here -- an unset username/password-hash/password-salt makes
+# OwnerCredentialGate.isConfigured() false, which denies every request
+# rather than defaulting open. Each deployment must set all three
+# explicitly, generated for that deployment (`pios.owner.password-hash`/
+# `pios.owner.password-salt` are PBKDF2-HMAC-SHA256 output and its salt,
+# both base64, never the plain password).
+# pios:
+#   owner:
+#     username: ""
+#     password-hash: ""
+#     password-salt: ""
+#     password-iterations: 210000
+#     auth:
+#       failure-delay-ms: 500
+#       max-failures-per-window: 20
+#       window-ms: 900000
+#   # ADR-055 (Session Authentication and Password Credential): the shared
+#   # HMAC secret this module's own SessionTokenVerifier checks a session
+#   # token against, used only by GET /v1/subscriptions/{driverId}.
+#   # Deliberately left unset here -- an unset pios.session.secret makes
+#   # SessionTokenVerifier.verify() return null for every token, so that
+#   # endpoint responds 401, the same fail-closed posture pios.owner.*
+#   # already establishes above. Must be set to the exact same value
+#   # `identity`'s own pios.session.secret carries -- this module has no
+#   # build-time dependency on identity and never calls it; verification is
+#   # entirely local (ADR-055 Decision 1).
+#   session:
+#     secret: ""
