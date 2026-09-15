@@ -30,5 +30,5 @@ class InMemoryDriverRepository : DriverRepository {
     override fun findAll(): List<Driver> = store.values.toList()
 
     override fun countInvitedBy(id: DriverId): Long =
-        store.values.count { it.invitedByDriverId == id.value && !it.isTest }.toLong()
+        store.values.count { it.invitedByDriverId == id.value }.toLong()
 }

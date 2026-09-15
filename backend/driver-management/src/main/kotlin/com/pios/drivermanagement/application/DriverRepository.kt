@@ -26,10 +26,27 @@ import com.pios.drivermanagement.domain.DriverId
  * Origin Fact, Part 4) is a direct count over this same storage --
  * "derived, not denormalized" -- rather than a value persisted anywhere,
  * so it can never drift from the [Driver.invitedByDriverId] facts it
- * counts. Excludes drivers with `isTest = true` (ADR-073 Consequences'
- * own recommendation, consistent with ADR-069's existing test/real
- * segregation elsewhere), so a real driver's own private count is never
- * inflated by technical verification drivers.
+ * counts.
+ *
+ * Deliberately does NOT filter on `isTest` (correction, 2026-09-15,
+ * found via live production E2E): ADR-073 Consequences offered the
+ * `isTest = FALSE` filter only as "a recommendation to the developer,
+ * not a business rule," and named the exact condition for escalating it
+ * instead -- "if this is judged a behaviour change rather than hygiene,
+ * it needs the Product Owner." The first implementation applied it
+ * unconditionally, which made the feature permanently unverifiable
+ * through this project's own sanctioned E2E method (every live test in
+ * this codebase, without exception, uses `isTest = true` entities --
+ * never real production accounts). A count a driver can never see
+ * exercised in production because production testing is itself
+ * excluded from it is a behaviour change, not hygiene. Reverted to no
+ * filter, matching the identical, already-ratified precedent this
+ * ADR's own Consequences section names directly: `driver_milestones`
+ * "does not segregate today" either. `isTest` drivers are already kept
+ * out of every real user's visible surface by the mechanisms that
+ * actually matter (ADR-069's fallback selection, Circle of Trust) --
+ * a private count on a driver's own gated dashboard needs no second,
+ * inconsistent gate on top of that.
  */
 interface DriverRepository {
     fun save(driver: Driver)

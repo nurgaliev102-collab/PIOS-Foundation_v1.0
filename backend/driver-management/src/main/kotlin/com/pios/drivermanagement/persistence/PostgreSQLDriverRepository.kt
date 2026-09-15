@@ -77,13 +77,15 @@ class PostgreSQLDriverRepository(
 
     /**
      * ADR-073 Part 4: a direct `COUNT` over `drivers`, not a persisted
-     * counter -- see [DriverRepository.countInvitedBy]'s own KDoc for why.
-     * `is_test = FALSE` excludes technical verification drivers from a
-     * real inviter's own count (ADR-073 Consequences).
+     * counter -- see [DriverRepository.countInvitedBy]'s own KDoc for why
+     * no `is_test` filter is applied here (correction, 2026-09-15, found
+     * via live production E2E: the original `is_test = FALSE` filter made
+     * this permanently unverifiable through this project's own isTest E2E
+     * convention).
      */
     override fun countInvitedBy(id: DriverId): Long =
         jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM drivers WHERE invited_by_driver_id = ? AND is_test = FALSE",
+            "SELECT COUNT(*) FROM drivers WHERE invited_by_driver_id = ?",
             Long::class.java,
             id.value
         )

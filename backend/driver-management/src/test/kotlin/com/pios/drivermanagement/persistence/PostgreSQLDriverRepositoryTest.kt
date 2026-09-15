@@ -180,7 +180,7 @@ class PostgreSQLDriverRepositoryTest {
     }
 
     @Test
-    fun `countInvitedBy counts only real drivers invited by the given driver, over real PostgreSQL data`() {
+    fun `countInvitedBy counts every driver invited by the given driver, real and isTest alike, over real PostgreSQL data`() {
         val inviter = Driver(DriverId("postgres-driver-count-invited-inviter"))
         repository.save(inviter)
         repository.save(Driver(DriverId("postgres-driver-count-invited-real-1"), invitedByDriverId = inviter.id.value))
@@ -188,7 +188,7 @@ class PostgreSQLDriverRepositoryTest {
         repository.save(Driver(DriverId("postgres-driver-count-invited-test"), invitedByDriverId = inviter.id.value, isTest = true))
         repository.save(Driver(DriverId("postgres-driver-count-invited-unrelated")))
 
-        assertEquals(2L, repository.countInvitedBy(inviter.id))
+        assertEquals(3L, repository.countInvitedBy(inviter.id))
     }
 
     @Test

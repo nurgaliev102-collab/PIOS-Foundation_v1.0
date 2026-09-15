@@ -69,7 +69,14 @@ abstract class DriverRepositoryContractTest {
     // --- ADR-073: Driver-to-Driver Referral -- Single-Hop Origin Fact ---
 
     @Test
-    fun `countInvitedBy counts only real drivers naming the given driver as invitedByDriverId`() {
+    fun `countInvitedBy counts every driver naming the given driver as invitedByDriverId, real and isTest alike`() {
+        // Correction, 2026-09-15, found via live production E2E: an earlier
+        // version of this repository excluded isTest drivers, which made
+        // the feature permanently unverifiable through this project's own
+        // isTest E2E convention. ADR-073 Consequences named that filter as
+        // a developer recommendation, not a business rule, with an
+        // explicit escalation condition this crossed -- see
+        // DriverRepository.countInvitedBy's own KDoc.
         val repository = createRepository()
         val inviter = Driver(DriverId("contract-test-invited-by-inviter"))
         repository.save(inviter)
@@ -77,7 +84,7 @@ abstract class DriverRepositoryContractTest {
         repository.save(Driver(DriverId("contract-test-invited-by-test"), invitedByDriverId = inviter.id.value, isTest = true))
         repository.save(Driver(DriverId("contract-test-invited-by-unrelated")))
 
-        assertEquals(1L, repository.countInvitedBy(inviter.id))
+        assertEquals(2L, repository.countInvitedBy(inviter.id))
     }
 
     @Test

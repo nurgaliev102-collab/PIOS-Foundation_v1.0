@@ -554,7 +554,7 @@ class DriverControllerTest {
     }
 
     @Test
-    fun `milestones exposes invitedDriversCount, excluding test drivers, private to the inviter's own Bearer token`() {
+    fun `milestones exposes invitedDriversCount, real and isTest invitees alike, private to the inviter's own Bearer token`() {
         controller.createDriver(CreateDriverRequest("adr073-milestones-inviter"))
         controller.createDriver(CreateDriverRequest("adr073-milestones-real-1", invitedByDriverId = "adr073-milestones-inviter"))
         controller.createDriver(CreateDriverRequest("adr073-milestones-real-2", invitedByDriverId = "adr073-milestones-inviter"))
@@ -563,7 +563,7 @@ class DriverControllerTest {
         val response = controller.getMilestones("adr073-milestones-inviter", authorization = driverToken("adr073-milestones-inviter"))
 
         assertEquals(HttpStatus.OK, response.statusCode)
-        assertEquals(2L, assertNotNull(response.body).invitedDriversCount)
+        assertEquals(3L, assertNotNull(response.body).invitedDriversCount)
     }
 
     @Test
