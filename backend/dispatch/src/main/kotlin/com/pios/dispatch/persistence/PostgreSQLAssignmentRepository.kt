@@ -140,6 +140,27 @@ class PostgreSQLAssignmentRepository(
             order.orderId
         )
 
+    /**
+     * [AssignmentRepository.findByOrders]'s own PostgreSQL adapter: the
+     * same `IN (...)` batching technique
+     * [PostgreSQLDriverAvailabilityRepository.findLongestIdleAvailable]
+     * already uses for its `NOT IN` exclusion set, applied here to a
+     * positive filter instead.
+     */
+    override fun findByOrders(orders: List<OrderReference>): List<Assignment> {
+        if (orders.isEmpty()) return emptyList()
+        val placeholders = orders.joinToString(", ") { "?" }
+        return jdbcTemplate.query(
+            """
+            SELECT id, order_reference, driver_reference, status, status_changed_at,
+                   arrived_at, started_at, completed_at, is_test
+            FROM assignments WHERE order_reference IN ($placeholders)
+            """.trimIndent(),
+            { rs, _ -> reconstruct(rs) },
+            *orders.map { it.orderId }.toTypedArray()
+        )
+    }
+
     private fun reconstruct(rs: ResultSet): Assignment {
         val constructor = Assignment::class.java.getDeclaredConstructor(
             String::class.java,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Header } from '../../components/Header'
 import { BottomNav } from '../../components/BottomNav'
@@ -28,6 +28,14 @@ import { DriverOnboarding } from './DriverOnboarding'
 import { hasSeenDriverOnboarding, markDriverOnboardingSeen } from '../../persistence/localOnboardingSeen'
 import { InstallPIOS, isStandalone } from '../../features/install'
 import { hasSeenInstallHelp } from '../../persistence/localInstallSeen'
+import {
+  NotificationBell,
+  useNotificationFacts,
+  type NotificationAssignmentSnapshot,
+  type NotificationMessageSnapshot,
+  type NotificationOrderSnapshot,
+  type NotificationProposalSnapshot,
+} from '../../features/notifications'
 import styles from './DriverHome.module.css'
 
 const MIN_PASSWORD_LENGTH = 8
@@ -187,6 +195,15 @@ interface AssignmentInfo {
 
 interface OrderListItem {
   id: string
+  // ADR-071 (In-App, Poll-Derived Notification Surface), Part 3, D5's own
+  // sole enabler: `OrderResponse.status` (Order Management,
+  // `OrderResponse.kt` line 54) has always been returned by `GET
+  // /v1/orders?ids=` -- this is a type-only declaration of a field
+  // already present in every response this screen already receives, not
+  // a new request or a backend change. Used only to notice a proposal's
+  // own order becoming `CANCELLED` (see `features/notifications`'s own
+  // `deriveNotificationFacts.ts`); not rendered directly anywhere.
+  status: string
   // Sprint "My Business + Circle of Trust": `GET /v1/orders`'s own
   // `OrderResponse.origin` already carries the order's passenger reference
   // (`OrderOrigin`, Order Management -- see `Coordinator.tsx`'s own note on
@@ -495,6 +512,75 @@ function passengerNamesByReference(orders: Record<string, OrderListItem>): Recor
     }
   }
   return names
+}
+
+/** Per-passenger ride stats [clientRideStatsByReference] below produces -- see that function's own KDoc. */
+interface ClientRideStats {
+  rideCount: number
+  /** The most recent completed ride's own `Assignment.statusChangedAt` (ISO-8601), or `null` if this passenger has none yet -- format with [formatHistoryDateTime], same as [completedRides] already does. */
+  lastRideAt: string | null
+  /** Mirrors the backend's own `driver_client_rides.ride_count >= 2` threshold verbatim (see this function's own KDoc) -- not a new business rule invented here. */
+  isRepeat: boolean
+}
+
+/** The honest zero [ClientRideStats] a connection with no completed ride yet renders -- see [clientRideStatsByReference]'s own KDoc on why this is a real zero, not a hidden/skipped row. */
+const ZERO_CLIENT_RIDE_STATS: ClientRideStats = { rideCount: 0, lastRideAt: null, isRepeat: false }
+
+/**
+ * Client CRM depth ("Мой бизнес -> Клиенты"): per-passenger ride count,
+ * last-ride date, and repeat flag, built entirely from this screen's own
+ * already-loaded state -- [completedRides] (itself derived from
+ * [proposals]/[assignments], this file's own existing derivation, below),
+ * plus [orderDetails] to resolve each order's own passengerReference
+ * (`OrderListItem.origin`, exactly like [passengerNamesByReference]
+ * immediately above). No new request, no new backend endpoint.
+ *
+ * [completedRides] is already sorted newest-first (its own definition,
+ * below), so the first entry seen for a given passengerReference is
+ * already that passenger's most recent ride -- no separate max/sort step
+ * is needed here.
+ *
+ * `isRepeat` reaching `true` at `rideCount >= 2` mirrors driver-management's
+ * own `driver_client_rides.ride_count` threshold verbatim
+ * (`V7__driver_milestones_repeat_clients.sql`: "ride_count reaching 2 is
+ * the moment this pair becomes a 'repeat client'") -- the same rule
+ * already used server-side to increment `driver_milestones.repeat_clients_count`,
+ * not a new one invented on this screen.
+ *
+ * A passenger with a connection but no completed ride yet has no entry in
+ * the returned record -- callers default to `{ rideCount: 0, lastRideAt:
+ * null, isRepeat: false }` rather than this function inventing a
+ * placeholder, so that default renders as a real, honest zero (this
+ * file's own "Сегодня" tiles' no-hiding-a-zero convention) rather than
+ * being hidden.
+ */
+function clientRideStatsByReference(
+  completedRides: ProposalListItem[],
+  orderDetails: Record<string, OrderListItem>,
+  assignments: Record<string, AssignmentInfo>
+): Record<string, ClientRideStats> {
+  const stats: Record<string, ClientRideStats> = {}
+  for (const proposal of completedRides) {
+    const order = orderDetails[proposal.orderId]
+    if (!order) {
+      continue
+    }
+    const passengerReference = order.origin
+    const existing = stats[passengerReference]
+    if (existing) {
+      existing.rideCount += 1
+    } else {
+      stats[passengerReference] = {
+        rideCount: 1,
+        lastRideAt: assignments[proposal.orderId]?.statusChangedAt ?? null,
+        isRepeat: false,
+      }
+    }
+  }
+  for (const passengerReference of Object.keys(stats)) {
+    stats[passengerReference].isRepeat = stats[passengerReference].rideCount >= 2
+  }
+  return stats
 }
 
 /**
@@ -974,34 +1060,46 @@ export function DriverHome() {
 
   /**
    * ADR-040 (Assignment Ride Lifecycle): looks up the Assignment for each
-   * ACCEPTED proposal in [currentProposals] (Dispatch has no bulk-by-driver
-   * assignment query — only `?orderId=` — so this is one request per
-   * accepted order; fine at the scale a single driver's own screen ever
-   * shows). Reads the freshly-fetched proposals passed in, not the
+   * ACCEPTED proposal in [currentProposals], in one batched request via
+   * `GET /v1/assignments?orderIds=<id>,<id>,...` -- Dispatch's own
+   * `AssignmentController.listAssignments` (Client CRM depth / N+1 fix
+   * task) now accepts this alongside its original single-`orderId` mode,
+   * the same comma-separated-ids convention `GET /v1/orders?ids=` already
+   * established (ADR-060 Mode 2). Previously issued one request per
+   * accepted order, every 3-second poll -- a real N+1 this fixes without
+   * changing the poll interval or anything this function's own callers
+   * observe. Reads the freshly-fetched proposals passed in, not the
    * `proposals` state, since this always runs from inside the same
    * `.then` that just resolved them — reading state here would see the
    * previous poll's value.
    */
   function loadAssignments(active: boolean, currentProposals: ProposalListItem[]) {
-    const acceptedOrderIds = currentProposals.filter((p) => p.status === 'ACCEPTED').map((p) => p.orderId)
-    Promise.all(
-      acceptedOrderIds.map((orderId) =>
-        request<AssignmentInfo[]>(`/v1/assignments?orderId=${orderId}`, { baseUrl: DISPATCH_BASE_URL }).catch(
-          () => [] as AssignmentInfo[]
-        )
-      )
-    ).then((results) => {
-      if (!active) {
-        return
-      }
-      setAssignments((current) => {
-        const updated = { ...current }
-        results.flat().forEach((assignment) => {
-          updated[assignment.orderId] = assignment
-        })
-        return updated
-      })
+    const acceptedOrderIds = Array.from(
+      new Set(currentProposals.filter((p) => p.status === 'ACCEPTED').map((p) => p.orderId))
+    )
+    if (acceptedOrderIds.length === 0) {
+      return
+    }
+    request<AssignmentInfo[]>(`/v1/assignments?orderIds=${acceptedOrderIds.join(',')}`, {
+      baseUrl: DISPATCH_BASE_URL,
     })
+      .then((results) => {
+        if (!active) {
+          return
+        }
+        setAssignments((current) => {
+          const updated = { ...current }
+          results.forEach((assignment) => {
+            updated[assignment.orderId] = assignment
+          })
+          return updated
+        })
+      })
+      .catch(() => {
+        // Best-effort, same tolerance as before this fix: a failed batch
+        // leaves the last-known assignments on screen rather than clearing
+        // them, exactly like [loadOrderDetails]'s own convention.
+      })
   }
 
   // Task 23 (Assignment API Security Remediation): arrive/start/complete
@@ -1439,6 +1537,59 @@ export function DriverHome() {
     }
   }
 
+  // ADR-071 (In-App, Poll-Derived Notification Surface): reshapes this
+  // screen's own already-polled state ([proposals]/[assignments]/
+  // [orderDetails]/[messagesByProposal]) into `deriveNotificationFacts`'s
+  // own snapshot shape -- no new request. `useMemo`d on each source
+  // state's own identity so the diff effect inside [useNotificationFacts]
+  // only actually re-runs once per poll, not on every unrelated
+  // re-render (e.g. typing in a price input). Placed here, before every
+  // conditional early return below (isRestoringIdentity/!identity/
+  // !identity.driverId) -- Rules of Hooks requires every hook this
+  // component calls, including [useNotificationFacts]'s own internal
+  // ones, to run in the same order on every render.
+  const notificationProposals = useMemo<NotificationProposalSnapshot[]>(
+    () =>
+      proposals.map((p) => ({
+        proposalId: p.proposalId,
+        orderId: p.orderId,
+        status: p.status,
+        statedPrice: p.statedPrice,
+      })),
+    [proposals]
+  )
+  const notificationAssignments = useMemo<NotificationAssignmentSnapshot[]>(
+    () =>
+      Object.values(assignments).map((a) => ({
+        orderId: a.orderId,
+        status: a.status,
+        statusChangedAt: a.statusChangedAt,
+      })),
+    [assignments]
+  )
+  const notificationOrders = useMemo<NotificationOrderSnapshot[]>(
+    () => Object.values(orderDetails).map((o) => ({ id: o.id, status: o.status })),
+    [orderDetails]
+  )
+  const notificationMessages = useMemo<NotificationMessageSnapshot[]>(() => {
+    const items: NotificationMessageSnapshot[] = []
+    for (const [proposalId, proposalMessages] of Object.entries(messagesByProposal)) {
+      const orderId = proposals.find((p) => p.proposalId === proposalId)?.orderId
+      if (!orderId) {
+        continue
+      }
+      for (const message of proposalMessages) {
+        items.push({ id: message.id, proposalId, orderId, senderRole: message.senderRole, sentAt: message.sentAt })
+      }
+    }
+    return items
+  }, [messagesByProposal, proposals])
+  const {
+    facts: notificationFacts,
+    unseenCount: notificationUnseenCount,
+    markAllSeen: markAllNotificationsSeen,
+  } = useNotificationFacts('driver', notificationProposals, notificationAssignments, notificationOrders, notificationMessages)
+
   // Sprint 2 (Identity MVP): covers the restoreIdentity() round trip on
   // mount — shown before Phase 1's own check, so a returning driver never
   // sees a flash of the welcome screen while their real identity is still
@@ -1613,6 +1764,10 @@ export function DriverHome() {
       (a, b) =>
         (assignments[b.orderId]?.statusChangedAt ?? '').localeCompare(assignments[a.orderId]?.statusChangedAt ?? '')
     )
+  // Client CRM depth ("Мой бизнес -> Клиенты"): per-passenger ride
+  // count/last-ride/repeat-flag, built from [completedRides] immediately
+  // above -- see [clientRideStatsByReference]'s own KDoc.
+  const clientRideStats = clientRideStatsByReference(completedRides, orderDetails, assignments)
   // Product owner request, 2026-09-07 (business tabs): a badge on the
   // "Маршруты" tab so a driver on "Обзор"/"Клиенты" still notices a ride
   // waiting on them -- OPEN (needs Accept/Decline) or ACCEPTED (needs
@@ -1625,6 +1780,17 @@ export function DriverHome() {
   return (
     <div className={styles.screen}>
       <Header />
+      {/* ADR-071: a floating overlay, deliberately not nested inside
+          `<Header />` itself (a shared component every other screen also
+          renders, unmodified by this ADR) -- see
+          `.notificationBellSlot`'s own CSS comment. */}
+      <div className={styles.notificationBellSlot}>
+        <NotificationBell
+          facts={notificationFacts}
+          unseenCount={notificationUnseenCount}
+          onOpen={markAllNotificationsSeen}
+        />
+      </div>
       <main className={styles.content}>
         {status === 'loading' && <Spinner label="Загружаем ваш профиль…" />}
 
@@ -2071,17 +2237,37 @@ export function DriverHome() {
                   <div className={styles.passengerList}>
                     {connections.map((connection) => {
                       const name = passengerNamesByReference(orderDetails)[connection.passengerReference]
+                      const stats = clientRideStats[connection.passengerReference] ?? ZERO_CLIENT_RIDE_STATS
+                      const lastRideText = formatHistoryDateTime(stats.lastRideAt)
                       return (
                         <div key={connection.passengerReference} className={styles.passengerListItem}>
-                          <span>{name ?? 'Пассажир по вашей ссылке'}</span>
-                          <button
-                            type="button"
-                            className={styles.passengerShareAction}
-                            aria-label={`Поделиться ссылкой с ${name ?? 'пассажиром по вашей ссылке'}`}
-                            onClick={() => void handleShare()}
-                          >
-                            Поделиться
-                          </button>
+                          <div className={styles.passengerListItemRow}>
+                            <span>{name ?? 'Пассажир по вашей ссылке'}</span>
+                            <button
+                              type="button"
+                              className={styles.passengerShareAction}
+                              aria-label={`Поделиться ссылкой с ${name ?? 'пассажиром по вашей ссылке'}`}
+                              onClick={() => void handleShare()}
+                            >
+                              Поделиться
+                            </button>
+                          </div>
+                          {/* Client CRM depth ("Мой бизнес -> Клиенты"): ride
+                              count (fixed "Поездок: N", same declension-free
+                              convention as "Новых клиентов"/"Заказов
+                              создано" elsewhere on this screen -- see this
+                              file's own note on that above), last-ride date
+                              (same [formatHistoryDateTime] the "Маршруты" tab
+                              already uses), and a repeat-client flag at the
+                              same `rideCount >= 2` threshold the backend's
+                              own `driver_client_rides` already uses. Renders
+                              a real "Поездок: 0" for a connection with no
+                              completed ride yet, never hidden. */}
+                          <Text role="caption" tone="secondary">
+                            {`Поездок: ${stats.rideCount}`}
+                            {lastRideText && ` · Последняя поездка: ${lastRideText}`}
+                            {stats.isRepeat && ' · Постоянный клиент'}
+                          </Text>
                         </div>
                       )
                     })}

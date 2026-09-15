@@ -17,6 +17,17 @@
   background: var(--pios-color-background);
 }
 
+/* ADR-071 (In-App, Poll-Derived Notification Surface): same floating
+   overlay as `DriverHome.module.css`'s own `.notificationBellSlot` --
+   see that file's own comment for why this is not nested inside
+   `Header.tsx` itself. */
+.notificationBellSlot {
+  position: fixed;
+  top: calc(var(--pios-safe-area-top, 0px) + 0.5rem);
+  right: 0.75rem;
+  z-index: 15;
+}
+
 .content {
   flex: 1;
   display: flex;

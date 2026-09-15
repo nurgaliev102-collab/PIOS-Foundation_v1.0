@@ -29,4 +29,10 @@ class InMemoryAssignmentRepository : AssignmentRepository {
     override fun findById(id: AssignmentId): Assignment? = store[id]
 
     override fun findByOrder(order: OrderReference): List<Assignment> = store.values.filter { it.order == order }
+
+    override fun findByOrders(orders: List<OrderReference>): List<Assignment> {
+        if (orders.isEmpty()) return emptyList()
+        val orderSet = orders.toSet()
+        return store.values.filter { it.order in orderSet }
+    }
 }

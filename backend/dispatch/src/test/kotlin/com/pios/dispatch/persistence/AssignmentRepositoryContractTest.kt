@@ -76,6 +76,38 @@ abstract class AssignmentRepositoryContractTest {
 
         assertEquals(emptyList(), repository.findByOrder(OrderReference("contract-test-findbyorder-never-assigned")))
     }
+
+    @Test
+    fun `findByOrders returns assignments across every named order and none outside it`() {
+        val repository = createRepository()
+        val orderA = OrderReference("contract-test-findbyorders-order-a")
+        val orderB = OrderReference("contract-test-findbyorders-order-b")
+        val orderC = OrderReference("contract-test-findbyorders-order-c")
+        val inA = Assignment.create(orderA, DriverReference("contract-test-findbyorders-driver-a"))
+        val inB = Assignment.create(orderB, DriverReference("contract-test-findbyorders-driver-b"))
+        val inC = Assignment.create(orderC, DriverReference("contract-test-findbyorders-driver-c"))
+        repository.save(inA.assignment)
+        repository.save(inB.assignment)
+        repository.save(inC.assignment)
+
+        val found = repository.findByOrders(listOf(orderA, orderB))
+
+        assertTrue(found.any { it.id == inA.assignment.id })
+        assertTrue(found.any { it.id == inB.assignment.id })
+        assertTrue(found.none { it.id == inC.assignment.id })
+    }
+
+    @Test
+    fun `findByOrders returns an empty list for an empty order list, never every assignment`() {
+        val repository = createRepository()
+        val created = Assignment.create(
+            OrderReference("contract-test-findbyorders-empty-order"),
+            DriverReference("contract-test-findbyorders-empty-driver")
+        )
+        repository.save(created.assignment)
+
+        assertEquals(emptyList(), repository.findByOrders(emptyList()))
+    }
 }
 
 class InMemoryAssignmentRepositoryContractTest : AssignmentRepositoryContractTest() {

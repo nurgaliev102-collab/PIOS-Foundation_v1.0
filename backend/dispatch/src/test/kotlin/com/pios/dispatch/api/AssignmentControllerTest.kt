@@ -137,6 +137,37 @@ class AssignmentControllerTest {
         assertTrue(body.any { it.orderId == "order-7" && it.driverId == "driver-7" && it.status == "CREATED" })
     }
 
+    // --- orderIds batch mode (Client CRM depth / N+1 fix, purely additive) ---
+
+    @Test
+    fun `listing assignments by orderIds returns assignments across every named order`() {
+        controller.assignOrder(AssignOrderRequest("order-batch-1", "driver-batch-1"))
+        controller.assignOrder(AssignOrderRequest("order-batch-2", "driver-batch-2"))
+        controller.assignOrder(AssignOrderRequest("order-batch-3", "driver-batch-3"))
+
+        val response = controller.listAssignments(orderIds = "order-batch-1,order-batch-2")
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        val body = assertNotNull(response.body)
+        assertTrue(body.any { it.orderId == "order-batch-1" && it.driverId == "driver-batch-1" })
+        assertTrue(body.any { it.orderId == "order-batch-2" && it.driverId == "driver-batch-2" })
+        assertTrue(body.none { it.orderId == "order-batch-3" })
+    }
+
+    @Test
+    fun `passing both orderId and orderIds returns 400`() {
+        val response = controller.listAssignments(orderId = "order-x", orderIds = "order-y,order-z")
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
+    @Test
+    fun `a blank id inside orderIds returns 400`() {
+        val response = controller.listAssignments(orderIds = "order-batch-1,,order-batch-2")
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
     @Test
     fun `arriving a created assignment returns 200 with ARRIVED status`() {
         val created = assertNotNull(controller.assignOrder(AssignOrderRequest("order-8", "driver-8")).body)

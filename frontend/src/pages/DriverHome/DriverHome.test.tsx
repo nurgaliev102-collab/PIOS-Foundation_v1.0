@@ -346,7 +346,7 @@ describe('DriverHome', () => {
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
     mockedRequest.mockResolvedValueOnce([
       { assignmentId: 'a1', orderId: 'o3', driverId: 'driver-1', status: 'CREATED', statusChangedAt: null },
-    ]) // GET /v1/assignments?orderId=o3
+    ]) // GET /v1/assignments?orderIds=o3
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o3
 
     renderDriverHome()
@@ -381,7 +381,7 @@ describe('DriverHome', () => {
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
     mockedRequest.mockResolvedValueOnce([
       { assignmentId: 'a4', orderId: 'o4', driverId: 'driver-1', status: 'IN_PROGRESS', statusChangedAt: null },
-    ]) // GET /v1/assignments?orderId=o4
+    ]) // GET /v1/assignments?orderIds=o4
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o4
 
     renderDriverHome()
@@ -409,7 +409,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections (fired right after proposals, before it resolves)
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
-    mockedRequest.mockResolvedValueOnce([]) // GET /v1/assignments?orderId=o1 (loadAssignments, chained after proposals resolves)
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/assignments?orderIds=o1 (loadAssignments, chained after proposals resolves)
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1 (chained after proposals resolves -- ADR-060)
 
     renderDriverHome()
@@ -679,7 +679,7 @@ describe('DriverHome', () => {
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 1, currentStreakWeeks: 1 }) // GET /v1/drivers/driver-1/milestones
     mockedRequest.mockResolvedValueOnce([
       { assignmentId: 'a1', orderId: 'o1', driverId: 'driver-1', status: 'COMPLETED', statusChangedAt: '2026-09-14T12:30:00Z' },
-    ]) // GET /v1/assignments?orderId=o1 -- loadAssignments fires before loadOrderDetails/loadMessages
+    ]) // GET /v1/assignments?orderIds=o1 -- loadAssignments fires before loadOrderDetails/loadMessages
     mockedRequest.mockResolvedValueOnce([
       {
         id: 'o1',
@@ -803,6 +803,70 @@ describe('DriverHome', () => {
 
     expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/i/driver-1`)
     expect(await screen.findByText('Ссылка скопирована')).toBeInTheDocument()
+  })
+
+  // --- Client CRM depth ("Мой бизнес -> Клиенты"): ride count, last-ride
+  // date, repeat flag -- built entirely from already-loaded proposals/
+  // assignments/orderDetails/connections state, no new request.
+
+  it('shows ride count, last-ride date, and a repeat-client flag on the "Клиенты" tab, and a real zero for a client with no completed ride yet', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'ACCEPTED', statedPrice: '300', statedEtaMinutes: null },
+      { proposalId: 'p2', orderId: 'o2', driverId: 'driver-1', status: 'ACCEPTED', statedPrice: '350', statedEtaMinutes: null },
+    ]) // GET /v1/proposals
+    mockedRequest.mockResolvedValueOnce([
+      { passengerReference: 'passenger-1', createdAt: '2026-07-01T10:00:00Z' },
+      { passengerReference: 'passenger-2', createdAt: '2026-07-02T10:00:00Z' },
+    ]) // GET /v1/connections -- passenger-2 connected but never ordered
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 2, currentStreakWeeks: 1, repeatClientsCount: 1 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([
+      { assignmentId: 'a1', orderId: 'o1', driverId: 'driver-1', status: 'COMPLETED', statusChangedAt: '2026-09-10T09:00:00Z' },
+      { assignmentId: 'a2', orderId: 'o2', driverId: 'driver-1', status: 'COMPLETED', statusChangedAt: '2026-09-14T12:30:00Z' },
+    ]) // GET /v1/assignments?orderIds=o1,o2 -- two completed rides, both for passenger-1
+    mockedRequest.mockResolvedValueOnce([
+      {
+        id: 'o1',
+        origin: 'passenger-1',
+        destination: null,
+        passengerName: 'Мария',
+        createdAt: '2026-09-10T08:00:00Z',
+        pickupAddress: null,
+        requestedPickupAt: null,
+      },
+      {
+        id: 'o2',
+        origin: 'passenger-1',
+        destination: null,
+        passengerName: 'Мария',
+        createdAt: '2026-09-14T12:00:00Z',
+        pickupAddress: null,
+        requestedPickupAt: null,
+      },
+    ]) // GET /v1/orders?ids=o1,o2
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals/p1/messages
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals/p2/messages
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Бизнес' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Клиенты' }))
+
+    // passenger-1: named (order carries passengerName), two completed
+    // rides together -- repeat client, latest ride's own date shown.
+    expect(await screen.findByText('Мария')).toBeInTheDocument()
+    expect(screen.getByText(/Поездок: 2/)).toBeInTheDocument()
+    expect(screen.getByText(/Постоянный клиент/)).toBeInTheDocument()
+    // Not asserting the exact formatted date text (timezone-dependent,
+    // same reason the existing "История" test above never does either) --
+    // only that a last-ride date was actually rendered for this passenger.
+    expect(screen.getByText(/Последняя поездка/)).toBeInTheDocument()
+
+    // passenger-2: a real connection with zero completed rides -- shown as
+    // an honest zero, not hidden or skipped.
+    expect(screen.getByText('Пассажир по вашей ссылке')).toBeInTheDocument()
+    expect(screen.getByText('Поездок: 0')).toBeInTheDocument()
   })
 
   // --- PIOS Install v1 (Product Owner exception) ---

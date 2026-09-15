@@ -95,6 +95,18 @@ import org.springframework.web.bind.annotation.RestController
  * has an order id on hand and nothing else Assignment could be queried by
  * yet.
  *
+ * `orderIds` (plural — added for the Client CRM/N+1 fix task) is a purely
+ * additive batch mode, following the exact same comma-separated-ids
+ * convention `OrderQueryController.listOrders`'s own `?ids=` already
+ * established (ADR-060 Mode 2): `?orderIds=<id>,<id>,...` returns every
+ * Assignment across the named orders in one response. `orderId` and
+ * `orderIds` are mutually exclusive (400 if both are present, same as
+ * `OrderQueryController`'s own `passengerReference`/`ids` check); passing
+ * neither is still 400, unchanged from before this parameter existed. No
+ * new authorization is introduced -- `listAssignments` was already a
+ * deliberately open read (Task 22/23's own scope note above) and stays
+ * exactly that for both parameters.
+ *
  * Each transition endpoint maps [AssignmentNotFoundException] to 404 and
  * an aggregate-rejected transition (wrong current status) to 409 — the
  * same two-status convention [ProposalController]'s own `accept`/`decline`
@@ -161,15 +173,29 @@ class AssignmentController(
         }
 
     @GetMapping
-    fun listAssignments(@RequestParam(required = false) orderId: String?): ResponseEntity<List<AssignmentResponse>> =
+    fun listAssignments(
+        @RequestParam(required = false) orderId: String? = null,
+        @RequestParam(required = false) orderIds: String? = null
+    ): ResponseEntity<List<AssignmentResponse>> =
         try {
-            if (orderId == null) {
-                ResponseEntity.badRequest().build()
-            } else {
-                ResponseEntity.ok(
+            when {
+                orderId != null && orderIds != null -> ResponseEntity.badRequest().build()
+                orderId != null -> ResponseEntity.ok(
                     assignmentRepository.findByOrder(OrderReference(orderId))
                         .map { it.toResponse(tripRepository.findByAssignmentId(it.id)) }
                 )
+                orderIds != null -> {
+                    val idList = orderIds.split(",")
+                    if (idList.isEmpty() || idList.any { it.isBlank() } || idList.size > MAX_ORDER_IDS) {
+                        ResponseEntity.badRequest().build()
+                    } else {
+                        ResponseEntity.ok(
+                            assignmentRepository.findByOrders(idList.map { OrderReference(it) })
+                                .map { it.toResponse(tripRepository.findByAssignmentId(it.id)) }
+                        )
+                    }
+                }
+                else -> ResponseEntity.badRequest().build()
             }
         } catch (ex: IllegalArgumentException) {
             ResponseEntity.badRequest().build()
@@ -288,5 +314,11 @@ class AssignmentController(
             trip?.completedAt?.toString(),
             isTest
         )
+    }
+
+    companion object {
+        // Same shape guard as OrderQueryController.MAX_IDS, applied to the
+        // same 100-id bound -- no business meaning attaches to the number.
+        private const val MAX_ORDER_IDS = 100
     }
 }

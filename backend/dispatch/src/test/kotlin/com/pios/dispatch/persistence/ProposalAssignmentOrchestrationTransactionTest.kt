@@ -90,6 +90,8 @@ class ProposalAssignmentOrchestrationTransactionTest {
                 throw RuntimeException("simulated transient infrastructure failure")
             override fun findById(id: AssignmentId): Assignment? = assignmentRepository.findById(id)
             override fun findByOrder(order: OrderReference): List<Assignment> = assignmentRepository.findByOrder(order)
+            override fun findByOrders(orders: List<OrderReference>): List<Assignment> =
+                assignmentRepository.findByOrders(orders)
         }
         val failingAssignmentService =
             DispatchAssignmentApplicationService(failingAssignmentRepository, transactionRunner = transactionRunner)

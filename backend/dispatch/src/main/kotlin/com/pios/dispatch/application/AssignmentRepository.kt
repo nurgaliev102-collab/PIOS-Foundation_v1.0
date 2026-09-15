@@ -27,9 +27,19 @@ import com.pios.dispatch.domain.OrderReference
  * honoring the one-active-assignment-per-order invariant for real rather
  * than only in tests that construct the collection by hand. Purely
  * additive: [save] and [findById] are unchanged.
+ *
+ * [findByOrders] added alongside `GET /v1/assignments`'s own `orderIds`
+ * batch parameter (`AssignmentController.listAssignments`): closes a real
+ * N+1 — `DriverHome.tsx`'s 3-second poll previously issued one
+ * [findByOrder] request per accepted proposal. Semantics mirror
+ * [findByOrder] exactly, just across many orders in one call; an empty
+ * [orders] list returns an empty result (never "no filter means
+ * everything"). Purely additive: [findByOrder] is unchanged and remains
+ * correct for a genuine single-order lookup.
  */
 interface AssignmentRepository {
     fun save(assignment: Assignment)
     fun findById(id: AssignmentId): Assignment?
     fun findByOrder(order: OrderReference): List<Assignment>
+    fun findByOrders(orders: List<OrderReference>): List<Assignment>
 }

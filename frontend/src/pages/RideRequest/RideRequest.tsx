@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { Header } from '../../components/Header'
 import { Button } from '../../components/Button'
@@ -22,7 +22,21 @@ import { getDisplayName } from '../../persistence/localDisplayName'
 import { clearCurrentOrderId, getCurrentOrderId, saveCurrentOrderId } from '../../persistence/localCurrentOrder'
 import { isSessionExpiredError, request, resolveBackendBaseUrl, SESSION_EXPIRED_MESSAGE } from '../../api/apiClient'
 import { useBackableStep } from '../../navigation/useBackableStep'
+import {
+  NotificationBell,
+  useNotificationFacts,
+  type NotificationAssignmentSnapshot,
+  type NotificationMessageSnapshot,
+  type NotificationOrderSnapshot,
+  type NotificationProposalSnapshot,
+} from '../../features/notifications'
 import styles from './RideRequest.module.css'
+
+// ADR-071: this screen has no D5-equivalent fact (Part 3's table has no
+// passenger-facing row derived from `Order.status`) -- a single stable
+// empty array, not re-created every render, so it never spuriously
+// changes [useNotificationFacts]'s own effect dependency identity.
+const NO_NOTIFICATION_ORDERS: NotificationOrderSnapshot[] = []
 
 // ADR-038/ADR-039/ADR-055: same module-level provider instance `PassengerLanding.tsx` already uses.
 const identityProvider = new BackendIdentityProvider()
@@ -515,6 +529,20 @@ export function RideRequest() {
   // read from the same poll every other proposal-derived field already
   // comes from.
   const [proposalId, setProposalId] = useState<string | null>(null)
+  // ADR-071 (In-App, Poll-Derived Notification Surface): the raw
+  // `items`/assignment-status this screen's own poll already fetches
+  // (see the `[step, orderId, identity, driverCode]` effect below), kept
+  // verbatim rather than only the single derived [rideStatus] value --
+  // `deriveNotificationFacts` needs the full proposal list (an order can
+  // carry more than one proposal over its lifetime, e.g. WITHDRAWN then a
+  // fresh OPEN via Fallback Dispatch re-selection) and the assignment's
+  // own status, not this screen's own already-collapsed summary. No new
+  // request: both are already fetched by the same effect for [rideStatus]
+  // itself.
+  const [proposalItemsForNotifications, setProposalItemsForNotifications] = useState<ProposalStatusItem[]>([])
+  const [assignmentStatusForNotifications, setAssignmentStatusForNotifications] = useState<
+    AssignmentStatusItem['status'] | null
+  >(null)
   const [priceDecisionStatus, setPriceDecisionStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
   // ADR-042 R9: the amount the driver stated on accepting this order, read
   // from the same poll [rideStatus] already uses -- null until a proposal
@@ -745,6 +773,9 @@ export function RideRequest() {
           if (!active) {
             return
           }
+          // ADR-071: kept verbatim for `deriveNotificationFacts` -- see
+          // [proposalItemsForNotifications]'s own KDoc above.
+          setProposalItemsForNotifications(items)
           // ADR-070 Part 2, Q8: additive, gated entirely by `!driverCode` --
           // the `driverCode` path already knows its driver and never enters
           // this branch, so its own polling behavior below is unaffected.
@@ -874,6 +905,9 @@ export function RideRequest() {
               }
               const status = assignments[0]?.status
               setRideStatus(status && status !== 'CREATED' ? (status as PassengerRideStatus) : 'ACCEPTED')
+              // ADR-071: same read, kept for `deriveNotificationFacts` --
+              // see [assignmentStatusForNotifications]'s own KDoc above.
+              setAssignmentStatusForNotifications(status ?? 'CREATED')
             })
             .catch(() => {
               if (active) {
@@ -993,6 +1027,58 @@ export function RideRequest() {
       setSendMessageStatus('error')
     }
   }
+
+  // ADR-071 (In-App, Poll-Derived Notification Surface): reshapes this
+  // screen's own already-polled state into `deriveNotificationFacts`'s
+  // own snapshot shape -- no new request (see
+  // [proposalItemsForNotifications]/[assignmentStatusForNotifications]'s
+  // own KDoc above). Placed here, before every conditional early return
+  // below -- Rules of Hooks requires every hook this component calls,
+  // including [useNotificationFacts]'s own internal ones, to run in the
+  // same order on every render.
+  const notificationProposals = useMemo<NotificationProposalSnapshot[]>(() => {
+    if (!orderId) {
+      return []
+    }
+    return proposalItemsForNotifications.map((item) => ({
+      proposalId: item.proposalId,
+      orderId,
+      status: item.status,
+      statedPrice: item.statedPrice,
+    }))
+  }, [proposalItemsForNotifications, orderId])
+  const notificationAssignments = useMemo<NotificationAssignmentSnapshot[]>(() => {
+    if (!orderId || !assignmentStatusForNotifications) {
+      return []
+    }
+    // `statusChangedAt` is honestly `null` -- this screen's own
+    // `AssignmentStatusItem` does not fetch it (see this file's own
+    // KDoc); never fabricated (this file's own top-of-file rule).
+    return [{ orderId, status: assignmentStatusForNotifications, statusChangedAt: null }]
+  }, [orderId, assignmentStatusForNotifications])
+  const notificationMessages = useMemo<NotificationMessageSnapshot[]>(() => {
+    if (!orderId || !proposalId) {
+      return []
+    }
+    return messages.map((message) => ({
+      id: message.id,
+      proposalId,
+      orderId,
+      senderRole: message.senderRole,
+      sentAt: message.sentAt,
+    }))
+  }, [messages, proposalId, orderId])
+  const {
+    facts: notificationFacts,
+    unseenCount: notificationUnseenCount,
+    markAllSeen: markAllNotificationsSeen,
+  } = useNotificationFacts(
+    'passenger',
+    notificationProposals,
+    notificationAssignments,
+    NO_NOTIFICATION_ORDERS,
+    notificationMessages
+  )
 
   if (identityChecked && !identity) {
     // ADR-070 Part 1: the driverless (`/request`) path has no `driverCode`
@@ -1662,6 +1748,15 @@ export function RideRequest() {
   return (
     <div className={styles.screen}>
       <Header />
+      {/* ADR-071: same floating-overlay placement as `DriverHome.tsx`'s
+          own -- see `.notificationBellSlot`'s own CSS comment there. */}
+      <div className={styles.notificationBellSlot}>
+        <NotificationBell
+          facts={notificationFacts}
+          unseenCount={notificationUnseenCount}
+          onOpen={markAllNotificationsSeen}
+        />
+      </div>
       <main className={styles.content}>
         {step === 'loading' && <LoadingState label="Загрузка…" />}
 

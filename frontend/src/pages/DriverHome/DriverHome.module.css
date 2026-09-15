@@ -5,6 +5,18 @@
   background: var(--pios-color-background);
 }
 
+/* ADR-071 (In-App, Poll-Derived Notification Surface): a floating
+   overlay above `Header.tsx`'s own sticky bar (that shared component's
+   own z-index: 10 is intentionally not touched -- it is rendered by
+   every other screen too), fixed to the viewport's own top-right corner
+   rather than nested inside Header's own centered-brand layout. */
+.notificationBellSlot {
+  position: fixed;
+  top: calc(var(--pios-safe-area-top, 0px) + 0.5rem);
+  right: 0.75rem;
+  z-index: 15;
+}
+
 .content {
   flex: 1;
   display: flex;
@@ -50,7 +62,16 @@
   gap: 0.25rem;
 }
 
+/* Client CRM depth ("Мой бизнес -> Клиенты"): now a two-line item --
+   the name/share row plus a per-client stats caption below it -- so this
+   is a column, not the single row it used to be. */
 .passengerListItem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.passengerListItemRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
