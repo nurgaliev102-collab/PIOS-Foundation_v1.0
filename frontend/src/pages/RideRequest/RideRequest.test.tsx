@@ -1420,7 +1420,9 @@ describe('RideRequest (driverless discovery entry, ADR-070)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
 
     expect(
-      await screen.findByText('Пока нет доступного водителя. Мы продолжаем искать и сообщим, как только кто-то откликнется.')
+      await screen.findByText(
+        'Сейчас нет доступного водителя. Если кто-то станет доступен, пока вы на этом экране, вы увидите предложение здесь — либо попробуйте отправить заказ ещё раз позже.',
+      )
     ).toBeInTheDocument()
     // Never the driver-linked path's own "waiting for a response" wording --
     // that would misstate the fact that no driver has even been matched yet.

@@ -1997,10 +1997,27 @@ export function RideRequest() {
                     `driverCode` path never reaches this branch: it always
                     has a real, just-created Proposal by the time `rideStatus`
                     can be 'OPEN' (see [attemptProposal]), so [hasProposal]
-                    is irrelevant to it. */}
+                    is irrelevant to it.
+
+                    QA finding, 2026-09-15: the original copy here said "Мы
+                    продолжаем искать и сообщим" ("we're still searching and
+                    will let you know") -- untrue. Dispatch runs First
+                    Refusal -> Fallback Dispatch exactly once, at
+                    submission; nothing on the backend retries a
+                    `NoAvailableDriver` order, and there is no notification
+                    of any kind (confirmed against
+                    `FallbackDispatchApplicationService`'s own "no retry on
+                    decline/lapse" KDoc and `DriverAvailabilityChangedListener`,
+                    which never re-attempts matching for an existing order).
+                    The only thing actually true is that this screen's own
+                    poll will pick up a Proposal if one appears while the
+                    passenger stays on it -- so that's the only claim made
+                    below. No "we're searching" promise, no notification
+                    guarantee. */}
                 {!driverCode && rideStatus === 'OPEN' && !hasProposal ? (
                   <Text role="body" tone="secondary">
-                    Пока нет доступного водителя. Мы продолжаем искать и сообщим, как только кто-то откликнется.
+                    Сейчас нет доступного водителя. Если кто-то станет доступен, пока вы на этом экране, вы увидите
+                    предложение здесь — либо попробуйте отправить заказ ещё раз позже.
                   </Text>
                 ) : (
                   <RideStatus status={rideStatus} label={rideStatusLabel(rideStatus)} />
