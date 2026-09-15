@@ -56,6 +56,19 @@ function renderAt(driverCode: string) {
   )
 }
 
+// ADR-070 (Channel 1 Discovery Matching), Part 1: the driverless entry
+// point -- same component, reached with no `driverCode` segment at all.
+function renderAtDiscovery() {
+  return render(
+    <MemoryRouter initialEntries={['/request']}>
+      <Routes>
+        <Route path="/request" element={<RideRequest />} />
+        <Route path="/me" element={<div>my-drivers-screen</div>} />
+      </Routes>
+    </MemoryRouter>
+  )
+}
+
 describe('RideRequest', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -1325,5 +1338,147 @@ describe('RideRequest', () => {
 
     expect(await screen.findByText('passenger-landing-screen')).toBeInTheDocument()
     expect(localStorage.getItem('pios.identity')).toBeNull()
+  })
+})
+
+// ADR-070 (Channel 1 Discovery Matching), Part 1/2: the driverless
+// (`/request`) entry point -- an identified passenger with no specific
+// driver in mind. Same component (`RideRequest`), reached with no
+// `driverCode` at all; every test below confirms the specific behaviors
+// that ADR authorizes without re-testing what the `driverCode`-keyed suite
+// above already covers unchanged.
+describe('RideRequest (driverless discovery entry, ADR-070)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    mockedRequest.mockReset()
+    mockedRequest.mockResolvedValue([])
+    seedIdentity()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('shows the order form directly, with no invitation or circle-of-trust fetch', async () => {
+    mockMeResponse()
+
+    renderAtDiscovery()
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    // Only the one session-restore call -- no `GET /v1/drivers/:id`
+    // (no invitation to load) and no `GET /v1/connections` (no
+    // circle-of-trust step; Part 1's own reasoning: Fallback Dispatch
+    // already tries trusted drivers first, server-side).
+    expect(mockedRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows an honest "please sign in" message with no session, instead of a broken redirect', async () => {
+    localStorage.clear()
+
+    renderAtDiscovery()
+
+    expect(await screen.findByText('Чтобы отправить заказ, войдите в аккаунт.')).toBeInTheDocument()
+    expect(mockedRequest).not.toHaveBeenCalled()
+  })
+
+  it('submits with explicitDriverIntent omitted (defaults to false) and never calls POST /v1/proposals', async () => {
+    mockMeResponse()
+
+    renderAtDiscovery()
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-discovery-1' }) // POST /v1/orders
+    mockedRequest.mockResolvedValueOnce([]) // status poll: no proposal yet
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
+
+    const submitCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/orders')
+    expect(submitCall).toBeDefined()
+    const body = JSON.parse((submitCall?.[1] as RequestInit).body as string)
+    expect(body).not.toHaveProperty('explicitDriverIntent')
+    expect(body.passengerReference).toBe(TEST_IDENTITY.identityId)
+
+    expect(mockedRequest.mock.calls.some(([path]) => path === '/v1/proposals')).toBe(false)
+  })
+
+  it('shows an honest "no driver available yet" message when no Proposal exists at all (FallbackDispatchOutcome.NoAvailableDriver)', async () => {
+    mockMeResponse()
+
+    renderAtDiscovery()
+
+    await userEvent.type(await screen.findByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-discovery-2' })
+    mockedRequest.mockResolvedValueOnce([]) // status poll: genuinely no proposal
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(
+      await screen.findByText('Пока нет доступного водителя. Мы продолжаем искать и сообщим, как только кто-то откликнется.')
+    ).toBeInTheDocument()
+    // Never the driver-linked path's own "waiting for a response" wording --
+    // that would misstate the fact that no driver has even been matched yet.
+    expect(screen.queryByText(/Ждём ответа водителя/)).not.toBeInTheDocument()
+  })
+
+  it('shows the real matched driver once Fallback Dispatch creates a Proposal, reusing the existing driver display', async () => {
+    mockMeResponse()
+
+    renderAtDiscovery()
+
+    await userEvent.type(await screen.findByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-discovery-3' }) // POST /v1/orders
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', status: 'OPEN', driverId: 'driver-matched', statedPrice: null, statedEtaMinutes: null },
+    ]) // status poll: Fallback Dispatch matched a real driver
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-matched', availability: 'AVAILABLE', displayName: 'Марат' }) // GET /v1/drivers/driver-matched
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('Марат')).toBeInTheDocument()
+  })
+
+  it('on COMPLETED, offers "Добавить в мои водители" naming the real matched driver, not a route parameter', async () => {
+    mockMeResponse()
+
+    renderAtDiscovery()
+
+    await userEvent.type(await screen.findByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-discovery-4' }) // POST /v1/orders
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', status: 'ACCEPTED', driverId: 'driver-matched', statedPrice: null, statedEtaMinutes: null },
+    ]) // status poll
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-matched', availability: 'AVAILABLE', displayName: 'Марат' }) // GET /v1/drivers/driver-matched
+    mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }]) // GET /v1/assignments?orderId=order-discovery-4
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    const saveButton = await screen.findByRole('button', { name: 'Добавить в мои водители' })
+    // Part 6 (Negative), design companion Section 10: recommending a
+    // discovery-matched driver still needs their own `driverCode` link,
+    // which this path never has -- so the button must not render either.
+    expect(screen.queryByRole('button', { name: 'Поделиться с другом' })).not.toBeInTheDocument()
+
+    mockedRequest.mockResolvedValueOnce({ connectionId: 'c-new' }) // POST /v1/connections
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/connections/c-new/primary -- no existing primary
+
+    await userEvent.click(saveButton)
+
+    expect(await screen.findByText('Водитель сохранён и назначен основным')).toBeInTheDocument()
+
+    const createCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/connections')
+    expect(createCall).toBeDefined()
+    const createBody = JSON.parse((createCall?.[1] as RequestInit).body as string)
+    expect(createBody).toEqual({ driverId: 'driver-matched', passengerReference: TEST_IDENTITY.identityId })
   })
 })

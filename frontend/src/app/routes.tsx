@@ -30,6 +30,16 @@ export const routes: RouteObject[] = [
     element: <RideRequest />,
   },
   {
+    // ADR-070 (Channel 1 Discovery Matching), Part 1: a passenger-side
+    // entry point with no `driverCode` at all -- reuses `RideRequest`
+    // itself (see that component's own KDoc for exactly which branches
+    // change when `driverCode` is `undefined`, and which stay byte-for-byte
+    // identical) rather than a second, parallel component, per that ADR's
+    // own preference for reuse over duplication.
+    path: '/request',
+    element: <RideRequest />,
+  },
+  {
     // docs/PIOS_PRODUCT_VISION.md §8 (product owner, 2026-09-05): a
     // returning passenger's own way back to a driver they already have a
     // relationship with, without needing that driver's own link again.

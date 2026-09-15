@@ -107,6 +107,13 @@ interface EnrichedCircleMember extends CircleMember {
 interface ProposalStatusItem {
   proposalId: string
   status: 'OPEN' | 'PRICE_PROPOSED' | 'ACCEPTED' | 'DECLINED' | 'LAPSED' | 'WITHDRAWN'
+  // ADR-070 (Channel 1 Discovery Matching), Part 2, Q8: `ProposalResponse.kt`
+  // (Dispatch) has always returned this field -- no backend change. Unused
+  // by this screen's own driver-linked path (that path already knows the
+  // driver from `driverCode`, the URL parameter); read only by the
+  // driverless discovery path below, which has no other way to learn which
+  // real driver Fallback Dispatch matched this order to.
+  driverId: string
   // ADR-042 (Stated Ride Price Minimal Model), Amendment 2026-08-01 (R9):
   // the Product Owner ruled the passenger does see the amount the driver
   // stated on acceptance -- `GET /v1/proposals?orderId=...` (this screen's
@@ -179,6 +186,14 @@ const NOTES_MAX_LENGTH = 500
 // NOTES_MAX_LENGTH: this is a short, chat-like message exchanged mid-ride,
 // not the one-time trip context [notes] already covers.
 const MESSAGE_MAX_LENGTH = 300
+
+// ADR-070 (Channel 1 Discovery Matching), Part 1: `localCurrentOrder.ts`'s
+// own map is keyed by `driverCode` (one entry per invitation link a
+// passenger has used) -- the driverless entry point this ADR authorizes has
+// no `driverCode` to key by, so it uses this one fixed key instead. Safe
+// from collision: every real `driverCode` this map is otherwise keyed by is
+// a backend-issued driver id, never this literal string.
+const DISCOVERY_ORDER_KEY = '__discovery__'
 
 /**
  * The passenger-facing ride chain (ADR-040, Assignment Ride Lifecycle):
@@ -278,6 +293,30 @@ function rideStatusLabel(status: PassengerRideStatus): string {
 // removed here rather than left as unused dead code now that the one
 // call site below (Section "Design foundation cleanup") passes `status`
 // to that component directly instead of calling this function.
+
+/**
+ * ADR-070 (Channel 1 Discovery Matching), Part 2, Q8: the driverless
+ * (`/request`) path's only way to learn which real driver Fallback
+ * Dispatch matched this order to -- the `driverCode` path never calls
+ * this (it already knows its driver from the URL). Picks whichever
+ * [ProposalStatusItem] is most "current" for this order, in the same
+ * priority the polling effect below already establishes for rendering
+ * (ACCEPTED, the driver who is actually doing this ride, first) -- a
+ * historical DECLINED/LAPSED entry from an earlier fallback attempt (the
+ * pre-existing lapse/retry mechanism this ADR does not touch) is only
+ * used as a last resort, so this never names a driver who is no longer
+ * the one attached to this order once a later attempt exists.
+ */
+function pickProposalDriverId(items: ProposalStatusItem[]): string | null {
+  const priority: ProposalStatusItem['status'][] = ['ACCEPTED', 'PRICE_PROPOSED', 'OPEN', 'DECLINED', 'LAPSED', 'WITHDRAWN']
+  for (const status of priority) {
+    const found = items.find((item) => item.status === status)
+    if (found) {
+      return found.driverId
+    }
+  }
+  return null
+}
 
 /**
  * Ride Request — Sprint 4: the first passenger action after onboarding,
@@ -384,6 +423,26 @@ function rideStatusLabel(status: PassengerRideStatus): string {
  * own product rule): repeating defaults to the driver just ridden with, but
  * "Мои водители" — rendered alongside, unconditionally, for every terminal
  * status — remains the passenger's own way to choose someone else instead.
+ *
+ * ADR-070 (Channel 1 Discovery Matching, Part 1/2): also rendered,
+ * behavior-unchanged for every `driverCode`-keyed branch above, at
+ * `/request` -- a route with no `driverCode` segment, so `driverCode` is
+ * `undefined` throughout this render. That path (every `driverCode`/
+ * `!driverCode` branch below) submits `POST /v1/orders` with
+ * `explicitDriverIntent` omitted entirely (defaults to `false` --
+ * `SubmitOrderRequest.kt`) and never calls [attemptProposal] -- the driver
+ * is chosen by Dispatch's existing First Refusal -> Fallback Dispatch chain
+ * (ADR-068/ADR-069), not this client. Since no driver is known at
+ * submission time, this screen learns which real driver Dispatch matched by
+ * reading the existing [ProposalStatusItem] poll's own `driverId` field
+ * (see that interface's own KDoc) and reuses the exact same
+ * [driverName]/[driverAvailability] state and `DriverTrustIndicator`
+ * rendering the `driverCode` path already has. Until a Proposal exists at
+ * all, this is the honest `FallbackDispatchOutcome.NoAvailableDriver` case
+ * (Part 7, Q9) -- no retry/timeout rule invented, just the plain fact
+ * stated once the existing poll has run. [handleSaveDriver] (Option B) is
+ * unchanged in mechanism, only in which driver id it targets -- see that
+ * function's own KDoc.
  */
 export function RideRequest() {
   const { driverCode } = useParams<{ driverCode: string }>()
@@ -499,6 +558,21 @@ export function RideRequest() {
   // KDoc for the full reasoning and exactly which existing endpoints this
   // reuses.
   const [saveDriverStatus, setSaveDriverStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
+  // ADR-070 (Channel 1 Discovery Matching), Part 2, Q8: the driverless
+  // (`/request`) path's own equivalent of `driverCode` -- the real driver
+  // Fallback Dispatch matched this order to, learned from the existing
+  // proposal poll's own `driverId` field (never set, and never read, on the
+  // `driverCode` path -- that path already knows its driver from the URL).
+  // See [handleSaveDriver]'s own KDoc for where this is used.
+  const [matchedDriverId, setMatchedDriverId] = useState<string | null>(null)
+  const matchedDriverIdRef = useRef<string | null>(null)
+  // ADR-070 Part 7, Q9: distinguishes "no Proposal exists yet for this
+  // order" (the honest `FallbackDispatchOutcome.NoAvailableDriver` case)
+  // from every other `rideStatus === 'OPEN'` cause on the `driverCode` path
+  // (a real, just-created Proposal still awaiting a response) -- both poll
+  // to the same `rideStatus`, but only the driverless path needs to tell
+  // them apart in its own rendering (see the 'confirmed' step JSX below).
+  const [hasProposal, setHasProposal] = useState(false)
 
   // Sprint 6 (Passenger Entry-Path Failure Handling): pulled out of the
   // effect (mirrors DriverHome.tsx's own loadDriver) so the same fetch can
@@ -531,6 +605,29 @@ export function RideRequest() {
       }
       loadCircleThenAdvance(active, forIdentity)
     })
+  }
+
+  /**
+   * ADR-070 (Channel 1 Discovery Matching), Part 1: the driverless
+   * (`/request`) path's own equivalent of [loadInvitation] -- mirrors only
+   * that function's own "resume an already-placed order" check
+   * (lines 573-581 above), since there is no invitation to fetch and no
+   * circle-of-trust step to offer (see the mount effect's own comment for
+   * why). A passenger with no order in flight lands directly on the form;
+   * one with an order already placed on this device resumes it, exactly
+   * like the `driverCode` path's own resume behavior.
+   */
+  function loadDiscoveryEntry(active: boolean) {
+    const existingOrderId = getCurrentOrderId(DISCOVERY_ORDER_KEY)
+    if (!active) {
+      return
+    }
+    if (existingOrderId) {
+      setOrderId(existingOrderId)
+      setStep('confirmed')
+      return
+    }
+    setStep('form')
   }
 
   /**
@@ -605,7 +702,18 @@ export function RideRequest() {
       setIdentity(restored)
       setIdentityChecked(true)
       if (restored) {
-        loadInvitation(active, driverCode ?? '', restored)
+        // ADR-070 Part 1: the driverless (`/request`) path has no
+        // `driverCode` to look up an invitation for, and deliberately never
+        // shows the circle-of-trust step ([loadCircleThenAdvance]'s own
+        // job) -- Fallback Dispatch already tries this passenger's trusted
+        // drivers first, server-side (ADR-068 Tier 1), before a stranger
+        // (Tier 3), so this screen does not need to ask "who do you trust"
+        // before submitting.
+        if (driverCode) {
+          loadInvitation(active, driverCode, restored)
+        } else {
+          loadDiscoveryEntry(active)
+        }
       }
     })
     return () => {
@@ -636,6 +744,43 @@ export function RideRequest() {
         .then((items) => {
           if (!active) {
             return
+          }
+          // ADR-070 Part 2, Q8: additive, gated entirely by `!driverCode` --
+          // the `driverCode` path already knows its driver and never enters
+          // this branch, so its own polling behavior below is unaffected.
+          if (!driverCode) {
+            // Part 7, Q9: an empty `items` array here is the honest
+            // `FallbackDispatchOutcome.NoAvailableDriver` case -- today that
+            // outcome just means "no proposal exists for this order," and
+            // that is exactly what this reflects, tick to tick, with no
+            // retry/timeout rule invented on top of it.
+            setHasProposal(items.length > 0)
+            const pickedDriverId = pickProposalDriverId(items)
+            if (pickedDriverId && pickedDriverId !== matchedDriverIdRef.current) {
+              matchedDriverIdRef.current = pickedDriverId
+              setMatchedDriverId(pickedDriverId)
+              // Reuses [driverName]/[driverAvailability] -- the exact same
+              // state, and the exact same `DriverTrustIndicator` render,
+              // the `driverCode` path already has -- rather than adding a
+              // second driver-identity display for this path.
+              request<DriverSummary>(`/v1/drivers/${pickedDriverId}`)
+                .then((driver) => {
+                  if (!active) {
+                    return
+                  }
+                  setDriverName(driver.displayName ?? pickedDriverId)
+                  setDriverAvailability(driver.availability)
+                })
+                .catch(() => {
+                  // Best-effort, same tolerance [enrichCircle] already
+                  // applies to an identical per-driver lookup.
+                  if (!active) {
+                    return
+                  }
+                  setDriverName(pickedDriverId)
+                  setDriverAvailability('UNAVAILABLE')
+                })
+            }
           }
           const acceptedItem = items.find((item) => item.status === 'ACCEPTED')
           if (!acceptedItem) {
@@ -788,7 +933,7 @@ export function RideRequest() {
       active = false
       clearInterval(interval)
     }
-  }, [step, orderId, identity])
+  }, [step, orderId, identity, driverCode])
 
   /**
    * Minimal In-Ride Messaging (Product Cycle): best-effort, same tolerance
@@ -850,7 +995,24 @@ export function RideRequest() {
   }
 
   if (identityChecked && !identity) {
-    return <Navigate to={`/i/${driverCode ?? ''}`} replace />
+    // ADR-070 Part 1: the driverless (`/request`) path has no `driverCode`
+    // to build a `/i/:driverCode` redirect from -- that route only exists
+    // per-driver-invitation, and this entry point deliberately has none.
+    // An honest "you need a session" message, not a broken navigation to
+    // `/i/` (which would fall through to `NotFound`).
+    if (!driverCode) {
+      return (
+        <div className={styles.screen}>
+          <Header />
+          <main className={styles.content}>
+            <Text role="body" tone="secondary">
+              Чтобы отправить заказ, войдите в аккаунт.
+            </Text>
+          </main>
+        </div>
+      )
+    }
+    return <Navigate to={`/i/${driverCode}`} replace />
   }
   if (!identity) {
     // Still checking this device's own session (ADR-055) -- `step` stays
@@ -997,27 +1159,41 @@ export function RideRequest() {
           ...(parsedPassengerCount ? { passengerCount: parsedPassengerCount } : {}),
           ...(trimmedNotes ? { notes: trimmedNotes } : {}),
           // Task 17 (First Refusal Explicit Driver Intent Integration):
-          // every order this screen ever creates is already tied to one
-          // specific, already-known driver -- `driverCode`, taken verbatim
-          // from the URL this page is reached through (see this
+          // every order the `driverCode` path creates is already tied to
+          // one specific, already-known driver -- `driverCode`, taken
+          // verbatim from the URL this page is reached through (see this
           // component's own KDoc and `handleChooseCircleMember`: picking
           // any other circle member navigates to *that* driver's own
           // `/i/:driverCode/request` rather than leaving the choice open).
           // `attemptProposal`, right below, proposes this exact order to
           // that exact driver a moment later. `explicitDriverIntent` (Order
-          // Management's own field, `SubmitOrderRequest.kt`, unused by any
-          // real caller until now) records that already-true fact
-          // atomically with submission, so Dispatch's automatic First
-          // Refusal (Task 16) never races this screen's own explicit
-          // choice for an order created here.
-          explicitDriverIntent: true,
+          // Management's own field, `SubmitOrderRequest.kt`) records that
+          // already-true fact atomically with submission, so Dispatch's
+          // automatic First Refusal (Task 16) never races this screen's own
+          // explicit choice for an order created here.
+          //
+          // ADR-070 (Channel 1 Discovery Matching) Part 1, constraint 1: the
+          // driverless (`/request`) path omits this field entirely rather
+          // than sending `false` explicitly -- both are equivalent to
+          // `SubmitOrderRequest.kt`'s own default, but omitting it is the
+          // literal, auditable difference this ADR names between the two
+          // entry points, not something a future edit could accidentally
+          // flip back to `true`.
+          ...(driverCode ? { explicitDriverIntent: true } : {}),
         }),
         baseUrl: ORDER_MANAGEMENT_BASE_URL,
       })
       setOrderId(response.orderId)
-      saveCurrentOrderId(driverCode ?? '', response.orderId)
+      saveCurrentOrderId(driverCode ?? DISCOVERY_ORDER_KEY, response.orderId)
       setStep('confirmed')
-      void attemptProposal(response.orderId)
+      // ADR-070 Part 1, constraint 2: the driverless path must not call
+      // [attemptProposal] -- that would propose this order to a specific
+      // driver directly, which only makes sense when one is already known
+      // (`driverCode`). A driverless order's driver is chosen by Dispatch's
+      // own First Refusal -> Fallback Dispatch chain, never by this client.
+      if (driverCode) {
+        void attemptProposal(response.orderId)
+      }
     } catch (error) {
       if (handleSessionExpiredError(error)) {
         return
@@ -1200,7 +1376,12 @@ export function RideRequest() {
   /** Section 6 ("Final Pre-Pilot Sprint"): a passenger must be able to sign out — the account itself is untouched, only this device forgets its own session. */
   function handleLogout() {
     identityProvider.logout()
-    navigate(`/i/${driverCode ?? ''}`, { replace: true })
+    // ADR-070 Part 1: the driverless (`/request`) path has no `driverCode`
+    // to build a `/i/:driverCode` redirect from -- `/me` is the one other
+    // route in this app that already tolerates "no identity" gracefully
+    // (`MyDrivers.tsx`'s own `status === 'empty'` branch), rather than
+    // inventing a new post-logout destination for this one path.
+    navigate(driverCode ? `/i/${driverCode}` : '/me', { replace: true })
   }
 
   /**
@@ -1222,7 +1403,7 @@ export function RideRequest() {
   }
 
   function handleOrderAgain() {
-    clearCurrentOrderId(driverCode ?? '')
+    clearCurrentOrderId(driverCode ?? DISCOVERY_ORDER_KEY)
     setOrderId(null)
     setProposalStatus(null)
     setRideStatus('OPEN')
@@ -1234,6 +1415,22 @@ export function RideRequest() {
     setRequestedPickupAt(null)
     hasFetchedRequestedPickupAt.current = false
     setCancelStatus('idle')
+    // ADR-070 Part 2, Q8: the driverless path's own matched-driver state
+    // belongs to the order that just ended -- a repeat submission goes
+    // through discovery matching again (Part 1 constraint 2 applies to
+    // every submission this screen makes, not only the first) and may
+    // match a different driver, or none yet. The `driverCode` path never
+    // reaches this branch: its [driverName]/[driverAvailability] come from
+    // the fixed invitation this screen was opened through, not from a
+    // Proposal, and correctly stay unchanged across a repeat, exactly as
+    // before this ADR.
+    if (!driverCode) {
+      matchedDriverIdRef.current = null
+      setMatchedDriverId(null)
+      setHasProposal(false)
+      setDriverName(null)
+      setDriverAvailability(null)
+    }
     setStep('form')
   }
 
@@ -1299,9 +1496,18 @@ export function RideRequest() {
    * own label already reads — so on success this driver's own repeat
    * action immediately relabels itself "Заказать у этого водителя" with no
    * separate flag needed.
+   *
+   * ADR-070 (Channel 1 Discovery Matching), Part 2 (Option B), Q8: on the
+   * driverless (`/request`) path there is no `driverCode` to save -- the
+   * real driver this ride was matched to is [matchedDriverId], learned from
+   * the proposal poll (see that state's own KDoc). Everything else here is
+   * unchanged: same endpoint, same idempotency, same "primary only if none
+   * exists" rule (Rule 4) -- this function does not know or care which path
+   * it was reached from, only which driver id to target.
    */
   async function handleSaveDriver() {
-    if (!identity || !driverCode || saveDriverStatus === 'submitting') {
+    const targetDriverId = driverCode ?? matchedDriverId
+    if (!identity || !targetDriverId || saveDriverStatus === 'submitting') {
       return
     }
     setSaveDriverStatus('submitting')
@@ -1309,7 +1515,7 @@ export function RideRequest() {
       const created = await request<{ connectionId: string }>('/v1/connections', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity.token}` },
-        body: JSON.stringify({ driverId: driverCode, passengerReference: identity.identityId }),
+        body: JSON.stringify({ driverId: targetDriverId, passengerReference: identity.identityId }),
         baseUrl: PASSENGER_EXPERIENCE_BASE_URL,
       })
       const hasExistingPrimary = circle.some((member) => member.isPrimary)
@@ -1324,10 +1530,10 @@ export function RideRequest() {
         ...current,
         {
           connectionId: created.connectionId,
-          driverId: driverCode,
+          driverId: targetDriverId,
           createdAt: new Date().toISOString(),
           isPrimary: !hasExistingPrimary,
-          displayName: driverName ?? driverCode,
+          displayName: driverName ?? targetDriverId,
           availability: driverAvailability ?? 'UNAVAILABLE',
         },
       ])
@@ -1446,6 +1652,12 @@ export function RideRequest() {
   // that the ride actually finished).
   const isMessagingOpen =
     rideStatus !== 'COMPLETED' && rideStatus !== 'DECLINED' && rideStatus !== 'LAPSED' && rideStatus !== 'WITHDRAWN'
+
+  // ADR-070 (Channel 1 Discovery Matching), Part 2 (Option B), Q8: the
+  // driver [handleSaveDriver] would target -- `driverCode` on the
+  // `driverCode` path (unchanged), [matchedDriverId] (from the proposal
+  // poll, `null` until a Proposal exists) on the driverless path.
+  const saveDriverTargetId = driverCode ?? matchedDriverId
 
   return (
     <div className={styles.screen}>
@@ -1772,7 +1984,27 @@ export function RideRequest() {
                 a reload (proposalStatus never set at all). */}
             {(proposalStatus === 'proposed' || proposalStatus === null) && (
               <>
-                <RideStatus status={rideStatus} label={rideStatusLabel(rideStatus)} />
+                {/* ADR-070 (Channel 1 Discovery Matching), Part 7, Q9: on
+                    the driverless path, `rideStatus === 'OPEN'` with no
+                    Proposal at all is the honest
+                    `FallbackDispatchOutcome.NoAvailableDriver` case, not a
+                    driver silently taking time to respond -- today that
+                    outcome just means "no proposal exists for this order,"
+                    so that is exactly what this states, plainly, with no
+                    fake "matching in progress" spinner and no invented
+                    retry/timeout rule -- the existing poll above (unchanged
+                    cadence) is what actually keeps checking. The
+                    `driverCode` path never reaches this branch: it always
+                    has a real, just-created Proposal by the time `rideStatus`
+                    can be 'OPEN' (see [attemptProposal]), so [hasProposal]
+                    is irrelevant to it. */}
+                {!driverCode && rideStatus === 'OPEN' && !hasProposal ? (
+                  <Text role="body" tone="secondary">
+                    Пока нет доступного водителя. Мы продолжаем искать и сообщим, как только кто-то откликнется.
+                  </Text>
+                ) : (
+                  <RideStatus status={rideStatus} label={rideStatusLabel(rideStatus)} />
+                )}
                 {/* ADR-042 R9: shown from ACCEPTED onward (never for OPEN/
                     DECLINED/LAPSED, where no acceptance -- and so no stated
                     amount -- exists yet); absent entirely if the driver
@@ -1952,8 +2184,17 @@ export function RideRequest() {
                         so prompting a referral there would not reflect
                         anything real. See [handleShareWithFriend]'s own
                         KDoc for why this reuses the existing invite link
-                        unchanged. */}
-                    {rideStatus === 'COMPLETED' && (
+                        unchanged.
+                        ADR-070 (Channel 1 Discovery Matching), Part 6
+                        (Negative), Section 10 of the design companion
+                        document: recommending a discovery-matched driver to
+                        someone else still needs that driver's own
+                        `driverCode` link, which this path never has -- not
+                        solved by this Sprint, not invented here. Gated on
+                        `driverCode` so this never renders a dead button
+                        ([handleShareWithFriend] itself already no-ops
+                        without one). */}
+                    {driverCode && rideStatus === 'COMPLETED' && (
                       <button type="button" className={styles.textAction} onClick={() => void handleShareWithFriend()}>
                         Поделиться с другом
                       </button>
@@ -1964,17 +2205,34 @@ export function RideRequest() {
                         contains this driver, so this condition (the same one
                         the COMPLETED button's own label already reads)
                         naturally stops rendering it -- no separate "saved"
-                        flag needed. */}
-                    {rideStatus === 'COMPLETED' && !circle.some((member) => member.driverId === driverCode) && (
-                      <button
-                        type="button"
-                        className={styles.textAction}
-                        onClick={() => void handleSaveDriver()}
-                        disabled={saveDriverStatus === 'submitting'}
-                      >
-                        Добавить в мои водители
-                      </button>
-                    )}
+                        flag needed.
+                        ADR-070 Part 2 (Option B), Q8: on the driverless path
+                        `driverCode` is `undefined`, so `saveDriverTargetId`
+                        falls back to [matchedDriverId] -- `null` until a
+                        Proposal has actually named a driver, which this
+                        condition also requires (nothing to save otherwise).
+                        Known, disclosed limitation: unlike the `driverCode`
+                        path (whose [circle] is fetched up front by
+                        [loadCircleThenAdvance]), the driverless path never
+                        fetches [circle] at all (Part 1 -- no circle-of-trust
+                        step), so this can render even if the matched driver
+                        happens to already be a saved connection. Harmless,
+                        not a correctness bug: [handleSaveDriver] -> `POST
+                        /v1/connections` is idempotent by both application
+                        logic and the `UNIQUE (driver_id, passenger_reference)`
+                        constraint (ADR-070 Part 2). */}
+                    {rideStatus === 'COMPLETED' &&
+                      saveDriverTargetId &&
+                      !circle.some((member) => member.driverId === saveDriverTargetId) && (
+                        <button
+                          type="button"
+                          className={styles.textAction}
+                          onClick={() => void handleSaveDriver()}
+                          disabled={saveDriverStatus === 'submitting'}
+                        >
+                          Добавить в мои водители
+                        </button>
+                      )}
                   </div>
                 )}
                 {shareFeedback && <StatusMessage>{shareFeedback}</StatusMessage>}
