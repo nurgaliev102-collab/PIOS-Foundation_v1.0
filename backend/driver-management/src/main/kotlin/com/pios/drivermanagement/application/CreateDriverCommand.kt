@@ -19,5 +19,17 @@ import com.pios.drivermanagement.domain.DriverId
  * [isTest] (Owner Control Center test/production data separation,
  * 2026-08-17) defaults to `false`, mirroring [displayName]'s own
  * backward-compatible defaulting.
+ *
+ * [invitedByDriverId] (ADR-073, Driver-to-Driver Referral -- Single-Hop
+ * Origin Fact) carries [com.pios.drivermanagement.api.CreateDriverRequest]'s
+ * own field unchanged -- validation (self-reference and existence checks,
+ * both degrading to `null` rather than failing the command) happens in
+ * [CreateDriverApplicationService.handle], not here; this command is a
+ * plain carrier, mirroring [isTest]'s own division of responsibility.
  */
-data class CreateDriverCommand(val driverId: DriverId, val displayName: String? = null, val isTest: Boolean = false)
+data class CreateDriverCommand(
+    val driverId: DriverId,
+    val displayName: String? = null,
+    val isTest: Boolean = false,
+    val invitedByDriverId: String? = null
+)

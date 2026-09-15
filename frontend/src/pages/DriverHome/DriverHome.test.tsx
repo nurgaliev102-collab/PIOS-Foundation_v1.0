@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { DriverHome } from './DriverHome'
 import { request } from '../../api/apiClient'
 
@@ -36,6 +36,33 @@ function renderDriverHome() {
     <MemoryRouter>
       <DriverHome />
     </MemoryRouter>
+  )
+}
+
+// ADR-073 (Driver-to-Driver Referral -- Single-Hop Origin Fact), Part 3:
+// renders the same `DriverHome` component at the new driver-facing
+// `/d/:inviterDriverCode` route, exactly as `routes.tsx` wires it -- a
+// plain `<MemoryRouter>` with no `<Route>` never resolves `useParams()`,
+// so this needs the real route table shape, not [renderDriverHome]'s own.
+function renderDriverHomeAtInviteRoute(inviterDriverCode: string) {
+  return render(
+    <MemoryRouter initialEntries={[`/d/${inviterDriverCode}`]}>
+      <Routes>
+        <Route path="/d/:inviterDriverCode" element={<DriverHome />} />
+      </Routes>
+    </MemoryRouter>
+  )
+}
+
+function seedIdentityWithNoDriver() {
+  localStorage.setItem(
+    'pios.identity',
+    JSON.stringify({
+      identityId: 'identity-1',
+      driverId: null,
+      token: 'test-token',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    })
   )
 }
 
@@ -847,5 +874,63 @@ describe('DriverHome', () => {
     await userEvent.click(screen.getByText('Пропустить'))
 
     expect(screen.queryByRole('button', { name: 'Закрыть' })).not.toBeInTheDocument()
+  })
+
+  // --- ADR-073: Driver-to-Driver Referral -- Single-Hop Origin Fact ---
+
+  it('reads the inviter code from /d/:inviterDriverCode and sends it as invitedByDriverId on POST /v1/drivers', async () => {
+    localStorage.clear()
+    seedIdentityWithNoDriver()
+    mockedRequest.mockReset()
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: null }) // GET /v1/identities/me -- no driver linked yet
+
+    renderDriverHomeAtInviteRoute('inviter-driver-1')
+
+    await userEvent.type(await screen.findByLabelText('Ваше имя'), 'Новый водитель')
+
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/drivers
+    mockedRequest.mockResolvedValueOnce({
+      identityId: 'identity-1',
+      driverId: 'generated-driver-id',
+      token: 'test-token-2',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    }) // POST /v1/identities/:id/driver (attachDriver)
+    mockedRequest.mockResolvedValue([]) // every subsequent poll/list call on the now-ready screen
+
+    await userEvent.click(screen.getByRole('button', { name: 'Создать профиль' }))
+
+    const createCall = await vi.waitUntil(() => mockedRequest.mock.calls.find(([path]) => path === '/v1/drivers'))
+    expect(createCall).toBeDefined()
+    const body = JSON.parse((createCall?.[1] as RequestInit).body as string)
+    expect(body.displayName).toBe('Новый водитель')
+    expect(body.invitedByDriverId).toBe('inviter-driver-1')
+  })
+
+  it('omits invitedByDriverId on POST /v1/drivers when registering through the plain "/" route (no inviter)', async () => {
+    localStorage.clear()
+    seedIdentityWithNoDriver()
+    mockedRequest.mockReset()
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: null }) // GET /v1/identities/me
+
+    renderDriverHome()
+
+    await userEvent.type(await screen.findByLabelText('Ваше имя'), 'Другой водитель')
+
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/drivers
+    mockedRequest.mockResolvedValueOnce({
+      identityId: 'identity-1',
+      driverId: 'generated-driver-id-2',
+      token: 'test-token-3',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    }) // POST /v1/identities/:id/driver
+    mockedRequest.mockResolvedValue([])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Создать профиль' }))
+
+    const createCall = await vi.waitUntil(() => mockedRequest.mock.calls.find(([path]) => path === '/v1/drivers'))
+    expect(createCall).toBeDefined()
+    const body = JSON.parse((createCall?.[1] as RequestInit).body as string)
+    expect(body.displayName).toBe('Другой водитель')
+    expect(body.invitedByDriverId).toBeUndefined()
   })
 })

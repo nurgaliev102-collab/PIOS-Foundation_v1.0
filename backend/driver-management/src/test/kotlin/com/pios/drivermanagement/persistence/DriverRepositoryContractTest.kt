@@ -65,6 +65,29 @@ abstract class DriverRepositoryContractTest {
         assertTrue(all.any { it.id == first.id && it.availability == Availability.AVAILABLE })
         assertTrue(all.any { it.id == second.id && it.availability == Availability.UNAVAILABLE })
     }
+
+    // --- ADR-073: Driver-to-Driver Referral -- Single-Hop Origin Fact ---
+
+    @Test
+    fun `countInvitedBy counts only real drivers naming the given driver as invitedByDriverId`() {
+        val repository = createRepository()
+        val inviter = Driver(DriverId("contract-test-invited-by-inviter"))
+        repository.save(inviter)
+        repository.save(Driver(DriverId("contract-test-invited-by-real"), invitedByDriverId = inviter.id.value))
+        repository.save(Driver(DriverId("contract-test-invited-by-test"), invitedByDriverId = inviter.id.value, isTest = true))
+        repository.save(Driver(DriverId("contract-test-invited-by-unrelated")))
+
+        assertEquals(1L, repository.countInvitedBy(inviter.id))
+    }
+
+    @Test
+    fun `countInvitedBy is zero for a driver with no invitees`() {
+        val repository = createRepository()
+        val driver = Driver(DriverId("contract-test-invited-by-none"))
+        repository.save(driver)
+
+        assertEquals(0L, repository.countInvitedBy(driver.id))
+    }
 }
 
 class InMemoryDriverRepositoryContractTest : DriverRepositoryContractTest() {

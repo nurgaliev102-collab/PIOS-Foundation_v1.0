@@ -6,6 +6,7 @@ import com.pios.drivermanagement.application.DeclareAvailabilityCommand
 import com.pios.drivermanagement.application.DriverAlreadyExistsException
 import com.pios.drivermanagement.application.DriverAvailabilityApplicationService
 import com.pios.drivermanagement.application.DriverNotFoundException
+import com.pios.drivermanagement.application.DriverRepository
 import com.pios.drivermanagement.application.RetrieveDriverAvailabilityHandler
 import com.pios.drivermanagement.application.RetrieveDriverMilestonesHandler
 import com.pios.drivermanagement.application.UpdateLongDistancePreferenceApplicationService
@@ -98,6 +99,13 @@ import org.springframework.web.bind.annotation.RestController
  * `declareAvailability`: 401 with no valid token, 403 for any token not
  * naming this exact [driverId].
  *
+ * `getMilestones` also carries [DriverMilestonesResponse.invitedDriversCount]
+ * (ADR-073 Part 4) -- computed live from [driverRepository], the same
+ * private, `Bearer`-gated surface this endpoint already is. No other
+ * endpoint on this controller, and no field on [DriverResponse], ever
+ * exposes this count -- ADR-073 Part 4's own "never passenger-facing"
+ * constraint.
+ *
  * ## Update Vehicle (PIOS Group and Long-Distance Rides Roadmap, Stage 1)
  *
  * `updateVehicle` is a driver's own declaration of their car's details --
@@ -127,14 +135,15 @@ class DriverController(
     private val retrieveDriverMilestonesHandler: RetrieveDriverMilestonesHandler,
     private val updateVehicleApplicationService: UpdateVehicleApplicationService,
     private val updateLongDistancePreferenceApplicationService: UpdateLongDistancePreferenceApplicationService,
-    private val sessionTokenVerifier: SessionTokenVerifier
+    private val sessionTokenVerifier: SessionTokenVerifier,
+    private val driverRepository: DriverRepository
 ) {
 
     @PostMapping
     fun createDriver(@RequestBody request: CreateDriverRequest): ResponseEntity<DriverResponse> =
         try {
             val driver = createDriverApplicationService.handle(
-                CreateDriverCommand(DriverId(request.driverId), request.displayName, request.isTest)
+                CreateDriverCommand(DriverId(request.driverId), request.displayName, request.isTest, request.invitedByDriverId)
             )
             ResponseEntity.status(HttpStatus.CREATED).body(driver.toResponse())
         } catch (ex: DriverAlreadyExistsException) {
@@ -240,7 +249,8 @@ class DriverController(
                     milestones.currentStreakWeeks,
                     milestones.repeatClientsCount,
                     milestones.totalStatedEarnings,
-                    milestones.unpricedRidesCount
+                    milestones.unpricedRidesCount,
+                    driverRepository.countInvitedBy(id)
                 )
             )
         } catch (ex: IllegalArgumentException) {

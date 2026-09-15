@@ -1,0 +1,15 @@
+-- ADR-073 (Driver-to-Driver Referral -- Single-Hop Origin Fact), Part 2: a
+-- single, nullable edge on the Driver a driver already owns creating for
+-- itself. Additive, nullable TEXT column, no foreign key -- the same
+-- reasoning V4__add_driver_created_at.sql and V5__add_driver_is_test.sql
+-- already established for an optional fact set once at creation: every
+-- existing row becomes NULL, every existing INSERT path is unaffected, and
+-- no cross-database FK is introduced (ADR-005/ADR-009 forbid those; a
+-- same-database self-reference is declined too, per ADR-073 Part 2's own
+-- reasoning -- an inert fact should not couple registration writes to
+-- row-ordering/cleanup concerns).
+--
+-- No recursive structure is introduced by this column: it is exactly one
+-- edge per driver, never walked more than one hop by any query this
+-- codebase runs (ADR-073 Part 5).
+ALTER TABLE drivers ADD COLUMN invited_by_driver_id TEXT NULL;

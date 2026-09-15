@@ -32,13 +32,13 @@ class PostgreSQLDriverRepository(
 ) : DriverRepository {
 
     private val selectColumns =
-        "id, availability, display_name, created_at, is_test, vehicle_make, vehicle_model, vehicle_color, vehicle_plate_number, vehicle_seat_count, accepts_long_distance_trips"
+        "id, availability, display_name, created_at, is_test, vehicle_make, vehicle_model, vehicle_color, vehicle_plate_number, vehicle_seat_count, accepts_long_distance_trips, invited_by_driver_id"
 
     override fun save(driver: Driver) {
         jdbcTemplate.update(
             """
-            INSERT INTO drivers (id, availability, display_name, created_at, is_test, vehicle_make, vehicle_model, vehicle_color, vehicle_plate_number, vehicle_seat_count, accepts_long_distance_trips)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO drivers (id, availability, display_name, created_at, is_test, vehicle_make, vehicle_model, vehicle_color, vehicle_plate_number, vehicle_seat_count, accepts_long_distance_trips, invited_by_driver_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 availability = EXCLUDED.availability,
                 vehicle_make = EXCLUDED.vehicle_make,
@@ -58,7 +58,8 @@ class PostgreSQLDriverRepository(
             driver.vehicleColor,
             driver.vehiclePlateNumber,
             driver.vehicleSeatCount,
-            driver.acceptsLongDistanceTrips
+            driver.acceptsLongDistanceTrips,
+            driver.invitedByDriverId
         )
     }
 
@@ -74,6 +75,19 @@ class PostgreSQLDriverRepository(
     override fun findAll(): List<Driver> =
         jdbcTemplate.query("SELECT $selectColumns FROM drivers") { rs, _ -> reconstruct(rs) }
 
+    /**
+     * ADR-073 Part 4: a direct `COUNT` over `drivers`, not a persisted
+     * counter -- see [DriverRepository.countInvitedBy]'s own KDoc for why.
+     * `is_test = FALSE` excludes technical verification drivers from a
+     * real inviter's own count (ADR-073 Consequences).
+     */
+    override fun countInvitedBy(id: DriverId): Long =
+        jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM drivers WHERE invited_by_driver_id = ? AND is_test = FALSE",
+            Long::class.java,
+            id.value
+        )
+
     private fun reconstruct(rs: java.sql.ResultSet): Driver = Driver(
         id = DriverId(rs.getString("id")),
         availability = Availability.valueOf(rs.getString("availability")),
@@ -85,6 +99,7 @@ class PostgreSQLDriverRepository(
         vehicleColor = rs.getString("vehicle_color"),
         vehiclePlateNumber = rs.getString("vehicle_plate_number"),
         vehicleSeatCount = rs.getInt("vehicle_seat_count").let { if (rs.wasNull()) null else it },
-        acceptsLongDistanceTrips = rs.getBoolean("accepts_long_distance_trips")
+        acceptsLongDistanceTrips = rs.getBoolean("accepts_long_distance_trips"),
+        invitedByDriverId = rs.getString("invited_by_driver_id")
     )
 }

@@ -54,7 +54,7 @@ class DriverControllerTest {
     private val updateLongDistancePreferenceService = UpdateLongDistancePreferenceApplicationService(repository)
     private val secret = Base64.getEncoder().encodeToString("driver-controller-test-secret".toByteArray())
     private val sessionTokenVerifier = SessionTokenVerifier(secretBase64 = secret)
-    private val controller = DriverController(handler, availabilityService, createDriverService, milestonesHandler, updateVehicleService, updateLongDistancePreferenceService, sessionTokenVerifier)
+    private val controller = DriverController(handler, availabilityService, createDriverService, milestonesHandler, updateVehicleService, updateLongDistancePreferenceService, sessionTokenVerifier, repository)
 
     // --- Token minting test helper (mirrors ProposalControllerTest's own) ---
 
@@ -515,5 +515,62 @@ class DriverControllerTest {
         assertEquals(2L, body.completedRidesCount)
         assertEquals(350L, body.totalStatedEarnings)
         assertEquals(1, body.unpricedRidesCount)
+    }
+
+    // --- ADR-073: Driver-to-Driver Referral -- Single-Hop Origin Fact ---
+
+    @Test
+    fun `creating a driver with a valid inviter persists and returns invitedByDriverId`() {
+        controller.createDriver(CreateDriverRequest("adr073-inviter-1"))
+
+        val response = controller.createDriver(CreateDriverRequest("adr073-invited-1", invitedByDriverId = "adr073-inviter-1"))
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        assertEquals("adr073-inviter-1", repository.findById(DriverId("adr073-invited-1"))?.invitedByDriverId)
+    }
+
+    @Test
+    fun `creating a driver with no invitedByDriverId leaves it null, unaffected for every existing caller`() {
+        val response = controller.createDriver(CreateDriverRequest("adr073-no-inviter"))
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        assertNull(repository.findById(DriverId("adr073-no-inviter"))?.invitedByDriverId)
+    }
+
+    @Test
+    fun `creating a driver with a self-referencing invitedByDriverId degrades to null and still succeeds`() {
+        val response = controller.createDriver(CreateDriverRequest("adr073-self", invitedByDriverId = "adr073-self"))
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        assertNull(repository.findById(DriverId("adr073-self"))?.invitedByDriverId)
+    }
+
+    @Test
+    fun `creating a driver with a nonexistent invitedByDriverId degrades to null and still succeeds`() {
+        val response = controller.createDriver(CreateDriverRequest("adr073-bad-inviter", invitedByDriverId = "no-such-driver"))
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        assertNull(repository.findById(DriverId("adr073-bad-inviter"))?.invitedByDriverId)
+    }
+
+    @Test
+    fun `milestones exposes invitedDriversCount, excluding test drivers, private to the inviter's own Bearer token`() {
+        controller.createDriver(CreateDriverRequest("adr073-milestones-inviter"))
+        controller.createDriver(CreateDriverRequest("adr073-milestones-real-1", invitedByDriverId = "adr073-milestones-inviter"))
+        controller.createDriver(CreateDriverRequest("adr073-milestones-real-2", invitedByDriverId = "adr073-milestones-inviter"))
+        controller.createDriver(CreateDriverRequest("adr073-milestones-test-1", isTest = true, invitedByDriverId = "adr073-milestones-inviter"))
+
+        val response = controller.getMilestones("adr073-milestones-inviter", authorization = driverToken("adr073-milestones-inviter"))
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals(2L, assertNotNull(response.body).invitedDriversCount)
+    }
+
+    @Test
+    fun `a brand-new driver with nobody invited through their link returns invitedDriversCount zero`() {
+        val response = controller.getMilestones("milestones-driver-new", authorization = driverToken("milestones-driver-new"))
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals(0L, assertNotNull(response.body).invitedDriversCount)
     }
 }

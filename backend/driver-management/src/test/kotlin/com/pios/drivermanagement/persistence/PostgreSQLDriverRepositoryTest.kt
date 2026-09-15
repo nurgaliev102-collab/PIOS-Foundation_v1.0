@@ -156,4 +156,46 @@ class PostgreSQLDriverRepositoryTest {
 
         assertEquals(false, repository.findById(driver.id)?.acceptsLongDistanceTrips)
     }
+
+    // --- ADR-073: Driver-to-Driver Referral -- Single-Hop Origin Fact (V12__add_driver_invited_by.sql) ---
+
+    @Test
+    fun `invitedByDriverId round-trips through PostgreSQL, proving V12__add_driver_invited_by applied`() {
+        val inviter = Driver(DriverId("postgres-driver-invited-by-inviter"))
+        repository.save(inviter)
+        val invited = Driver(DriverId("postgres-driver-invited-by-invited"), invitedByDriverId = inviter.id.value)
+
+        repository.save(invited)
+
+        assertEquals(inviter.id.value, repository.findById(invited.id)?.invitedByDriverId)
+    }
+
+    @Test
+    fun `a driver saved without an inviter loads back with invitedByDriverId null`() {
+        val driver = Driver(DriverId("postgres-driver-invited-by-none"))
+
+        repository.save(driver)
+
+        assertNull(repository.findById(driver.id)?.invitedByDriverId)
+    }
+
+    @Test
+    fun `countInvitedBy counts only real drivers invited by the given driver, over real PostgreSQL data`() {
+        val inviter = Driver(DriverId("postgres-driver-count-invited-inviter"))
+        repository.save(inviter)
+        repository.save(Driver(DriverId("postgres-driver-count-invited-real-1"), invitedByDriverId = inviter.id.value))
+        repository.save(Driver(DriverId("postgres-driver-count-invited-real-2"), invitedByDriverId = inviter.id.value))
+        repository.save(Driver(DriverId("postgres-driver-count-invited-test"), invitedByDriverId = inviter.id.value, isTest = true))
+        repository.save(Driver(DriverId("postgres-driver-count-invited-unrelated")))
+
+        assertEquals(2L, repository.countInvitedBy(inviter.id))
+    }
+
+    @Test
+    fun `countInvitedBy returns zero for a driver nobody has ever named as their inviter`() {
+        val driver = Driver(DriverId("postgres-driver-count-invited-lonely"))
+        repository.save(driver)
+
+        assertEquals(0L, repository.countInvitedBy(driver.id))
+    }
 }

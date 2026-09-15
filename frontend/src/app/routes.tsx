@@ -26,6 +26,19 @@ export const routes: RouteObject[] = [
     element: <PassengerLanding />,
   },
   {
+    // ADR-073 (Driver-to-Driver Referral -- Single-Hop Origin Fact), Part
+    // 3: a driver-facing registration link, distinct from the
+    // passenger-facing `/i/:driverCode` above -- that URL already means "a
+    // passenger is being introduced to this driver by name" and must keep
+    // meaning only that. Reuses the existing `DriverHome` component (same
+    // reuse-over-duplication precedent `/request` already established for
+    // `RideRequest`, ADR-070 Part 1) -- `DriverHome` reads
+    // `inviterDriverCode` from the route itself and threads it into its own
+    // existing `POST /v1/drivers` call.
+    path: '/d/:inviterDriverCode',
+    element: <DriverHome />,
+  },
+  {
     path: '/i/:driverCode/request',
     element: <RideRequest />,
   },

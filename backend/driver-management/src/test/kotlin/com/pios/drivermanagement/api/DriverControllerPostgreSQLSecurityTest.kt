@@ -55,7 +55,8 @@ class DriverControllerPostgreSQLSecurityTest {
         milestonesHandler,
         updateVehicleService,
         updateLongDistancePreferenceService,
-        SessionTokenVerifier(secretBase64 = secret)
+        SessionTokenVerifier(secretBase64 = secret),
+        repository
     )
 
     private val objectMapper = ObjectMapper()

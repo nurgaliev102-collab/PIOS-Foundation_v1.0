@@ -56,6 +56,23 @@ import java.time.Instant
  * existing driver, including every one registered before this field
  * existed, is unaffected until they explicitly opt in via
  * [updateLongDistancePreference].
+ *
+ * [invitedByDriverId] (ADR-073, Driver-to-Driver Referral -- Single-Hop
+ * Origin Fact) is the id of the Driver whose own registration link this
+ * driver registered through, if any -- a single, immutable, optional edge
+ * recorded once at creation, appended last so every existing positional
+ * call site keeps compiling, the same treatment [createdAt] received.
+ * [com.pios.drivermanagement.application.CreateDriverApplicationService]
+ * is the only place this is ever set, and it degrades an unrecognized or
+ * self-referencing value to `null` rather than failing registration (see
+ * that class's own KDoc). `null` for every driver registered before this
+ * field existed and for every driver who registered through the
+ * passenger-facing link or with no inviter at all.
+ *
+ * This is the aggregate's first Driver-to-Driver relationship (ADR-073
+ * Consequences) -- intentionally just one nullable string, no new Value
+ * Object, no chain: ADR-073 Part 5 binds this codebase to never walk it
+ * more than one hop, and to never attach anything of value to it.
  */
 class Driver(
     val id: DriverId,
@@ -68,7 +85,8 @@ class Driver(
     vehicleColor: String? = null,
     vehiclePlateNumber: String? = null,
     vehicleSeatCount: Int? = null,
-    acceptsLongDistanceTrips: Boolean = false
+    acceptsLongDistanceTrips: Boolean = false,
+    val invitedByDriverId: String? = null
 ) {
     var availability: Availability = availability
         private set

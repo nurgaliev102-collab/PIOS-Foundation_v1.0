@@ -10,6 +10,16 @@ package com.pios.drivermanagement.api
  * -- see [com.pios.drivermanagement.domain.DriverMilestones]'s own KDoc.
  * No currency symbol or formatting is added here: the backend asserts no
  * currency (ADR-042 Open Question 2 stays open; ADR-065 Decision item 4).
+ *
+ * [invitedDriversCount] (ADR-073, Driver-to-Driver Referral -- Single-Hop
+ * Origin Fact, Part 4) is a plain count of drivers who registered through
+ * this driver's own `/d/:inviterDriverCode` link, sourced live from
+ * [com.pios.drivermanagement.application.DriverRepository.countInvitedBy]
+ * -- never persisted here, never a score/rank/trend, and never surfaced
+ * anywhere other than this already-`Bearer`-gated endpoint (see
+ * [com.pios.drivermanagement.api.DriverController.getMilestones]'s own
+ * KDoc for why: this is private business data about this driver, and
+ * ADR-073 Part 5 forbids attaching anything of value to this fact).
  */
 data class DriverMilestonesResponse(
     val driverId: String,
@@ -17,5 +27,6 @@ data class DriverMilestonesResponse(
     val currentStreakWeeks: Int,
     val repeatClientsCount: Int,
     val totalStatedEarnings: Long,
-    val unpricedRidesCount: Int
+    val unpricedRidesCount: Int,
+    val invitedDriversCount: Long
 )

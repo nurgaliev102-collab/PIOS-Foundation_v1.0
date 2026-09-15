@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useParams } from 'react-router-dom'
 import { Header } from '../../components/Header'
 import { BottomNav } from '../../components/BottomNav'
 import { DriverCard } from '../../components/DriverCard'
@@ -584,6 +585,12 @@ function generateDriverId(): string {
  * KDoc). No new backend endpoint or state was introduced by this fix.
  */
 export function DriverHome() {
+  // ADR-073 (Driver-to-Driver Referral -- Single-Hop Origin Fact), Part 3:
+  // `undefined` on every route other than `/d/:inviterDriverCode` (the
+  // existing `/` and `/i/:driverCode/...` routes render this same
+  // component with no such param), so every existing caller of this
+  // screen is unaffected.
+  const { inviterDriverCode } = useParams<{ inviterDriverCode: string }>()
   const [identity, setIdentity] = useState<StoredIdentity | null>(null)
   // Sprint 2 (Identity MVP): true until the mount-time restoreIdentity()
   // round trip resolves, so a returning driver never sees a flash of the
@@ -1154,7 +1161,15 @@ export function DriverHome() {
         await request('/v1/drivers', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ driverId: newDriverId, displayName: trimmed }),
+          body: JSON.stringify({
+            driverId: newDriverId,
+            displayName: trimmed,
+            // ADR-073 Part 3: present only when this screen was reached
+            // through a driver's own `/d/:inviterDriverCode` link -- every
+            // other registration path (including the passenger-facing
+            // `/i/:driverCode`) omits it, unchanged.
+            ...(inviterDriverCode ? { invitedByDriverId: inviterDriverCode } : {}),
+          }),
         })
       } catch (error) {
         if (!(error instanceof ApiError && error.status === 409)) {

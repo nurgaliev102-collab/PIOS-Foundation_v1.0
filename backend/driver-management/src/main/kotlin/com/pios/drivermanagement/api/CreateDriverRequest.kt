@@ -16,5 +16,21 @@ package com.pios.drivermanagement.api
  * 2026-08-17) lets an automated/manual technical verification mark the
  * driver it creates as such -- optional, defaulting to `false`, so no
  * existing caller (a real driver's own registration) is affected.
+ *
+ * [invitedByDriverId] (ADR-073, Driver-to-Driver Referral -- Single-Hop
+ * Origin Fact) is the id of the Driver who invited the registering driver,
+ * read by `frontend/src/pages/DriverHome/DriverHome.tsx` from the new
+ * `/d/:inviterDriverCode` route and threaded through unchanged -- optional,
+ * defaulting to `null`, so every existing caller of this endpoint
+ * (including every registration through the unrelated `/i/:driverCode`
+ * passenger link) is unaffected. Degraded to `null` by
+ * [com.pios.drivermanagement.application.CreateDriverApplicationService]
+ * rather than validated here -- see that class's own KDoc for why a bad
+ * value must never fail registration.
  */
-data class CreateDriverRequest(val driverId: String, val displayName: String? = null, val isTest: Boolean = false)
+data class CreateDriverRequest(
+    val driverId: String,
+    val displayName: String? = null,
+    val isTest: Boolean = false,
+    val invitedByDriverId: String? = null
+)
