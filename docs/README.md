@@ -76,6 +76,9 @@ Architecture Decision Records. Every change to an architectural decision is reco
 | [ADR-068](ADR/ADR-068-Relationship-Ordered-Fallback-Dispatch.md) | Relationship-Ordered Fallback Dispatch — Trusted → Open (Network tier deferred) | **Accepted, narrowed scope** |
 | [ADR-069](ADR/ADR-069-Test-Real-Segregation-In-Fallback-Driver-Selection.md) | Test/Real Segregation in Fallback Driver Selection — `is_test` on Dispatch's Availability Projection | **Accepted** |
 | [ADR-070](ADR/ADR-070-Channel-1-Discovery-Matching-and-Post-Ride-Relationship-Formation.md) | Channel 1 — Discovery Matching and Post-Ride Relationship Formation (Option B) | **Accepted** |
+| [ADR-071](ADR/ADR-071-In-App-Poll-Derived-Notification-Surface.md) | In-App, Poll-Derived Notification Surface | **Accepted** |
+| [ADR-073](ADR/ADR-073-Driver-To-Driver-Referral-Single-Hop-Origin-Fact.md) | Driver-to-Driver Referral — Single-Hop Origin Fact | **Accepted** |
+| [ADR-074](ADR/ADR-074-Subscription-Billing-Bounded-Context-Foundation.md) | Subscription/Billing Foundation — a New Bounded Context That Gates Nothing | **Accepted, container only** |
 
 Note (Sprint 1 — Foundation Stabilization): this table is also missing ADR-027 through ADR-034, which exist as real files under `docs/ADR/` but were never added here — a pre-existing indexing gap found during this sprint's own documentation-sync work, left uncorrected here since it is outside this sprint's authorized scope; recorded for Sprint 2.
 
