@@ -31,6 +31,8 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveBackendTarget, BACKEND_ROUTES } from './backendRoutes.mjs'
+import { clientIpForBackend } from './clientIp.mjs'
+import { safeStaticPath } from './safeStaticPath.mjs'
 import { injectDriverPreview } from './injectMeta.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -115,9 +117,18 @@ async function serveDriverPreview(req, res, driverCode) {
 
 function proxyRequest(req, res, targetBaseUrl) {
   const target = new URL(req.url, targetBaseUrl)
+  const headers = { ...req.headers, host: target.host }
+  // Never relay a caller-supplied identity for the guest-creation limiter.
+  // cloudflared reaches this server through a loopback socket and supplies
+  // CF-Connecting-IP; direct external clients are keyed by their socket IP.
+  delete headers['x-pios-client-ip']
+  const clientIp = clientIpForBackend(req.socket.remoteAddress, req.headers['cf-connecting-ip'])
+  delete headers['cf-connecting-ip']
+  delete headers['x-forwarded-for']
+  if (clientIp) headers['x-pios-client-ip'] = clientIp
   const proxyReq = http.request(
     target,
-    { method: req.method, headers: { ...req.headers, host: target.host } },
+    { method: req.method, headers },
     (proxyRes) => {
       res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers)
       proxyRes.pipe(res)
@@ -146,11 +157,10 @@ function cacheControlFor(pathname) {
 }
 
 async function serveStaticOrFallback(req, res, pathname) {
-  const filePath = path.join(DIST_DIR, decodeURIComponent(pathname))
-  // Reject any resolved path that escapes DIST_DIR (a `..` segment) --
-  // this server is otherwise unauthenticated and reachable from the public
-  // internet through the Tailscale Funnel.
-  if (!filePath.startsWith(DIST_DIR)) {
+  const filePath = safeStaticPath(DIST_DIR, pathname)
+  // A string-prefix check is insufficient: dist-private is a sibling, not
+  // a child of dist. The helper uses path.relative and rejects that case.
+  if (!filePath) {
     res.writeHead(400)
     res.end()
     return
@@ -175,7 +185,14 @@ async function serveStaticOrFallback(req, res, pathname) {
 }
 
 const server = http.createServer((req, res) => {
-  const pathname = new URL(req.url, `http://${req.headers.host}`).pathname
+  let pathname
+  try {
+    pathname = new URL(req.url, 'http://localhost').pathname
+  } catch {
+    res.writeHead(400)
+    res.end('Bad request')
+    return
+  }
 
   const driverCodeMatch = pathname.match(DRIVER_CODE_ROUTE)
   if (driverCodeMatch && req.method === 'GET') {

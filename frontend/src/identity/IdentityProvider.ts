@@ -13,6 +13,8 @@ export interface StoredIdentity {
   token: string
   /** ISO-8601 — [IdentityProvider] itself never sends an expired token; callers still hit 401 if the backend disagrees. */
   expiresAt: string
+  /** A short-lived, device-local passenger session created without registration. */
+  guest?: boolean
 }
 
 export interface IdentityProvider {
@@ -22,6 +24,10 @@ export interface IdentityProvider {
   register(phone: string, password: string): Promise<StoredIdentity>
   /** Signs in to an existing account and remembers the session on this device. */
   login(phone: string, password: string): Promise<StoredIdentity>
+  /** Starts the passenger journey without collecting credentials. */
+  createGuest(): Promise<StoredIdentity>
+  /** Converts the current guest in place, preserving its orders and relationships. */
+  upgradeGuest(phone: string, password: string): Promise<StoredIdentity>
   /** Forgets this device's own session — the account itself is untouched. */
   logout(): void
   /** Associates a just-created driver profile with this device's identity. */

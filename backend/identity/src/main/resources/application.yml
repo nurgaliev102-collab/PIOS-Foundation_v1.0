@@ -64,8 +64,12 @@ logging:
 #   session:
 #     secret: ""
 #     ttl-seconds: 2592000
+#     guest-ttl-seconds: 604800
 #   identity:
 #     password-iterations: 210000
+#     guest:
+#       max-per-window: 10
+#       window-ms: 3600000
 #     login:
 #       failure-delay-ms: 500
 #       max-failures-per-window: 20

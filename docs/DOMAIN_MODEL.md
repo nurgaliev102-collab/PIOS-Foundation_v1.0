@@ -152,7 +152,7 @@ These are structural invariants derivable from approved documentation, not busin
 
 Described in prose, conceptually, without workflow diagrams:
 
-- **Order.** Submitted, then either assigned by Dispatch and carried through acceptance, the ride itself, and completion, or cancelled at any point before completion.
+- **Order.** Submitted, then either assigned by Dispatch and carried through acceptance, the ride itself, and completion, or cancelled at any point before completion, or — **amended 2026-09-16 by `ADR-077`, recorded here per `ADR-015`** — closed as **unfulfilled** when Dispatch's own routing window for that order expires with no offer ever having been made (`DispatchExhausted` → `OrderUnfulfilled`). Unfulfilled is terminal, reachable only from submitted, and cannot be left; Section 11's invariants ("exactly one current status", "a completed order cannot return to an active state") are unchanged by it. Distinct from cancellation (an act by a participant) and from completion (a ride that happened). **Not deployed as of this amendment's own date** — see `ADR-077` Status.
 - **Proposal.** Created open; resolves, exactly once, to confirmed, refused, lapsed, or withdrawn (Product Decision: Electronic Dispatcher MVP Blockers v1.0; ADR-053). Its resolution-recognition mechanism is fully assigned: lapse to Dispatch's own application layer (ADR-051, ADR-052, both Accepted); withdrawal to Dispatch's consumption of Order Management's `OrderCancelled` (ADR-053, Accepted).
 - **Assignment.** Made by Dispatch in connection with an order, then accepted; it stands until its order is completed or cancelled.
 - **Driver Availability.** Declared by the driver and changed by the driver at will; it exists independently of any single order or assignment.

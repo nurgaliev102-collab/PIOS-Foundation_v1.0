@@ -52,7 +52,7 @@ class FirstRefusalApplicationServiceTest {
     @Test
     fun `Test F -- a passenger with an eligible primary driver gets a First Refusal proposal for that driver`() {
         primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
 
         val outcome = service.attempt(order, passenger)
 
@@ -63,9 +63,33 @@ class FirstRefusalApplicationServiceTest {
     }
 
     @Test
+    fun `primary test driver is ineligible for a real order`() {
+        primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, primaryDriver))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = true))
+
+        assertIs<FirstRefusalOutcome.PrimaryDriverIneligible>(service.attempt(order, passenger, isTest = false))
+        assertEquals(emptyList(), proposalRepository.findByOrder(order))
+    }
+
+    @Test
+    fun `primary driver may receive an advance request while off-line`() {
+        primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, primaryDriver))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = false, isTest = false))
+
+        val outcome = service.attempt(
+            order,
+            passenger,
+            requestedPickupAt = java.time.Instant.parse("2099-08-25T06:30:00Z")
+        )
+
+        assertIs<FirstRefusalOutcome.Proposed>(outcome)
+        assertEquals(primaryDriver, outcome.proposal.driver)
+    }
+
+    @Test
     fun `Test F -- the created proposal uses the existing OPEN status, no new vocabulary`() {
         primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
 
         val outcome = service.attempt(order, passenger) as FirstRefusalOutcome.Proposed
 
@@ -89,7 +113,7 @@ class FirstRefusalApplicationServiceTest {
     @Test
     fun `Test H -- an unavailable primary driver produces no proposal, leaving the order free for normal dispatch`() {
         primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = false))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = false, isTest = false))
 
         val outcome = service.attempt(order, passenger)
 
@@ -101,7 +125,7 @@ class FirstRefusalApplicationServiceTest {
         // proposal for a different, available driver still works exactly
         // as today (ProposalApplicationService's own pre-existing
         // availability gate, unchanged by this task).
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-fallback"), available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-fallback"), available = true, isTest = false))
         val fallback = proposalApplicationService.handle(ProposeDriverCommand(order, DriverReference("driver-fallback")))
         assertEquals(ProposalStatus.OPEN, fallback.proposal.status)
     }
@@ -122,7 +146,7 @@ class FirstRefusalApplicationServiceTest {
     @Test
     fun `Test I -- attempting First Refusal twice for the same order does not create a second proposal`() {
         primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
 
         val first = service.attempt(order, passenger)
         val second = service.attempt(order, passenger)
@@ -144,7 +168,7 @@ class FirstRefusalApplicationServiceTest {
     @Test
     fun `Test 3 -- declared explicit driver intent skips First Refusal entirely, even with an eligible primary driver`() {
         primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
 
         val outcome = service.attempt(order, passenger, explicitDriverIntentDeclared = true)
 
@@ -175,7 +199,7 @@ class FirstRefusalApplicationServiceTest {
     @Test
     fun `Test 4 -- no explicit intent declared (the default) leaves an eligible primary driver free to be proposed to`() {
         primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
 
         val outcome = service.attempt(order, passenger, explicitDriverIntentDeclared = false)
 

@@ -43,6 +43,7 @@ class OrderCancelledApplicationService(
     private val orderCancelledRepository: OrderCancelledRepository,
     private val proposalRepository: ProposalRepository,
     private val proposalApplicationService: ProposalApplicationService,
+    private val dispatchRequestRepository: DispatchRequestRepository,
     private val transactionRunner: TransactionRunner = NoOpTransactionRunner
 ) {
     private val logger = LoggerFactory.getLogger(OrderCancelledApplicationService::class.java)
@@ -51,6 +52,9 @@ class OrderCancelledApplicationService(
         val isNewEvent = orderCancelledRepository.markProcessed(command.eventId)
         if (isNewEvent) {
             val order = OrderReference(command.orderReference)
+            // The cancellation tombstone must exist even when this event
+            // arrives before OrderSubmitted on its independent queue.
+            dispatchRequestRepository.markCancelled(order.orderId)
             val openProposal = proposalRepository.findByOrder(order).firstOrNull { it.status == ProposalStatus.OPEN }
             if (openProposal != null) {
                 proposalApplicationService.withdrawProposal(openProposal, WithdrawProposalCommand(openProposal.id))

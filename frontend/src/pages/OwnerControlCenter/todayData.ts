@@ -108,8 +108,11 @@ export function excludeTestData<T extends { isTest: boolean }>(items: T[]): T[] 
 }
 
 /** `GET /v1/drivers` — unauthenticated, unaffected by ADR-060. */
-export function fetchDrivers(): Promise<DriverListItem[]> {
-  return request<DriverListItem[]>('/v1/drivers', { baseUrl: DRIVER_MANAGEMENT_BASE_URL })
+export function fetchDrivers(credential: OwnerCredential): Promise<DriverListItem[]> {
+  return request<DriverListItem[]>('/v1/drivers', {
+    headers: { Authorization: toBasicAuthorizationHeader(credential) },
+    baseUrl: DRIVER_MANAGEMENT_BASE_URL,
+  })
 }
 
 /** `GET /v1/orders`, owner Mode (ADR-060 Decision 1's third mode: no parameter, `Authorization: Basic`). */
@@ -155,8 +158,9 @@ export function fetchProposalsForOrder(orderId: string, credential: OwnerCredent
  * Carries the same [FAN_OUT_REQUEST_TIMEOUT_MS] bound as
  * [fetchProposalsForDriver], for the same reason.
  */
-export function fetchAssignmentsForOrder(orderId: string): Promise<AssignmentListItem[]> {
+export function fetchAssignmentsForOrder(orderId: string, credential: OwnerCredential): Promise<AssignmentListItem[]> {
   return request<AssignmentListItem[]>(`/v1/assignments?orderId=${encodeURIComponent(orderId)}`, {
+    headers: { Authorization: toBasicAuthorizationHeader(credential) },
     baseUrl: DISPATCH_BASE_URL,
     signal: AbortSignal.timeout(FAN_OUT_REQUEST_TIMEOUT_MS),
   })
@@ -268,7 +272,7 @@ function passengerLabel(orderId: string, orders: OrderListItem[]): string {
  */
 export async function loadTodaySnapshot(credential: OwnerCredential): Promise<TodaySnapshot> {
   const [driversRaw, ordersRaw] = await Promise.all([
-    fetchDrivers().catch(() => [] as DriverListItem[]),
+    fetchDrivers(credential).catch(() => [] as DriverListItem[]),
     fetchOrders(credential).catch(() => [] as OrderListItem[]),
   ])
   const drivers = excludeTestData(driversRaw)
@@ -283,7 +287,7 @@ export async function loadTodaySnapshot(credential: OwnerCredential): Promise<To
     proposals.filter((proposal) => proposal.status === 'ACCEPTED').map((proposal) => proposal.orderId)
   )
   const assignmentLists = await mapWithConcurrency([...ordersWithAcceptedProposal], FAN_OUT_CONCURRENCY_LIMIT, (orderId) =>
-    fetchAssignmentsForOrder(orderId).catch(() => [] as AssignmentListItem[])
+    fetchAssignmentsForOrder(orderId, credential).catch(() => [] as AssignmentListItem[])
   )
   const assignments = excludeTestData(assignmentLists.flat())
 

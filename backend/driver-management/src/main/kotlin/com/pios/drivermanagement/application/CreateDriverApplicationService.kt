@@ -1,6 +1,8 @@
 package com.pios.drivermanagement.application
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.drivermanagement.domain.Driver
+import com.pios.drivermanagement.domain.DriverAvailabilityChanged
 import com.pios.drivermanagement.domain.DriverId
 import org.springframework.stereotype.Service
 import java.time.Instant
@@ -24,12 +26,12 @@ import java.time.Instant
  * overwrite an existing driver's availability instead of rejecting the
  * request.
  *
- * No `DriverRegistered` (or equivalent) domain event is raised or
- * published: Sprint 3A's own scope explicitly excludes it (nothing in this
- * module consumes one today; introducing an unconsumed event is exactly
- * the premature abstraction this project's engineering discipline rejects)
- * -- unlike [DriverAvailabilityApplicationService], this service has no
- * [OutboxRepository] dependency at all, not merely a defaulted one.
+ * Registration writes an initial `DriverAvailabilityChanged` projection
+ * fact (`UNAVAILABLE`) into the same transactional outbox as later
+ * availability changes. This does not claim the driver is on line; it lets
+ * Dispatch know the new driver's existence and test classification even
+ * before their first availability toggle, which advance direct requests
+ * need. No separate `DriverRegistered` public contract is introduced.
  *
  * [transactionRunner] defaults to [NoOpTransactionRunner], mirroring every
  * other application service in this module, so tests exercising this
@@ -61,21 +63,33 @@ import java.time.Instant
 @Service
 class CreateDriverApplicationService(
     private val driverRepository: DriverRepository,
-    private val transactionRunner: TransactionRunner = NoOpTransactionRunner
+    private val transactionRunner: TransactionRunner = NoOpTransactionRunner,
+    private val outboxRepository: OutboxRepository = NoOpOutboxRepository,
+    private val objectMapper: ObjectMapper = ObjectMapper()
 ) {
     fun handle(command: CreateDriverCommand): Driver = transactionRunner.run {
         if (driverRepository.findById(command.driverId) != null) {
             throw DriverAlreadyExistsException(command.driverId)
         }
         val invitedByDriverId = resolveInvitedByDriverId(command.driverId, command.invitedByDriverId)
+        val registeredAt = Instant.now()
         val driver = Driver(
             command.driverId,
             displayName = command.displayName,
-            createdAt = Instant.now(),
+            createdAt = registeredAt,
             isTest = command.isTest,
             invitedByDriverId = invitedByDriverId
         )
         driverRepository.save(driver)
+        // The first UNAVAILABLE state is a real projection fact. Without it,
+        // a newly registered driver has no Dispatch record until toggling
+        // availability and cannot even consider a future direct request.
+        outboxRepository.save(
+            DriverAvailabilityOutboxRecordFactory.create(
+                DriverAvailabilityChanged(driver.id, driver.availability, driver.isTest, registeredAt),
+                objectMapper
+            )
+        )
         driver
     }
 

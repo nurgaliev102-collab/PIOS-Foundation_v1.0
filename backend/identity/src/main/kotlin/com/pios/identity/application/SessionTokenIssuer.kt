@@ -27,7 +27,8 @@ import javax.crypto.spec.SecretKeySpec
 @Component
 class SessionTokenIssuer(
     @Value("\${pios.session.secret:}") private val secretBase64: String,
-    @Value("\${pios.session.ttl-seconds:2592000}") private val ttlSeconds: Long
+    @Value("\${pios.session.ttl-seconds:2592000}") private val ttlSeconds: Long,
+    @Value("\${pios.session.guest-ttl-seconds:604800}") private val guestTtlSeconds: Long = 604_800
 ) {
     private val objectMapper = ObjectMapper()
 
@@ -41,7 +42,13 @@ class SessionTokenIssuer(
      * log in a caller must configure the secret; there is no
      * "issue an unusable token" fallback.
      */
-    fun issue(identityId: String, driverId: String?): IssuedToken {
+    fun issue(identityId: String, driverId: String?): IssuedToken =
+        issue(identityId, driverId, guest = false, ttlSeconds = ttlSeconds)
+
+    fun issueGuest(identityId: String): IssuedToken =
+        issue(identityId, driverId = null, guest = true, ttlSeconds = guestTtlSeconds)
+
+    private fun issue(identityId: String, driverId: String?, guest: Boolean, ttlSeconds: Long): IssuedToken {
         check(secretBase64.isNotBlank()) { "pios.session.secret must be configured to issue a session token" }
         val expiresAt = Instant.now().plusSeconds(ttlSeconds)
         val payloadNode = objectMapper.createObjectNode()
@@ -51,6 +58,7 @@ class SessionTokenIssuer(
         } else {
             payloadNode.put("drv", driverId)
         }
+        payloadNode.put("gst", guest)
         payloadNode.put("exp", expiresAt.epochSecond)
         val encodedPayload = base64UrlEncode(objectMapper.writeValueAsBytes(payloadNode))
         val encodedSignature = base64UrlEncode(hmac(encodedPayload))

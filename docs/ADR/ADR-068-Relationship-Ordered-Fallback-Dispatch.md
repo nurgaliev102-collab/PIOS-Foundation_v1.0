@@ -169,6 +169,15 @@ Three candidate definitions are recorded **for product-owner selection only. Non
 
 ### Part 4 — What stays unchanged (FR-003A semantics, preserved in full)
 
+> **Amendment pointer (2026-09-16).** `ADR-077` (Dispatch Routing Obligation, Bounded Retry, and `UNFULFILLED`) amends **three** items in this Part, and preserves the fourth. Recorded here per `ADR-015` so no silent disagreement exists. Nothing else in this ADR — the tier algorithm, the `updated_at ASC` tie-break, Tier 2's emptiness, `excludeDrivers`, Part 1's projection contract — is changed.
+>
+> - *"No new idempotency ledger, no new lock, no new advisory lock"* — **amended.** `dispatch_requests` (V20) is a durable per-order routing record that also dedupes `OrderSubmitted` redelivery, and it is read `FOR UPDATE`. Proposal deduplication itself is unchanged (`Proposal.propose` + `proposals_one_open_per_order`).
+> - *"not a new state, not a new event"* — **amended.** `DispatchExhausted` and `OrderUnfulfilled` are new events; `OrderStatus.UNFULFILLED` is a new terminal Order state. `FallbackDispatchOutcome.NoAvailableDriver` itself is unchanged and still means exactly what this Part says at the level of one `attempt` call.
+> - Part 2's *"no… internal retry loop"* / Part 5's *"any cascading retry across tiers"* — **amended narrowly.** No descent across tiers on a negative result is introduced. The same single, complete tier evaluation may now be repeated over time (5s interval, 2-minute window) **while no proposal exists at all**, and stops permanently the moment one does.
+> - **`"No retry on decline/lapse"` (below) is NOT amended — it is preserved, structurally.** `ADR-077`'s retry short-circuits on `proposals.findByOrder(order).isNotEmpty()`, so once any proposal exists the routing row leaves `PENDING` forever and a later decline or lapse triggers nothing. Q3's ratified answer stands. Extending recovery to decline/lapse would reverse this Part and requires its own ADR.
+>
+> `ADR-076` separately narrows **Part 2, property 3** ("availability remains the sole eligibility gate"): for a *direct or First-Refusal* offer whose `requestedPickupAt` is in the future, an `UNAVAILABLE` driver may be offered. Tier 1 and Tier 3 fallback selection are **not** affected — `FallbackDispatchApplicationService` passes no `requestedPickupAt` and still requires `available = true`.
+
 Every one of the following is explicitly **not** modified by this ADR, and the implementation must preserve each:
 
 - **`FallbackDispatchOutcome`'s three cases** (`Proposed` / `NoAvailableDriver` / `AlreadyAttempted`) and their meanings. "No driver in any tier" is `NoAvailableDriver`, the same non-exceptional outcome it is today — not an error, not a new state, not a new event.

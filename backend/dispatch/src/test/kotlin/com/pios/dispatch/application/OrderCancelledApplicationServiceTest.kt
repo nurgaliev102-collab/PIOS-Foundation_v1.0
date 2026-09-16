@@ -6,6 +6,7 @@ import com.pios.dispatch.domain.ProposalStatus
 import com.pios.dispatch.persistence.InMemoryProposalRepository
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * Fast, DB-free unit test of [OrderCancelledApplicationService]'s own
@@ -28,7 +29,10 @@ class OrderCancelledApplicationServiceTest {
     private val orderCancelledRepository = InMemoryOrderCancelledRepository()
     private val proposalRepository = InMemoryProposalRepository()
     private val proposalApplicationService = ProposalApplicationService(proposalRepository)
-    private val service = OrderCancelledApplicationService(orderCancelledRepository, proposalRepository, proposalApplicationService)
+    private val dispatchRequests = InMemoryDispatchRequestRepository()
+    private val service = OrderCancelledApplicationService(
+        orderCancelledRepository, proposalRepository, proposalApplicationService, dispatchRequests
+    )
 
     @Test
     fun `a new event withdraws the order's own OPEN proposal`() {
@@ -43,8 +47,7 @@ class OrderCancelledApplicationServiceTest {
     @Test
     fun `an order with no proposal at all is handled without error`() {
         service.handle(OrderCancelledUpdateCommand(eventId = "event-2", orderReference = "order-never-proposed"))
-        // No assertion beyond "did not throw" -- the absence of a Proposal
-        // to withdraw is not an error (ADR-053 Part 1's own KDoc).
+        assertTrue(dispatchRequests.cancelledOrderIds.contains("order-never-proposed"))
     }
 
     @Test

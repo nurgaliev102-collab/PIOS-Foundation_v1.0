@@ -424,7 +424,7 @@ export async function collectPilotAnalyticsInput(
   healths: ModuleHealth[]
 ): Promise<PilotAnalyticsInput> {
   const [driversRaw, ordersRaw] = await Promise.all([
-    fetchDrivers().catch(() => [] as DriverListItem[]),
+    fetchDrivers(credential).catch(() => [] as DriverListItem[]),
     fetchOrders(credential).catch(() => [] as OrderListItem[]),
   ])
   const drivers = excludeTestData(driversRaw)
@@ -441,7 +441,7 @@ export async function collectPilotAnalyticsInput(
   const assignmentLists = await mapWithConcurrency(
     [...ordersWithAcceptedProposal],
     FAN_OUT_CONCURRENCY_LIMIT,
-    (orderId) => fetchAssignmentsForOrder(orderId).catch(() => [] as AssignmentListItem[])
+    (orderId) => fetchAssignmentsForOrder(orderId, credential).catch(() => [] as AssignmentListItem[])
   )
   const assignments = excludeTestData(assignmentLists.flat())
 

@@ -1,8 +1,8 @@
 package com.pios.drivermanagement.application
 
 /**
- * A no-op [OutboxRepository]. Used only as [DriverAvailabilityApplicationService]'s
- * default when no real outbox behavior is wired in -- for example, tests
+ * A no-op [OutboxRepository]. Used only as application services' defaults
+ * when no real outbox behavior is wired in -- for example, tests
  * exercising availability logic unrelated to the outbox. Never used in a
  * running application: Spring always finds and injects the real
  * [com.pios.drivermanagement.persistence.PostgreSQLOutboxRepository] bean

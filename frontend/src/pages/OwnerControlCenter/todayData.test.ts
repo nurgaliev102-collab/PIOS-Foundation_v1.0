@@ -32,7 +32,7 @@ describe('loadTodaySnapshot', () => {
     vi.restoreAllMocks()
   })
 
-  it('sends the owner Basic credential on GET /v1/orders and GET /v1/proposals?driverId=, and no header on GET /v1/drivers', async () => {
+  it('sends the owner Basic credential on every operational data read', async () => {
     mockedRequest.mockResolvedValueOnce([
       { id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван', registeredAt: null },
     ]) // GET /v1/drivers
@@ -42,7 +42,7 @@ describe('loadTodaySnapshot', () => {
     await loadTodaySnapshot(OWNER_CREDENTIAL)
 
     const driversCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/drivers')
-    expect((driversCall?.[1] as RequestInit | undefined)?.headers).toBeUndefined()
+    expect((driversCall?.[1] as RequestInit).headers).toMatchObject({ Authorization: EXPECTED_BASIC_HEADER })
 
     const ordersCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/orders')
     expect((ordersCall?.[1] as RequestInit).headers).toMatchObject({ Authorization: EXPECTED_BASIC_HEADER })

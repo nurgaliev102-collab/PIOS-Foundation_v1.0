@@ -1,6 +1,7 @@
 package com.pios.dispatch.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.pios.dispatch.application.DispatchRequestApplicationService
 import com.pios.dispatch.application.DriverAvailabilityRecord
 import com.pios.dispatch.application.FallbackDispatchApplicationService
 import com.pios.dispatch.application.FirstRefusalApplicationService
@@ -77,10 +78,16 @@ class RepeatClientLoopIntegrationTest {
     // Step 2: First Refusal -> new order.
     private val proposalRepository = PostgreSQLProposalRepository(JdbcTemplate(dataSource))
     private val driverAvailabilityRepository = PostgreSQLDriverAvailabilityRepository(JdbcTemplate(dataSource))
-    private val proposalApplicationService = ProposalApplicationService(proposalRepository, transactionRunner, driverAvailabilityRepository)
+    private val dispatchRequests = PostgreSQLDispatchRequestRepository(JdbcTemplate(dataSource))
+    private val proposalApplicationService = ProposalApplicationService(proposalRepository, transactionRunner, driverAvailabilityRepository, dispatchRequests)
     private val firstRefusalApplicationService = FirstRefusalApplicationService(primaryDriverRepository, proposalApplicationService, driverAvailabilityRepository)
     private val fallbackDispatchApplicationService = FallbackDispatchApplicationService(driverAvailabilityRepository, proposalApplicationService)
-    private val firstRefusalListener = OrderSubmittedFirstRefusalListener(firstRefusalApplicationService, fallbackDispatchApplicationService, ObjectMapper())
+    private val dispatchRequestApplicationService = DispatchRequestApplicationService(
+        dispatchRequests, proposalRepository, proposalApplicationService,
+        firstRefusalApplicationService, fallbackDispatchApplicationService,
+        PostgreSQLOutboxRepository(JdbcTemplate(dataSource)), transactionRunner, ObjectMapper()
+    )
+    private val firstRefusalListener = OrderSubmittedFirstRefusalListener(dispatchRequestApplicationService, ObjectMapper())
     private val orderSubmittedPublisher = OrderSubmittedMessagePublisher(RabbitMQTestConnection.connectionFactory)
     private val firstRefusalHarness = OrderSubmittedFirstRefusalTestListenerHarness(RabbitMQTestConnection.connectionFactory, firstRefusalListener)
 
@@ -94,7 +101,7 @@ class RepeatClientLoopIntegrationTest {
     fun `saving a driver as primary through the real Connection event, then submitting a new order, proposes exactly that driver`() {
         val passengerReference = "repeat-client-passenger-${UUID.randomUUID()}"
         val savedDriver = DriverReference("repeat-client-driver-${UUID.randomUUID()}")
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(savedDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(savedDriver, available = true, isTest = false))
 
         // Step 1 -- Connection -> Primary, via the real event Passenger
         // Experience's own `POST /v1/connections/:id/primary` publishes.
@@ -126,7 +133,7 @@ class RepeatClientLoopIntegrationTest {
         // exercise) from independently proposing to them for an unrelated
         // reason, which would make this assertion ambiguous about *why* a
         // proposal did or did not name them.
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(savedDriver, available = false))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(savedDriver, available = false, isTest = false))
 
         primaryConnectionPublisher.publishDesignated(passengerReference = passengerReference, driverId = savedDriver.driverId)
         awaitUntilNotNull { primaryDriverRepository.findByPassenger(PassengerReference(passengerReference)) }
@@ -147,7 +154,7 @@ class RepeatClientLoopIntegrationTest {
         val canaryPassenger = "repeat-client-canary-passenger-${UUID.randomUUID()}"
         val canaryDriver = DriverReference("repeat-client-canary-driver-${UUID.randomUUID()}")
         val canaryOrderId = "repeat-client-canary-order-${UUID.randomUUID()}"
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(canaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(canaryDriver, available = true, isTest = false))
         primaryConnectionPublisher.publishDesignated(passengerReference = canaryPassenger, driverId = canaryDriver.driverId)
         awaitUntilNotNull { primaryDriverRepository.findByPassenger(PassengerReference(canaryPassenger)) }
 

@@ -8,4 +8,10 @@ package com.pios.identity.api
  * ISO-8601) rather than depending on Jackson's automatic `Instant`
  * (de)serialization.
  */
-data class AuthResponse(val identityId: String, val driverId: String?, val token: String, val expiresAt: String)
+data class AuthResponse(
+    val identityId: String,
+    val driverId: String?,
+    val token: String,
+    val expiresAt: String,
+    val guest: Boolean = false
+)

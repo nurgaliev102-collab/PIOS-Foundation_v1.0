@@ -8,6 +8,7 @@ import com.pios.dispatch.domain.ProposalLapsed
 import com.pios.dispatch.domain.ProposalPriceProposed
 import com.pios.dispatch.domain.ProposalWithdrawn
 import org.springframework.stereotype.Service
+import java.time.Instant
 
 /**
  * Application-layer coordination for the Propose Driver, Accept Proposal,
@@ -120,14 +121,27 @@ import org.springframework.stereotype.Service
 class ProposalApplicationService(
     private val proposalRepository: ProposalRepository,
     private val transactionRunner: TransactionRunner = NoOpTransactionRunner,
-    private val driverAvailabilityRepository: DriverAvailabilityRepository? = null
+    private val driverAvailabilityRepository: DriverAvailabilityRepository? = null,
+    private val dispatchRequestRepository: DispatchRequestRepository? = null
 ) {
 
     fun handle(command: ProposeDriverCommand): ProposalCreated = transactionRunner.run {
+        val routingState: DispatchRequestState? = dispatchRequestRepository
+            ?.findForUpdate(command.order.orderId)?.state
+        check(routingState != DispatchRequestState.CANCELLED && routingState != DispatchRequestState.UNFULFILLED) {
+            "Order ${command.order.orderId} is no longer eligible for a proposal"
+        }
         if (driverAvailabilityRepository != null) {
             val record = driverAvailabilityRepository.findByDriverReference(command.driver)
-            check(record?.available == true) {
+            // An advance request to a named driver can be considered while
+            // that driver is off-line now; it is not an immediate pickup.
+            // A known driver projection and test/real match remain mandatory.
+            val advanceRequest = command.requestedPickupAt?.isAfter(Instant.now()) == true
+            check(record != null && (record.available || advanceRequest)) {
                 "Driver ${command.driver.driverId} is not available"
+            }
+            check(record.isTest == command.isTest) {
+                "Driver ${command.driver.driverId} is not eligible for this order population"
             }
         }
         val existingProposals = proposalRepository.findByOrder(command.order)

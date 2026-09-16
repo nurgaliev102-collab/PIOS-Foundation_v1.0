@@ -56,6 +56,7 @@ class DriverControllerPostgreSQLSecurityTest {
         updateVehicleService,
         updateLongDistancePreferenceService,
         SessionTokenVerifier(secretBase64 = secret),
+        OwnerCredentialGate("", "", "", 1_000, 0, 1_000, 900_000),
         repository
     )
 

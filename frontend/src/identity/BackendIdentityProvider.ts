@@ -20,6 +20,7 @@ interface AuthResponse {
   driverId: string | null
   token: string
   expiresAt: string
+  guest?: boolean
 }
 
 /**
@@ -68,6 +69,28 @@ export class BackendIdentityProvider implements IdentityProvider {
     const response = await request<AuthResponse>('/v1/identities/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, password }),
+      baseUrl: IDENTITY_BASE_URL,
+    })
+    return this.persistAuthResponse(response)
+  }
+
+  async createGuest(): Promise<StoredIdentity> {
+    const response = await request<AuthResponse>('/v1/identities/guest', {
+      method: 'POST',
+      baseUrl: IDENTITY_BASE_URL,
+    })
+    return this.persistAuthResponse(response)
+  }
+
+  async upgradeGuest(phone: string, password: string): Promise<StoredIdentity> {
+    const current = this.getStoredIdentity()
+    if (!current?.guest) {
+      throw new Error('upgradeGuest called without a guest session')
+    }
+    const response = await request<AuthResponse>('/v1/identities/me/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${current.token}` },
       body: JSON.stringify({ phone, password }),
       baseUrl: IDENTITY_BASE_URL,
     })
@@ -142,6 +165,7 @@ export class BackendIdentityProvider implements IdentityProvider {
       driverId: response.driverId,
       token: response.token,
       expiresAt: response.expiresAt,
+      guest: response.guest ?? false,
     }
     this.persist(identity)
     return identity
@@ -175,6 +199,7 @@ function isStoredIdentity(value: unknown): value is StoredIdentity {
     typeof candidate.identityId === 'string' &&
     (candidate.driverId === null || typeof candidate.driverId === 'string') &&
     typeof candidate.token === 'string' &&
-    typeof candidate.expiresAt === 'string'
+    typeof candidate.expiresAt === 'string' &&
+    (candidate.guest === undefined || typeof candidate.guest === 'boolean')
   )
 }

@@ -2,6 +2,8 @@ package com.pios.drivermanagement.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.drivermanagement.application.DeclareAvailabilityCommand
+import com.pios.drivermanagement.application.CreateDriverApplicationService
+import com.pios.drivermanagement.application.CreateDriverCommand
 import com.pios.drivermanagement.application.DriverAvailabilityApplicationService
 import com.pios.drivermanagement.application.OutboxRecord
 import com.pios.drivermanagement.application.OutboxRepository
@@ -34,6 +36,37 @@ class DriverAvailabilityOutboxTransactionTest {
     private val transactionRunner = SpringTransactionRunner(TransactionTemplate(DataSourceTransactionManager(dataSource)))
     private val objectMapper = ObjectMapper()
     private val service = DriverAvailabilityApplicationService(driverRepository, outboxRepository, transactionRunner, objectMapper)
+
+    @Test
+    fun `registration persists the initial availability event atomically`() {
+        val driverId = DriverId("created-with-outbox-${java.util.UUID.randomUUID()}")
+        val createService = CreateDriverApplicationService(driverRepository, transactionRunner, outboxRepository, objectMapper)
+
+        createService.handle(CreateDriverCommand(driverId, isTest = false))
+
+        assertEquals(Availability.UNAVAILABLE, driverRepository.findById(driverId)?.availability)
+        val records = outboxRepository.findUnpublished().filter { it.aggregateId == driverId.value }
+        assertEquals(1, records.size)
+        val payload = objectMapper.readTree(records.single().payload).get("payload")
+        assertEquals("UNAVAILABLE", payload.get("availability").asText())
+        assertEquals(false, payload.get("isTest").asBoolean())
+    }
+
+    @Test
+    fun `registration rolls back the driver when its initial outbox write fails`() {
+        val driverId = DriverId("failed-create-outbox-${java.util.UUID.randomUUID()}")
+        val failingOutbox = object : OutboxRepository {
+            override fun save(record: OutboxRecord): OutboxRecord = throw RuntimeException("simulated outbox failure")
+            override fun findUnpublished(): List<OutboxRecord> = emptyList()
+            override fun markPublished(id: Long) = Unit
+            override fun countUnpublished(): com.pios.drivermanagement.application.OutboxBacklog =
+                com.pios.drivermanagement.application.OutboxBacklog(0, null)
+        }
+        val createService = CreateDriverApplicationService(driverRepository, transactionRunner, failingOutbox, objectMapper)
+
+        assertFailsWith<RuntimeException> { createService.handle(CreateDriverCommand(driverId)) }
+        assertNull(driverRepository.findById(driverId))
+    }
 
     @Test
     fun `declaring a changed availability persists both the driver and a matching outbox record together`() {

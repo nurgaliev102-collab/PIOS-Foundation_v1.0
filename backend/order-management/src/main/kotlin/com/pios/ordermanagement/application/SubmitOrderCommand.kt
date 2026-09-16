@@ -49,5 +49,6 @@ class SubmitOrderCommand(
     val isTest: Boolean = false,
     val explicitDriverIntent: Boolean = false,
     val passengerCount: Int? = null,
-    val notes: String? = null
+    val notes: String? = null,
+    val requestedDriverId: String? = null
 )

@@ -1,6 +1,7 @@
 package com.pios.dispatch.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.pios.dispatch.application.DispatchRequestApplicationService
 import com.pios.dispatch.application.DriverAvailabilityRecord
 import com.pios.dispatch.application.FallbackDispatchApplicationService
 import com.pios.dispatch.application.FirstRefusalApplicationService
@@ -45,14 +46,20 @@ class OrderSubmittedFirstRefusalConcurrencyTest {
     private val proposalRepository = PostgreSQLProposalRepository(JdbcTemplate(dataSource))
     private val primaryDriverRepository: PrimaryDriverRepository = PostgreSQLPrimaryDriverRepository(JdbcTemplate(dataSource))
     private val driverAvailabilityRepository = PostgreSQLDriverAvailabilityRepository(JdbcTemplate(dataSource))
+    private val dispatchRequests = PostgreSQLDispatchRequestRepository(JdbcTemplate(dataSource))
     private val transactionRunner = SpringTransactionRunner(TransactionTemplate(DataSourceTransactionManager(dataSource)))
     private val proposalApplicationService =
-        ProposalApplicationService(proposalRepository, transactionRunner, driverAvailabilityRepository)
+        ProposalApplicationService(proposalRepository, transactionRunner, driverAvailabilityRepository, dispatchRequests)
     private val firstRefusalApplicationService =
         FirstRefusalApplicationService(primaryDriverRepository, proposalApplicationService, driverAvailabilityRepository)
     private val fallbackDispatchApplicationService =
         FallbackDispatchApplicationService(driverAvailabilityRepository, proposalApplicationService)
-    private val listener = OrderSubmittedFirstRefusalListener(firstRefusalApplicationService, fallbackDispatchApplicationService, ObjectMapper())
+    private val dispatchRequestApplicationService = DispatchRequestApplicationService(
+        dispatchRequests, proposalRepository, proposalApplicationService,
+        firstRefusalApplicationService, fallbackDispatchApplicationService,
+        PostgreSQLOutboxRepository(JdbcTemplate(dataSource)), transactionRunner, ObjectMapper()
+    )
+    private val listener = OrderSubmittedFirstRefusalListener(dispatchRequestApplicationService, ObjectMapper())
     private val objectMapper = ObjectMapper()
 
     private fun envelopeFor(orderId: String, passengerReference: String, eventId: String): String =
@@ -78,7 +85,7 @@ class OrderSubmittedFirstRefusalConcurrencyTest {
         val primaryDriver = DriverReference("driver-${UUID.randomUUID()}")
         val eventId = UUID.randomUUID().toString()
         primaryDriverRepository.upsert(PrimaryDriverRecord(PassengerReference(passengerReference), primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
         val envelope = envelopeFor(orderId, passengerReference, eventId)
 
         val executor = Executors.newFixedThreadPool(2)

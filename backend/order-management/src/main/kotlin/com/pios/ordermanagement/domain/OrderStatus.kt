@@ -12,6 +12,7 @@ package com.pios.ordermanagement.domain
  */
 enum class OrderStatus {
     SUBMITTED,
+    UNFULFILLED,
     COMPLETED,
     CANCELLED
 }

@@ -51,5 +51,7 @@ data class OrderSubmitted(
     val origin: OrderOrigin,
     val explicitDriverIntent: Boolean = false,
     val isTest: Boolean = false,
+    val requestedDriverId: String? = null,
+    val requestedPickupAt: Instant? = null,
     val occurredAt: Instant = Instant.now()
 )

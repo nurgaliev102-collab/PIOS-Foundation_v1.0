@@ -9,6 +9,9 @@ import java.time.Instant
  * create this event. No event infrastructure, broker, or schema is implied
  * by this representation, consistent with ADR-003 and EVENT_CATALOG.md's
  * own scope.
+ * The first record at registration represents the change from no driver
+ * projection to this driver's initial UNAVAILABLE state. Subsequent records
+ * come from an actual availability toggle.
  *
  * [isTest] (ADR-069, Test/Real Segregation in Fallback Driver Selection) is
  * this driver's own [Driver.isTest] classification, carried on the event so

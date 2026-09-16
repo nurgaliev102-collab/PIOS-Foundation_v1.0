@@ -180,7 +180,7 @@ export function Coordinator() {
     }
     let active = true
     setDriversStatus('loading')
-    fetchDrivers()
+    fetchDrivers(credential)
       .then((result) => {
         if (!active) {
           return

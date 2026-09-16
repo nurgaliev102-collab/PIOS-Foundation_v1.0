@@ -2,6 +2,7 @@ package com.pios.dispatch.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.dispatch.application.DriverAvailabilityRecord
+import com.pios.dispatch.application.DispatchRequestApplicationService
 import com.pios.dispatch.application.FallbackDispatchApplicationService
 import com.pios.dispatch.application.FirstRefusalApplicationService
 import com.pios.dispatch.application.PrimaryDriverRecord
@@ -37,14 +38,20 @@ class OrderSubmittedFirstRefusalConsumerIntegrationTest {
     private val proposalRepository = PostgreSQLProposalRepository(JdbcTemplate(dataSource))
     private val primaryDriverRepository: PrimaryDriverRepository = PostgreSQLPrimaryDriverRepository(JdbcTemplate(dataSource))
     private val driverAvailabilityRepository = PostgreSQLDriverAvailabilityRepository(JdbcTemplate(dataSource))
+    private val dispatchRequests = PostgreSQLDispatchRequestRepository(JdbcTemplate(dataSource))
     private val transactionRunner = SpringTransactionRunner(TransactionTemplate(DataSourceTransactionManager(dataSource)))
     private val proposalApplicationService =
-        ProposalApplicationService(proposalRepository, transactionRunner, driverAvailabilityRepository)
+        ProposalApplicationService(proposalRepository, transactionRunner, driverAvailabilityRepository, dispatchRequests)
     private val firstRefusalApplicationService =
         FirstRefusalApplicationService(primaryDriverRepository, proposalApplicationService, driverAvailabilityRepository)
     private val fallbackDispatchApplicationService =
         FallbackDispatchApplicationService(driverAvailabilityRepository, proposalApplicationService)
-    private val listener = OrderSubmittedFirstRefusalListener(firstRefusalApplicationService, fallbackDispatchApplicationService, ObjectMapper())
+    private val dispatchRequestApplicationService = DispatchRequestApplicationService(
+        dispatchRequests, proposalRepository, proposalApplicationService,
+        firstRefusalApplicationService, fallbackDispatchApplicationService,
+        PostgreSQLOutboxRepository(JdbcTemplate(dataSource)), transactionRunner, ObjectMapper()
+    )
+    private val listener = OrderSubmittedFirstRefusalListener(dispatchRequestApplicationService, ObjectMapper())
     private val publisher = OrderSubmittedMessagePublisher(RabbitMQTestConnection.connectionFactory)
     private val harness = OrderSubmittedFirstRefusalTestListenerHarness(RabbitMQTestConnection.connectionFactory, listener)
 
@@ -59,7 +66,7 @@ class OrderSubmittedFirstRefusalConsumerIntegrationTest {
         val passengerReference = "passenger-${UUID.randomUUID()}"
         val primaryDriver = DriverReference("driver-${UUID.randomUUID()}")
         primaryDriverRepository.upsert(PrimaryDriverRecord(PassengerReference(passengerReference), primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
 
         publisher.publish(orderId = orderId, passengerReference = passengerReference)
 
@@ -79,7 +86,7 @@ class OrderSubmittedFirstRefusalConsumerIntegrationTest {
         val passengerReference = "passenger-${UUID.randomUUID()}"
         val primaryDriver = DriverReference("driver-${UUID.randomUUID()}")
         primaryDriverRepository.upsert(PrimaryDriverRecord(PassengerReference(passengerReference), primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = true))
 
         publisher.publish(orderId = orderId, passengerReference = passengerReference, isTest = true)
 
@@ -87,6 +94,54 @@ class OrderSubmittedFirstRefusalConsumerIntegrationTest {
 
         kotlin.test.assertNotNull(proposal)
         assertEquals(true, proposal.isTest)
+    }
+
+    @Test
+    fun `an explicit driver in OrderSubmitted v2 creates exactly that proposal`() {
+        val orderId = "order-${UUID.randomUUID()}"
+        val passengerReference = "passenger-${UUID.randomUUID()}"
+        val requestedDriver = DriverReference("driver-explicit-${UUID.randomUUID()}")
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(requestedDriver, available = true, isTest = false))
+
+        publisher.publish(
+            orderId = orderId,
+            passengerReference = passengerReference,
+            explicitDriverIntent = true,
+            requestedDriverId = requestedDriver.driverId
+        )
+
+        val proposal = awaitUntilNotNull {
+            proposalRepository.findByOrder(OrderReference(orderId)).firstOrNull()
+        }
+
+        kotlin.test.assertNotNull(proposal)
+        assertEquals(requestedDriver, proposal.driver)
+        assertEquals(PassengerReference(passengerReference), proposal.passengerReference)
+        assertEquals(1, proposalRepository.findByOrder(OrderReference(orderId)).size)
+    }
+
+    @Test
+    fun `an advance request in OrderSubmitted v3 reaches its named driver while currently off-line`() {
+        val orderId = "order-${UUID.randomUUID()}"
+        val passengerReference = "passenger-${UUID.randomUUID()}"
+        val requestedDriver = DriverReference("driver-future-${UUID.randomUUID()}")
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(requestedDriver, available = false, isTest = false))
+
+        publisher.publish(
+            orderId = orderId,
+            passengerReference = passengerReference,
+            explicitDriverIntent = true,
+            requestedDriverId = requestedDriver.driverId,
+            requestedPickupAt = "2099-08-25T06:30:00Z"
+        )
+
+        val proposal = awaitUntilNotNull {
+            proposalRepository.findByOrder(OrderReference(orderId)).firstOrNull()
+        }
+
+        kotlin.test.assertNotNull(proposal)
+        assertEquals(requestedDriver, proposal.driver)
+        assertEquals(ProposalStatus.OPEN, proposal.status)
     }
 
     @Test
@@ -144,7 +199,7 @@ class OrderSubmittedFirstRefusalConsumerIntegrationTest {
         val passengerReference = "passenger-${UUID.randomUUID()}"
         val primaryDriver = DriverReference("driver-${UUID.randomUUID()}")
         primaryDriverRepository.upsert(PrimaryDriverRecord(PassengerReference(passengerReference), primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
 
         publisher.publish(orderId = orderId, passengerReference = passengerReference, explicitDriverIntent = true)
 
@@ -168,8 +223,8 @@ class OrderSubmittedFirstRefusalConsumerIntegrationTest {
         val primaryDriverA = DriverReference("driver-a-${UUID.randomUUID()}")
         val explicitlyChosenDriverB = DriverReference("driver-b-${UUID.randomUUID()}")
         primaryDriverRepository.upsert(PrimaryDriverRecord(PassengerReference(passengerReference), primaryDriverA))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriverA, available = true))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(explicitlyChosenDriverB, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriverA, available = true, isTest = false))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(explicitlyChosenDriverB, available = true, isTest = false))
 
         // Step 1 -- the real Order Management -> Dispatch path: OrderSubmitted
         // with explicitDriverIntent = true (what RideRequest.tsx's own
@@ -208,7 +263,7 @@ class OrderSubmittedFirstRefusalConsumerIntegrationTest {
         val primaryDriver = DriverReference("driver-${UUID.randomUUID()}")
         val eventId = UUID.randomUUID().toString()
         primaryDriverRepository.upsert(PrimaryDriverRecord(PassengerReference(passengerReference), primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
 
         publisher.publish(orderId = orderId, passengerReference = passengerReference, eventId = eventId)
         val first = awaitUntilNotNull { proposalRepository.findByOrder(OrderReference(orderId)).firstOrNull() }
@@ -241,7 +296,7 @@ class OrderSubmittedFirstRefusalConsumerIntegrationTest {
         val passengerReference = "passenger-${UUID.randomUUID()}"
         val primaryDriver = DriverReference("driver-${UUID.randomUUID()}")
         primaryDriverRepository.upsert(PrimaryDriverRecord(PassengerReference(passengerReference), primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
 
         publisher.publish(orderId = orderId, passengerReference = passengerReference)
 

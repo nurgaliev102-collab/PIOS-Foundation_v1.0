@@ -75,6 +75,40 @@ class AssignmentControllerTest {
     private fun driverToken(driverId: String): String = bearer(issueToken(sub = "$driverId-identity", drv = driverId))
 
     @Test
+    fun `HTTP manual assignment is closed without owner credentials`() {
+        val response = controller.assignOrderHttp(AssignOrderRequest("order-http", "driver-http"), authorization = null)
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+        assertTrue(repository.findByOrder(OrderReference("order-http")).isEmpty())
+    }
+
+    @Test
+    fun `HTTP assignment listing is closed to anonymous callers`() {
+        repository.save(Assignment.create(OrderReference("order-private"), DriverReference("driver-private")).assignment)
+
+        val response = controller.listAssignmentsHttp(authorization = null, orderId = "order-private")
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
+    fun `HTTP assignment listing returns only the authenticated driver's assignment`() {
+        repository.save(Assignment.create(OrderReference("order-own"), DriverReference("driver-own")).assignment)
+
+        val own = controller.listAssignmentsHttp(
+            authorization = driverToken("driver-own"),
+            orderId = "order-own"
+        )
+        val other = controller.listAssignmentsHttp(
+            authorization = driverToken("driver-other"),
+            orderId = "order-own"
+        )
+
+        assertEquals(1, own.body?.size)
+        assertTrue(other.body?.isEmpty() == true)
+    }
+
+    @Test
     fun `assigning an order to a driver returns 201 with a new assignment id and CREATED status`() {
         val response = controller.assignOrder(AssignOrderRequest("order-1", "driver-1"))
 

@@ -146,6 +146,25 @@ describe('PassengerLanding', () => {
 
   // --- Registration and login (ADR-055, "Final Pre-Pilot Sprint") ---
 
+  it('lets a first-time passenger order from the driver without registering', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderAt('driver-1')
+    const guestButton = await screen.findByRole('button', { name: 'Заказать без регистрации' })
+
+    mockedRequest.mockResolvedValueOnce({
+      identityId: 'guest-1',
+      driverId: null,
+      token: 'guest-token',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      guest: true,
+    })
+    await userEvent.click(guestButton)
+
+    expect(await screen.findByText('ride-request-screen')).toBeInTheDocument()
+    expect(JSON.parse(localStorage.getItem('pios.identity') ?? '{}').guest).toBe(true)
+  })
+
   it('lets a first-time visitor create a real account and lands on the confirmed screen', async () => {
     mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
 

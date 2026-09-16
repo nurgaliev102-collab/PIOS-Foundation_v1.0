@@ -3,6 +3,7 @@ package com.pios.dispatch.application
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import com.pios.dispatch.domain.PassengerReference
+import java.time.Instant
 import com.pios.dispatch.domain.Proposal
 import org.springframework.stereotype.Service
 
@@ -131,7 +132,8 @@ class FirstRefusalApplicationService(
         order: OrderReference,
         passengerReference: PassengerReference,
         isTest: Boolean = false,
-        explicitDriverIntentDeclared: Boolean = false
+        explicitDriverIntentDeclared: Boolean = false,
+        requestedPickupAt: Instant? = null
     ): FirstRefusalOutcome {
         if (explicitDriverIntentDeclared) {
             return FirstRefusalOutcome.ExplicitDriverIntentDeclared
@@ -140,7 +142,7 @@ class FirstRefusalApplicationService(
         val primary = primaryDriverRepository.findByPassenger(passengerReference)
             ?: return FirstRefusalOutcome.NoPrimaryDriver
 
-        if (!isEligible(primary.primaryDriverId)) {
+        if (!isEligible(primary.primaryDriverId, isTest, requestedPickupAt)) {
             return FirstRefusalOutcome.PrimaryDriverIneligible(primary.primaryDriverId)
         }
 
@@ -150,7 +152,8 @@ class FirstRefusalApplicationService(
                     order = order,
                     driver = primary.primaryDriverId,
                     isTest = isTest,
-                    passengerReference = passengerReference
+                    passengerReference = passengerReference,
+                    requestedPickupAt = requestedPickupAt
                 )
             )
             FirstRefusalOutcome.Proposed(created.proposal)
@@ -180,9 +183,11 @@ class FirstRefusalApplicationService(
         }
     }
 
-    private fun isEligible(driver: DriverReference): Boolean {
+    private fun isEligible(driver: DriverReference, orderIsTest: Boolean, requestedPickupAt: Instant?): Boolean {
         val repository = driverAvailabilityRepository ?: return true
-        return repository.findByDriverReference(driver)?.available == true
+        val record = repository.findByDriverReference(driver)
+        val advanceRequest = requestedPickupAt?.isAfter(Instant.now()) == true
+        return record != null && record.isTest == orderIsTest && (record.available || advanceRequest)
     }
 }
 

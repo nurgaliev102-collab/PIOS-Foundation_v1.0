@@ -92,7 +92,8 @@ class OrderSubmissionController(
                 request.isTest,
                 request.explicitDriverIntent,
                 request.passengerCount,
-                request.notes
+                request.notes,
+                request.requestedDriverId
             )
             ResponseEntity.status(HttpStatus.CREATED).body(SubmitOrderResponse(orderId))
         } catch (ex: IllegalArgumentException) {

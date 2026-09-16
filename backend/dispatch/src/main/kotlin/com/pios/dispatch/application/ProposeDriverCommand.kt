@@ -3,6 +3,7 @@ package com.pios.dispatch.application
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import com.pios.dispatch.domain.PassengerReference
+import java.time.Instant
 
 /**
  * The Propose Driver command (Domain Design — Pre-Commitment Aggregate,
@@ -23,5 +24,6 @@ data class ProposeDriverCommand(
     val order: OrderReference,
     val driver: DriverReference,
     val isTest: Boolean = false,
-    val passengerReference: PassengerReference? = null
+    val passengerReference: PassengerReference? = null,
+    val requestedPickupAt: Instant? = null
 )

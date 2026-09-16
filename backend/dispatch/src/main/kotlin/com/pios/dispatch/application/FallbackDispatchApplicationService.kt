@@ -88,11 +88,25 @@ import org.springframework.stereotype.Service
  * If the resulting Proposal is later declined or lapses, nothing further
  * happens automatically — the order simply returns to "unmatched," exactly
  * as an order with no primary driver and no available fallback driver
- * already does today. A coordinator can still manually propose a different
- * driver via the existing `ProposalController.createProposal`, unchanged.
- * Automatically retrying a second, third, ... driver is exactly the
- * "complex matching" FR-003A's own brief excludes — a candidate for a
- * later slice, not decided here.
+ * already does today.
+ *
+ * Correction, 2026-09-16 (ADR-077): "a coordinator can still manually
+ * propose a different driver via the existing `ProposalController.
+ * createProposal`, unchanged" is no longer true in every case. Dispatch
+ * now tracks each order's own routing obligation (`dispatch_requests`)
+ * and `ProposalApplicationService.handle` refuses to create a Proposal
+ * once that obligation has reached a terminal `CANCELLED` or
+ * `UNFULFILLED` state — a manual coordinator proposal is rejected there
+ * exactly like an automatic one would be, since by that point Order
+ * Management has already marked the order `UNFULFILLED`/cancelled and no
+ * further offer is a coherent action on it. For every other state
+ * (including a merely-declined-or-lapsed Proposal, which does not by
+ * itself move the routing obligation to a terminal state) the
+ * coordinator's manual path is unchanged. Automatically retrying a
+ * second, third, ... driver after a decline/lapse specifically (as
+ * opposed to the no-proposal-at-all path ADR-077 now covers) is still
+ * exactly the "complex matching" FR-003A's own brief excludes — a
+ * candidate for a later slice, not decided here.
  *
  * ## Races and duplicate attempts
  *

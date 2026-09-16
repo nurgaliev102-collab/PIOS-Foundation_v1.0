@@ -54,16 +54,27 @@ class DriverControllerTest {
     private val updateLongDistancePreferenceService = UpdateLongDistancePreferenceApplicationService(repository)
     private val secret = Base64.getEncoder().encodeToString("driver-controller-test-secret".toByteArray())
     private val sessionTokenVerifier = SessionTokenVerifier(secretBase64 = secret)
-    private val controller = DriverController(handler, availabilityService, createDriverService, milestonesHandler, updateVehicleService, updateLongDistancePreferenceService, sessionTokenVerifier, repository)
+    private val controller = DriverController(
+        handler,
+        availabilityService,
+        createDriverService,
+        milestonesHandler,
+        updateVehicleService,
+        updateLongDistancePreferenceService,
+        sessionTokenVerifier,
+        OwnerCredentialGate("", "", "", 1_000, 0, 1_000, 900_000),
+        repository
+    )
 
     // --- Token minting test helper (mirrors ProposalControllerTest's own) ---
 
     private val objectMapper = ObjectMapper()
 
-    private fun issueToken(sub: String, drv: String? = null, ttlSeconds: Long = 3600): String {
+    private fun issueToken(sub: String, drv: String? = null, ttlSeconds: Long = 3600, guest: Boolean = false): String {
         val payloadNode = objectMapper.createObjectNode()
         payloadNode.put("sub", sub)
         if (drv == null) payloadNode.putNull("drv") else payloadNode.put("drv", drv)
+        payloadNode.put("gst", guest)
         payloadNode.put("exp", Instant.now().plusSeconds(ttlSeconds).epochSecond)
         val encodedPayload = base64UrlEncode(objectMapper.writeValueAsBytes(payloadNode))
         val secretBytes = Base64.getDecoder().decode(secret)
@@ -77,6 +88,67 @@ class DriverControllerTest {
 
     /** A valid session token naming [driverId] as its own `drv` -- what `DriverHome.tsx` now sends on toggleAvailability. */
     private fun driverToken(driverId: String): String = "Bearer " + issueToken(sub = "$driverId-identity", drv = driverId)
+
+    private fun onboardingToken(identityId: String): String = "Bearer " + issueToken(sub = identityId)
+
+    @Test
+    fun `HTTP driver creation requires an authenticated identity`() {
+        val response = controller.createDriver(CreateDriverRequest("anonymous-driver"), authorization = null)
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+        assertNull(repository.findById(DriverId("anonymous-driver")))
+    }
+
+    @Test
+    fun `HTTP driver creation binds the driver id to the identity subject`() {
+        val response = controller.createDriver(
+            CreateDriverRequest("victim-driver"),
+            authorization = onboardingToken("attacker-identity")
+        )
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+        assertNull(repository.findById(DriverId("victim-driver")))
+    }
+
+    @Test
+    fun `HTTP driver creation accepts the identity's own id`() {
+        val response = controller.createDriver(
+            CreateDriverRequest("new-owned-driver"),
+            authorization = onboardingToken("new-owned-driver")
+        )
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        assertNotNull(repository.findById(DriverId("new-owned-driver")))
+    }
+
+    @Test
+    fun `a guest identity cannot create a driver profile`() {
+        val response = controller.createDriver(
+            CreateDriverRequest("guest-driver"),
+            authorization = "Bearer " + issueToken(sub = "guest-driver", guest = true)
+        )
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+        assertNull(repository.findById(DriverId("guest-driver")))
+    }
+
+    @Test
+    fun `a regular identity cannot inject test data`() {
+        val response = controller.createDriver(
+            CreateDriverRequest("test-data-injection", isTest = true),
+            authorization = onboardingToken("test-data-injection")
+        )
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+        assertNull(repository.findById(DriverId("test-data-injection")))
+    }
+
+    @Test
+    fun `HTTP driver enumeration requires owner authentication`() {
+        val response = controller.listDrivers(authorization = null)
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
 
     @Test
     fun `creating a driver returns 201 with the new driver's id and default availability`() {

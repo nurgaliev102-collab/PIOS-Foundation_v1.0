@@ -21,6 +21,7 @@ import { LocalInvitationProvider } from '../../identity/InvitationProvider'
 import { getDisplayName } from '../../persistence/localDisplayName'
 import { clearCurrentOrderId, getCurrentOrderId, saveCurrentOrderId } from '../../persistence/localCurrentOrder'
 import { isSessionExpiredError, request, resolveBackendBaseUrl, SESSION_EXPIRED_MESSAGE } from '../../api/apiClient'
+import { isValidPhone, normalizePhone, PHONE_FORMAT_HINT } from '../../identity/phoneFormat'
 import { useBackableStep } from '../../navigation/useBackableStep'
 import {
   NotificationBell,
@@ -77,7 +78,6 @@ const DISPATCH_BASE_URL = resolveBackendBaseUrl(import.meta.env.VITE_DISPATCH_BA
 const PASSENGER_EXPERIENCE_BASE_URL = resolveBackendBaseUrl(import.meta.env.VITE_PASSENGER_EXPERIENCE_BASE_URL, 'http://localhost:8082')
 
 type Step = 'loading' | 'not-found' | 'error' | 'circle' | 'form' | 'confirmed'
-type ProposalStatus = 'proposing' | 'proposed' | 'error'
 
 interface SubmitOrderResponse {
   orderId: string
@@ -173,6 +173,7 @@ interface ProposalMessageItem {
  */
 interface OrderListItem {
   id: string
+  status: 'SUBMITTED' | 'COMPLETED' | 'CANCELLED' | 'UNFULFILLED'
   requestedPickupAt: string | null
 }
 
@@ -245,6 +246,7 @@ type PassengerRideStatus =
   | 'ARRIVED'
   | 'IN_PROGRESS'
   | 'COMPLETED'
+  | 'UNFULFILLED'
 
 /**
  * ADR-058 Decision item 5: PIOS itself asserts nothing about a past
@@ -281,6 +283,8 @@ function formatRequestedPickupAt(requestedPickupAt: string | null): string | nul
  */
 function rideStatusLabel(status: PassengerRideStatus): string {
   switch (status) {
+    case 'UNFULFILLED':
+      return 'Не удалось найти водителя. Заказ закрыт, поездка не подтверждена.'
     case 'OPEN':
       return '⏳ Ждём ответа водителя. Мы сообщим, как только он подтвердит заказ.'
     case 'PRICE_PROPOSED':
@@ -410,15 +414,14 @@ function pickProposalDriverId(items: ProposalStatusItem[]): string | null {
  * same driver.
  *
  * Task 17 (First Refusal Explicit Driver Intent Integration): [handleSubmit]
- * now sends `explicitDriverIntent: true` on every `POST /v1/orders` this
- * screen makes — not a new concept, `Order Management`'s own
+ * sends `explicitDriverIntent: true` on every driver-linked `POST /v1/orders`
+ * this screen makes — not a new concept, `Order Management`'s own
  * `SubmitOrderRequest.explicitDriverIntent` (Task 15C) already existed and
  * already threaded end-to-end to `OrderSubmitted`, simply unused by any
  * real caller until now. Correct unconditionally here: this screen only
- * ever exists reached through one specific driver's own `driverCode` (the
- * URL parameter), and always proposes the resulting order to exactly that
- * driver a moment later ([attemptProposal]) — there is no order this
- * screen ever creates without an already-known, specific driver. Setting
+ * can be reached through one specific driver's own `driverCode` (the
+ * URL parameter). Order Management emits the selected driver in its
+ * outbox event; Dispatch creates the proposal from that event. Setting
  * this stops Dispatch's automatic First Refusal (Task 16) from racing that
  * already-explicit choice for orders created here.
  *
@@ -444,7 +447,7 @@ function pickProposalDriverId(items: ProposalStatusItem[]): string | null {
  * `undefined` throughout this render. That path (every `driverCode`/
  * `!driverCode` branch below) submits `POST /v1/orders` with
  * `explicitDriverIntent` omitted entirely (defaults to `false` --
- * `SubmitOrderRequest.kt`) and never calls [attemptProposal] -- the driver
+ * `SubmitOrderRequest.kt`) and never chooses a driver in the browser -- the driver
  * is chosen by Dispatch's existing First Refusal -> Fallback Dispatch chain
  * (ADR-068/ADR-069), not this client. Since no driver is known at
  * submission time, this screen learns which real driver Dispatch matched by
@@ -463,6 +466,11 @@ export function RideRequest() {
   const navigate = useNavigate()
   const [identity, setIdentity] = useState<StoredIdentity | null>(null)
   const [identityChecked, setIdentityChecked] = useState(false)
+  const [guestSessionStatus, setGuestSessionStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
+  const [guestUpgradePhone, setGuestUpgradePhone] = useState('')
+  const [guestUpgradePassword, setGuestUpgradePassword] = useState('')
+  const [guestUpgradeStatus, setGuestUpgradeStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle')
+  const [guestUpgradeError, setGuestUpgradeError] = useState<string | null>(null)
   const [step, setStep] = useState<Step>('loading')
   // UX audit (Language Policy): the invited driver's own display name,
   // already fetched by [loadInvitation] below — kept here so the confirmed
@@ -522,7 +530,6 @@ export function RideRequest() {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [orderId, setOrderId] = useState<string | null>(null)
-  const [proposalStatus, setProposalStatus] = useState<ProposalStatus | null>(null)
   const [rideStatus, setRideStatus] = useState<PassengerRideStatus>('OPEN')
   // Product Owner instruction, 2026-09-05: needed to call confirm-price/
   // decline-price on the exact proposal the driver named a price on --
@@ -555,6 +562,12 @@ export function RideRequest() {
   // ADR-058 (Scheduled Pickup Time): whether this passenger is booking for
   // "сейчас" (default, sends nothing) or a chosen future date/time.
   const [isScheduled, setIsScheduled] = useState(false)
+
+  useEffect(() => {
+    if (driverCode && driverAvailability === 'UNAVAILABLE') {
+      setIsScheduled(true)
+    }
+  }, [driverCode, driverAvailability])
   const [scheduledAt, setScheduledAt] = useState('')
   const [scheduledAtError, setScheduledAtError] = useState<string | null>(null)
   // ADR-058: this order's own requested pickup instant, read from Order
@@ -752,8 +765,8 @@ export function RideRequest() {
   // First-pilot feedback: while this screen shows a confirmed order, poll
   // Dispatch for whether the driver has accepted it — no reload needed to
   // see the change. Runs identically whether this order was just submitted
-  // or resumed after a page reload (proposalStatus is only ever set by a
-  // fresh submission's own attemptProposal, never by this effect).
+  // or resumed after a page reload. Dispatch creates proposals from the
+  // OrderSubmitted event; the browser only observes the resulting fact.
   useEffect(() => {
     if (step !== 'confirmed' || !orderId || !identity) {
       return
@@ -773,9 +786,28 @@ export function RideRequest() {
           if (!active) {
             return
           }
+          const safeItems = Array.isArray(items) ? items : []
+          setHasProposal(safeItems.length > 0)
           // ADR-071: kept verbatim for `deriveNotificationFacts` -- see
           // [proposalItemsForNotifications]'s own KDoc above.
-          setProposalItemsForNotifications(items)
+          setProposalItemsForNotifications(safeItems)
+          if (safeItems.length === 0) {
+            // Dispatch retries a no-offer order durably. Order Management's
+            // terminal status is the authority on when that window ends.
+            request<OrderListItem[]>(`/v1/orders?passengerReference=${currentIdentity.identityId}`, {
+              headers: { Authorization: `Bearer ${currentIdentity.token}` },
+              baseUrl: ORDER_MANAGEMENT_BASE_URL,
+            })
+              .then((orders) => {
+                if (!active) return
+                const order = orders.find((item) => item.id === orderId)
+                setRequestedPickupAt(order?.requestedPickupAt ?? null)
+                if (order?.status === 'UNFULFILLED') setRideStatus('UNFULFILLED')
+                if (order?.status === 'CANCELLED') setRideStatus('WITHDRAWN')
+              })
+              .catch((error) => { if (active) handleSessionExpiredError(error) })
+            return
+          }
           // ADR-070 Part 2, Q8: additive, gated entirely by `!driverCode` --
           // the `driverCode` path already knows its driver and never enters
           // this branch, so its own polling behavior below is unaffected.
@@ -785,8 +817,7 @@ export function RideRequest() {
             // outcome just means "no proposal exists for this order," and
             // that is exactly what this reflects, tick to tick, with no
             // retry/timeout rule invented on top of it.
-            setHasProposal(items.length > 0)
-            const pickedDriverId = pickProposalDriverId(items)
+            const pickedDriverId = pickProposalDriverId(safeItems)
             if (pickedDriverId && pickedDriverId !== matchedDriverIdRef.current) {
               matchedDriverIdRef.current = pickedDriverId
               setMatchedDriverId(pickedDriverId)
@@ -813,14 +844,14 @@ export function RideRequest() {
                 })
             }
           }
-          const acceptedItem = items.find((item) => item.status === 'ACCEPTED')
+          const acceptedItem = safeItems.find((item) => item.status === 'ACCEPTED')
           if (!acceptedItem) {
             // Product Owner instruction, 2026-09-05: a driver-named price
             // awaiting this passenger's own decision -- checked before the
             // OPEN/DECLINED/LAPSED/WITHDRAWN priority group below, since
             // it is itself a real, distinct, non-terminal fact, not one of
             // those four.
-            const priceProposedItem = items.find((item) => item.status === 'PRICE_PROPOSED')
+            const priceProposedItem = safeItems.find((item) => item.status === 'PRICE_PROPOSED')
             if (priceProposedItem) {
               setRideStatus('PRICE_PROPOSED')
               setProposalId(priceProposedItem.proposalId)
@@ -841,10 +872,10 @@ export function RideRequest() {
             // withdraws the open proposal automatically, asynchronously, so
             // this poll is also what confirms a cancellation actually took
             // effect, not only [handleCancelOrder]'s own optimistic update.
-            const openItem = items.find((item) => item.status === 'OPEN')
-            const declinedItem = items.find((item) => item.status === 'DECLINED')
-            const lapsedItem = items.find((item) => item.status === 'LAPSED')
-            const withdrawnItem = items.find((item) => item.status === 'WITHDRAWN')
+            const openItem = safeItems.find((item) => item.status === 'OPEN')
+            const declinedItem = safeItems.find((item) => item.status === 'DECLINED')
+            const lapsedItem = safeItems.find((item) => item.status === 'LAPSED')
+            const withdrawnItem = safeItems.find((item) => item.status === 'WITHDRAWN')
             if (openItem) {
               setRideStatus('OPEN')
               // Minimal In-Ride Messaging (Product Cycle): [proposalId] used
@@ -870,9 +901,9 @@ export function RideRequest() {
               setProposalId(withdrawnItem.proposalId)
               loadMessages(active, withdrawnItem.proposalId, currentIdentity.token)
             } else {
-              // No proposal recorded yet (e.g., the propose call is still
-              // in flight) -- honestly "waiting", not yet knowable as
-              // anything else.
+              // No proposal recorded yet: the asynchronous OrderSubmitted
+              // consumer may still be working, or there may be no eligible
+              // driver. An order record alone is never a confirmed offer.
               setRideStatus('OPEN')
             }
             return
@@ -898,7 +929,10 @@ export function RideRequest() {
           // progress. CREATED and ACCEPTED both read as "принял" to a
           // passenger -- see Assignment.arrive's own KDoc for why the
           // Assignment itself may still say CREATED here.
-          request<AssignmentStatusItem[]>(`/v1/assignments?orderId=${orderId}`, { baseUrl: DISPATCH_BASE_URL })
+          request<AssignmentStatusItem[]>(`/v1/assignments?orderId=${orderId}`, {
+            baseUrl: DISPATCH_BASE_URL,
+            headers: { Authorization: `Bearer ${currentIdentity.token}` },
+          })
             .then((assignments) => {
               if (!active) {
                 return
@@ -1080,6 +1114,53 @@ export function RideRequest() {
     notificationMessages
   )
 
+  async function handleContinueAsGuest() {
+    if (guestSessionStatus === 'submitting') {
+      return
+    }
+    setGuestSessionStatus('submitting')
+    try {
+      const guest = await identityProvider.createGuest()
+      setIdentity(guest)
+      setIdentityChecked(true)
+      setGuestSessionStatus('idle')
+      if (driverCode) {
+        loadInvitation(true, driverCode, guest)
+      } else {
+        loadDiscoveryEntry(true)
+      }
+    } catch {
+      setGuestSessionStatus('error')
+    }
+  }
+
+  async function handleUpgradeGuest() {
+    if (!identity?.guest || guestUpgradeStatus === 'submitting') {
+      return
+    }
+    const phone = normalizePhone(guestUpgradePhone.trim())
+    if (!isValidPhone(phone)) {
+      setGuestUpgradeError(PHONE_FORMAT_HINT)
+      return
+    }
+    if (guestUpgradePassword.length < 10) {
+      setGuestUpgradeError('Пароль должен быть не короче 10 символов.')
+      return
+    }
+    setGuestUpgradeError(null)
+    setGuestUpgradeStatus('submitting')
+    try {
+      const upgraded = await identityProvider.upgradeGuest(phone, guestUpgradePassword)
+      setIdentity(upgraded)
+      setGuestUpgradeStatus('success')
+    } catch (error) {
+      setGuestUpgradeStatus('error')
+      setGuestUpgradeError(
+        error instanceof Error ? 'Не удалось сохранить аккаунт. Возможно, этот номер уже используется.' : 'Не удалось сохранить аккаунт.'
+      )
+    }
+  }
+
   if (identityChecked && !identity) {
     // ADR-070 Part 1: the driverless (`/request`) path has no `driverCode`
     // to build a `/i/:driverCode` redirect from -- that route only exists
@@ -1091,9 +1172,21 @@ export function RideRequest() {
         <div className={styles.screen}>
           <Header />
           <main className={styles.content}>
+            <Heading level={1} visual="display">Заказать поездку</Heading>
             <Text role="body" tone="secondary">
-              Чтобы отправить заказ, войдите в аккаунт.
+              Начните без регистрации. Аккаунт можно создать позже, чтобы сохранить историю на других устройствах.
             </Text>
+            <div className={styles.actionRow}>
+              <Button
+                label="Продолжить без регистрации"
+                variant="primary"
+                loading={guestSessionStatus === 'submitting'}
+                onClick={() => void handleContinueAsGuest()}
+              />
+            </div>
+            {guestSessionStatus === 'error' && (
+              <StatusMessage tone="error">Не удалось начать. Проверьте связь и попробуйте ещё раз.</StatusMessage>
+            )}
           </main>
         </div>
       )
@@ -1173,6 +1266,10 @@ export function RideRequest() {
     if (isSubmitting) {
       return
     }
+    if (driverCode && driverAvailability === 'UNAVAILABLE' && !isScheduled) {
+      setSubmitError('Водитель сейчас не на линии. Выберите дату и время будущей поездки.')
+      return
+    }
     const trimmedPickupAddress = pickupAddress.trim()
     if (!trimmedPickupAddress) {
       setPickupAddressError('Пожалуйста, укажите адрес.')
@@ -1211,6 +1308,10 @@ export function RideRequest() {
         setScheduledAtError('Неверная дата или время.')
         return
       }
+      if (parsed.getTime() <= Date.now()) {
+        setScheduledAtError('Выберите время в будущем.')
+        return
+      }
       requestedPickupAt = parsed.toISOString()
     }
     // Product Cycle (Passenger Ride Requirements): trimmed and defensively
@@ -1233,8 +1334,7 @@ export function RideRequest() {
         // guaranteed non-null here (this component's own early
         // `if (!identity) return ...` above); non-null assertion only
         // because TypeScript's narrowing does not carry into this nested
-        // function's own closure, same reasoning already applied elsewhere
-        // in this file (e.g. `attemptProposal`'s own `identity!.token`).
+        // function's own closure.
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity!.token}` },
         body: JSON.stringify({
           passengerReference: passengerId,
@@ -1251,8 +1351,8 @@ export function RideRequest() {
           // component's own KDoc and `handleChooseCircleMember`: picking
           // any other circle member navigates to *that* driver's own
           // `/i/:driverCode/request` rather than leaving the choice open).
-          // `attemptProposal`, right below, proposes this exact order to
-          // that exact driver a moment later. `explicitDriverIntent` (Order
+          // Dispatch proposes this exact order to that exact driver from
+          // Order Management's event. `explicitDriverIntent` (Order
           // Management's own field, `SubmitOrderRequest.kt`) records that
           // already-true fact atomically with submission, so Dispatch's
           // automatic First Refusal (Task 16) never races this screen's own
@@ -1265,21 +1365,16 @@ export function RideRequest() {
           // literal, auditable difference this ADR names between the two
           // entry points, not something a future edit could accidentally
           // flip back to `true`.
-          ...(driverCode ? { explicitDriverIntent: true } : {}),
+          ...(driverCode ? { explicitDriverIntent: true, requestedDriverId: driverCode } : {}),
         }),
         baseUrl: ORDER_MANAGEMENT_BASE_URL,
       })
       setOrderId(response.orderId)
       saveCurrentOrderId(driverCode ?? DISCOVERY_ORDER_KEY, response.orderId)
       setStep('confirmed')
-      // ADR-070 Part 1, constraint 2: the driverless path must not call
-      // [attemptProposal] -- that would propose this order to a specific
-      // driver directly, which only makes sense when one is already known
-      // (`driverCode`). A driverless order's driver is chosen by Dispatch's
-      // own First Refusal -> Fallback Dispatch chain, never by this client.
-      if (driverCode) {
-        void attemptProposal(response.orderId)
-      }
+      // Dispatch consumes the transactional OrderSubmitted event. A saved
+      // order is not proof that an eligible driver has received an offer;
+      // the status poll below reports whether a proposal actually exists.
     } catch (error) {
       if (handleSessionExpiredError(error)) {
         return
@@ -1287,56 +1382,6 @@ export function RideRequest() {
       setSubmitError('Не удалось связаться с сервером. Попробуйте ещё раз через несколько секунд.')
     } finally {
       setIsSubmitting(false)
-    }
-  }
-
-  /**
-   * Sprint 7B (Personal Network Flow MVP): proposes the just-created order
-   * to the driver whose link the passenger arrived through. The order
-   * itself already exists and is confirmed regardless of what happens
-   * here — a failure never deletes it or blocks the confirmation screen,
-   * per this sprint's own explicit requirement; it only offers a Retry.
-   *
-   * Task 21 (Proposal API Security Remediation): `POST /v1/proposals` now
-   * requires an `Authorization` header -- this passenger's own already-held
-   * session token (`identity.token`, the same one already sent on this
-   * screen's own Circle-of-Trust calls) is sufficient; Dispatch's own new
-   * check only requires *some* authenticated caller for `create`, not a
-   * verified relationship to this specific order or driver (see
-   * `docs/PIOS_TAXI_TASK_20_PROPOSAL_SECURITY_AUDIT.md`).
-   *
-   * Proposal Participant Authorization (ADR-066, P0 remediation): the
-   * request body now also carries `passengerReference`, required to equal
-   * this same token's own `sub` (`identity.identityId`) -- Dispatch's own
-   * 403 otherwise. Sent as the same value `passengerId` already uses
-   * elsewhere on this screen (`submitOrder`'s own `passengerReference`).
-   */
-  async function attemptProposal(forOrderId: string) {
-    setProposalStatus('proposing')
-    try {
-      await request('/v1/proposals', {
-        method: 'POST',
-        // Non-null assertion: this function is only ever reachable from a
-        // click on JSX that itself only renders once identity is non-null
-        // (the component's own early `if (!identity) return ...` above) --
-        // same reasoning already applied elsewhere in this codebase (e.g.
-        // DriverHome.tsx's own `identity.driverId!`).
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity!.token}` },
-        body: JSON.stringify({ orderId: forOrderId, driverId: driverCode ?? '', passengerReference: identity!.identityId }),
-        baseUrl: DISPATCH_BASE_URL,
-      })
-      setProposalStatus('proposed')
-    } catch (error) {
-      if (handleSessionExpiredError(error)) {
-        return
-      }
-      setProposalStatus('error')
-    }
-  }
-
-  function handleRetryProposal() {
-    if (orderId && proposalStatus !== 'proposing') {
-      void attemptProposal(orderId)
     }
   }
 
@@ -1365,7 +1410,7 @@ export function RideRequest() {
    * docs/PIOS_TAXI_TASK_24_REMAINING_MUTATION_API_SECURITY_AUDIT.md and
    * docs/PIOS_TAXI_TASK_25_SECURITY_REMEDIATION_REPORT.md). `identity` is
    * guaranteed non-null here for the same reason already established for
-   * `attemptProposal` (Task 17/21): this whole screen returns early,
+   * order submission and authenticated status polling: this screen returns early,
    * before any JSX, when identity is null.
    */
   async function handleCancelOrder() {
@@ -1491,7 +1536,6 @@ export function RideRequest() {
   function handleOrderAgain() {
     clearCurrentOrderId(driverCode ?? DISCOVERY_ORDER_KEY)
     setOrderId(null)
-    setProposalStatus(null)
     setRideStatus('OPEN')
     setStatedPrice(null)
     setStatedEtaMinutes(null)
@@ -1799,15 +1843,14 @@ export function RideRequest() {
                   />
                   <div className={styles.actionRow}>
                     <Button
-                      label="Вызвать"
+                      label={primary.availability === 'AVAILABLE' ? 'Вызвать' : 'Заказать заранее'}
                       variant="primary"
                       onClick={() => handleChooseCircleMember(primary.driverId)}
-                      disabled={primary.availability !== 'AVAILABLE'}
                     />
                   </div>
                   {primary.availability !== 'AVAILABLE' && (
                     <Text role="caption" tone="muted">
-                      Сейчас недоступен. Вот кому ещё вы доверяете:
+                      Сейчас не на линии. Можно предложить ему поездку на другое время.
                     </Text>
                   )}
                 </Card>
@@ -1826,10 +1869,9 @@ export function RideRequest() {
                       <DriverTrustIndicator name={member.displayName} availability={member.availability} emphasis="compact" />
                       <div className={styles.circleMemberActions}>
                         <Button
-                          label="Выбрать"
+                          label={member.availability === 'AVAILABLE' ? 'Выбрать' : 'Заказать заранее'}
                           variant="secondary"
                           onClick={() => handleChooseCircleMember(member.driverId)}
-                          disabled={member.availability !== 'AVAILABLE'}
                         />
                         <button
                           type="button"
@@ -1903,13 +1945,9 @@ export function RideRequest() {
                 fill out and submit a real order with zero visibility into
                 whether this one specific driver was even online -- the
                 backend's own [availability] was fetched by [loadInvitation]
-                and silently discarded before this fix. Shown, not gated:
-                unlike the circle step's own `disabled={...}` (which picks
-                *among* several saved drivers), this screen has no
-                alternative driver to offer instead -- the passenger came
-                here through this one driver's own link. The caption below
-                points at the "Заранее" scheduling option that already
-                exists, rather than inventing a new one. */}
+                and silently discarded before this fix. An off-line driver
+                can receive an advance request, but cannot receive an
+                immediate one. The form defaults to "Заранее" in that case. */}
             {driverName && (
               <>
                 <DriverTrustIndicator name={driverName} availability={driverAvailability ?? undefined} emphasis="compact" />
@@ -1964,7 +2002,7 @@ export function RideRequest() {
                 value={isScheduled ? 'later' : 'now'}
                 onChange={(event) => setIsScheduled(event.target.value === 'later')}
               >
-                <option value="now">Сейчас</option>
+                <option value="now" disabled={Boolean(driverCode && driverAvailability === 'UNAVAILABLE')}>Сейчас</option>
                 <option value="later">Заранее</option>
               </Select>
             </FormField>
@@ -2064,55 +2102,17 @@ export function RideRequest() {
               </Text>
             )}
 
-            {proposalStatus === 'proposing' && <LoadingState label="Сообщаем водителю…" />}
-            {proposalStatus === 'error' && (
-              <ErrorState
-                message="Не удалось передать заказ водителю. Заказ сохранён — можно попробовать ещё раз."
-                retryLabel="Повторить"
-                onRetry={handleRetryProposal}
-              />
-            )}
-
-            {/* First-pilot feedback (ADR-040, ride lifecycle): this
-                reflects live, polled status — shown whether this order was
-                just submitted (proposalStatus 'proposed') or resumed after
-                a reload (proposalStatus never set at all). */}
-            {(proposalStatus === 'proposed' || proposalStatus === null) && (
+            {/* A saved order and an actual driver offer are distinct facts.
+                The authenticated poll below decides which one to show. */}
               <>
-                {/* ADR-070 (Channel 1 Discovery Matching), Part 7, Q9: on
-                    the driverless path, `rideStatus === 'OPEN'` with no
-                    Proposal at all is the honest
-                    `FallbackDispatchOutcome.NoAvailableDriver` case, not a
-                    driver silently taking time to respond -- today that
-                    outcome just means "no proposal exists for this order,"
-                    so that is exactly what this states, plainly, with no
-                    fake "matching in progress" spinner and no invented
-                    retry/timeout rule -- the existing poll above (unchanged
-                    cadence) is what actually keeps checking. The
-                    `driverCode` path never reaches this branch: it always
-                    has a real, just-created Proposal by the time `rideStatus`
-                    can be 'OPEN' (see [attemptProposal]), so [hasProposal]
-                    is irrelevant to it.
-
-                    QA finding, 2026-09-15: the original copy here said "Мы
-                    продолжаем искать и сообщим" ("we're still searching and
-                    will let you know") -- untrue. Dispatch runs First
-                    Refusal -> Fallback Dispatch exactly once, at
-                    submission; nothing on the backend retries a
-                    `NoAvailableDriver` order, and there is no notification
-                    of any kind (confirmed against
-                    `FallbackDispatchApplicationService`'s own "no retry on
-                    decline/lapse" KDoc and `DriverAvailabilityChangedListener`,
-                    which never re-attempts matching for an existing order).
-                    The only thing actually true is that this screen's own
-                    poll will pick up a Proposal if one appears while the
-                    passenger stays on it -- so that's the only claim made
-                    below. No "we're searching" promise, no notification
-                    guarantee. */}
-                {!driverCode && rideStatus === 'OPEN' && !hasProposal ? (
+                {/* Dispatch may not have created a proposal yet, either
+                    because its outbox consumer is pending or no eligible
+                    driver exists. Never present that as an accepted ride. */}
+                {rideStatus === 'OPEN' && !hasProposal ? (
                   <Text role="body" tone="secondary">
-                    Сейчас нет доступного водителя. Если кто-то станет доступен, пока вы на этом экране, вы увидите
-                    предложение здесь — либо попробуйте отправить заказ ещё раз позже.
+                    {driverCode
+                      ? 'Ищем возможность передать заказ выбранному водителю. Если предложение не появится в течение двух минут, заказ закроется автоматически.'
+                      : 'Ищем доступного водителя. Если предложение не появится в течение двух минут, заказ закроется автоматически.'}
                   </Text>
                 ) : (
                   <RideStatus status={rideStatus} label={rideStatusLabel(rideStatus)} />
@@ -2200,6 +2200,16 @@ export function RideRequest() {
                       loading={cancelStatus === 'submitting'}
                       onClick={() => void handleCancelOrder()}
                     />
+                  </div>
+                )}
+                {rideStatus === 'UNFULFILLED' && (
+                  <div className={styles.actionRow}>
+                    <Button label="Создать новый заказ" onClick={() => {
+                      setOrderId(null)
+                      setRideStatus('OPEN')
+                      setHasProposal(false)
+                      setStep('form')
+                    }} />
                   </div>
                 )}
                 {cancelStatus === 'error' && <StatusMessage tone="error">Не удалось отменить заказ. Попробуйте ещё раз.</StatusMessage>}
@@ -2351,6 +2361,49 @@ export function RideRequest() {
                 {saveDriverStatus === 'error' && (
                   <StatusMessage tone="error">Не удалось сохранить водителя. Попробуйте ещё раз.</StatusMessage>
                 )}
+                {rideStatus === 'COMPLETED' && identity.guest && (
+                  <Card>
+                    <Text role="label">Сохраните историю поездок</Text>
+                    <Text role="body" tone="secondary">
+                      Создайте вход для этой гостевой сессии. Поездки и сохранённые водители останутся на месте.
+                    </Text>
+                    <FormField label="Номер телефона" htmlFor="guest-upgrade-phone">
+                      <Input
+                        id="guest-upgrade-phone"
+                        type="tel"
+                        value={guestUpgradePhone}
+                        onChange={(event) => {
+                          setGuestUpgradePhone(event.target.value)
+                          setGuestUpgradeError(null)
+                        }}
+                      />
+                    </FormField>
+                    <FormField label="Пароль" htmlFor="guest-upgrade-password">
+                      <Input
+                        id="guest-upgrade-password"
+                        type="password"
+                        autoComplete="new-password"
+                        value={guestUpgradePassword}
+                        onChange={(event) => {
+                          setGuestUpgradePassword(event.target.value)
+                          setGuestUpgradeError(null)
+                        }}
+                      />
+                    </FormField>
+                    <div className={styles.actionRow}>
+                      <Button
+                        label="Сохранить аккаунт"
+                        variant="secondary"
+                        loading={guestUpgradeStatus === 'submitting'}
+                        onClick={() => void handleUpgradeGuest()}
+                      />
+                    </div>
+                    {guestUpgradeError && <StatusMessage tone="error">{guestUpgradeError}</StatusMessage>}
+                  </Card>
+                )}
+                {guestUpgradeStatus === 'success' && (
+                  <StatusMessage>Аккаунт сохранён. История доступна после входа на другом устройстве.</StatusMessage>
+                )}
                 {/* Minimal In-Ride Messaging (Product Cycle): "коммуникация
                     принадлежит конкретной поездке, а не платформе в целом"
                     -- rendered inside this exact order's own confirmation
@@ -2418,7 +2471,6 @@ export function RideRequest() {
                   </Card>
                 )}
               </>
-            )}
           </div>
         )}
       </main>

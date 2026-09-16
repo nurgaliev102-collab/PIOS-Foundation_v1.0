@@ -2,12 +2,15 @@ package com.pios.identity.api
 
 import com.pios.identity.application.AssociateDriverApplicationService
 import com.pios.identity.application.CredentialRepository
+import com.pios.identity.application.CreateGuestIdentityApplicationService
+import com.pios.identity.application.GuestIdentityRateLimiter
 import com.pios.identity.application.LoginApplicationService
 import com.pios.identity.application.LoginRateLimiter
 import com.pios.identity.application.PasswordHasher
 import com.pios.identity.application.RegisterIdentityApplicationService
 import com.pios.identity.application.RetrieveIdentityHandler
 import com.pios.identity.application.SessionTokenIssuer
+import com.pios.identity.application.UpgradeGuestIdentityApplicationService
 import com.pios.identity.persistence.InMemoryCredentialRepository
 import com.pios.identity.persistence.InMemoryIdentityRepository
 import org.springframework.http.HttpStatus
@@ -43,12 +46,23 @@ class IdentityControllerTest {
         LoginApplicationService(identityRepository, credentialRepository, passwordHasher, sessionTokenIssuer, loginRateLimiter)
     private val retrieveIdentityHandler = RetrieveIdentityHandler(identityRepository)
     private val associateDriverService = AssociateDriverApplicationService(identityRepository, sessionTokenIssuer)
+    private val createGuestService = CreateGuestIdentityApplicationService(identityRepository, sessionTokenIssuer)
+    private val guestRateLimiter = GuestIdentityRateLimiter(maxPerWindow = 1000, windowMillis = 3_600_000)
+    private val upgradeGuestService = UpgradeGuestIdentityApplicationService(
+        identityRepository,
+        credentialRepository,
+        passwordHasher,
+        sessionTokenIssuer
+    )
     private val controller = IdentityController(
         registerService,
         loginService,
         retrieveIdentityHandler,
         associateDriverService,
-        sessionTokenVerifier
+        sessionTokenVerifier,
+        createGuestService,
+        guestRateLimiter,
+        upgradeGuestService
     )
 
     private fun bearer(token: String): String = "Bearer $token"
@@ -57,6 +71,61 @@ class IdentityControllerTest {
         assertNotNull(controller.register(RegisterIdentityRequest(phone, password)).body)
 
     // --- Register ---
+
+    @Test
+    fun `guest session is created without phone or password and carries the guest claim`() {
+        val response = controller.createGuestFromAddress("127.0.0.1", null)
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        val body = assertNotNull(response.body)
+        val verified = assertNotNull(sessionTokenVerifier.verify(bearer(body.token)))
+        assertEquals(body.identityId, verified.sub)
+        assertEquals(true, verified.guest)
+        assertNull(retrieveIdentityHandler.handle(com.pios.identity.domain.IdentityId(body.identityId)).phone)
+    }
+
+    @Test
+    fun `guest session cannot be associated with a driver profile`() {
+        val guest = assertNotNull(controller.createGuestFromAddress("127.0.0.1", "203.0.113.10").body)
+
+        val response = controller.associateDriver(
+            guest.identityId,
+            AssociateDriverRequest(guest.identityId),
+            bearer(guest.token)
+        )
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+    }
+
+    @Test
+    fun `guest can register in place without losing identity and then log in`() {
+        val guest = assertNotNull(controller.createGuestFromAddress("127.0.0.1", "203.0.113.11").body)
+
+        val upgraded = controller.upgradeGuest(
+            RegisterIdentityRequest("+79991234567", "correct-horse-battery-staple"),
+            bearer(guest.token)
+        )
+
+        assertEquals(HttpStatus.OK, upgraded.statusCode)
+        val body = assertNotNull(upgraded.body)
+        assertEquals(guest.identityId, body.identityId)
+        assertEquals(false, body.guest)
+        assertEquals(false, assertNotNull(sessionTokenVerifier.verify(bearer(body.token))).guest)
+        val loggedIn = assertNotNull(controller.login(LoginRequest("+79991234567", "correct-horse-battery-staple")).body)
+        assertEquals(guest.identityId, loggedIn.identityId)
+    }
+
+    @Test
+    fun `external client cannot bypass guest limiter by forging the proxy IP header`() {
+        val limitedController = IdentityController(
+            registerService, loginService, retrieveIdentityHandler, associateDriverService,
+            sessionTokenVerifier, createGuestService,
+            GuestIdentityRateLimiter(maxPerWindow = 1, windowMillis = 3_600_000), upgradeGuestService
+        )
+
+        assertEquals(HttpStatus.CREATED, limitedController.createGuestFromAddress("198.51.100.7", "203.0.113.1").statusCode)
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, limitedController.createGuestFromAddress("198.51.100.7", "203.0.113.2").statusCode)
+    }
 
     @Test
     fun `registering with a new phone returns 201 with an identity id, driver id, token and expiry`() {
@@ -89,6 +158,13 @@ class IdentityControllerTest {
     @Test
     fun `registering with a blank password returns 400`() {
         val response = controller.register(RegisterIdentityRequest("+79991234567", ""))
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
+    @Test
+    fun `registering with a short password returns 400`() {
+        val response = controller.register(RegisterIdentityRequest("+79991234567", "short"))
 
         assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
     }
@@ -214,10 +290,10 @@ class IdentityControllerTest {
         val registered = register("+79991234567")
 
         val response =
-            controller.associateDriver(registered.identityId, AssociateDriverRequest("ILDAR001"), bearer(registered.token))
+            controller.associateDriver(registered.identityId, AssociateDriverRequest(registered.identityId), bearer(registered.token))
 
         assertEquals(HttpStatus.OK, response.statusCode)
-        assertEquals("ILDAR001", assertNotNull(response.body).driverId)
+        assertEquals(registered.identityId, assertNotNull(response.body).driverId)
     }
 
     @Test
@@ -226,12 +302,12 @@ class IdentityControllerTest {
         val registrationToken = registered.token
 
         val response =
-            controller.associateDriver(registered.identityId, AssociateDriverRequest("ILDAR001"), bearer(registrationToken))
+            controller.associateDriver(registered.identityId, AssociateDriverRequest(registered.identityId), bearer(registrationToken))
 
         val body = assertNotNull(response.body)
         assertNotNull(body.token)
         val verifiedNewToken = assertNotNull(sessionTokenVerifier.verify(bearer(body.token)))
-        assertEquals("ILDAR001", verifiedNewToken.drv)
+        assertEquals(registered.identityId, verifiedNewToken.drv)
         // The new token is genuinely a different one, not the same string echoed back --
         // the whole point is that the caller no longer needs the registration-time token.
         assertEquals(false, body.token == registrationToken)
@@ -241,7 +317,7 @@ class IdentityControllerTest {
     fun `the registration token used to call associateDriver still verifies afterwards -- no server-side revocation exists (ADR-055)`() {
         val registered = register("+79991234567")
 
-        controller.associateDriver(registered.identityId, AssociateDriverRequest("ILDAR001"), bearer(registered.token))
+        controller.associateDriver(registered.identityId, AssociateDriverRequest(registered.identityId), bearer(registered.token))
 
         val verifiedOldToken = assertNotNull(sessionTokenVerifier.verify(bearer(registered.token)))
         assertNull(verifiedOldToken.drv)
@@ -252,7 +328,7 @@ class IdentityControllerTest {
         val self = register("+79991234567")
         val other = register("+79997654321")
 
-        val response = controller.associateDriver(other.identityId, AssociateDriverRequest("ILDAR001"), bearer(self.token))
+        val response = controller.associateDriver(other.identityId, AssociateDriverRequest(other.identityId), bearer(self.token))
 
         assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
     }
@@ -271,7 +347,7 @@ class IdentityControllerTest {
         val registered = register("+79991234567")
 
         val response =
-            controller.associateDriver(registered.identityId, AssociateDriverRequest("ILDAR001"), bearer("garbage.garbage"))
+            controller.associateDriver(registered.identityId, AssociateDriverRequest(registered.identityId), bearer("garbage.garbage"))
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
     }
@@ -288,11 +364,24 @@ class IdentityControllerTest {
     @Test
     fun `a driver's token carries their driverId as the drv claim, so their own connections lookup can be locked to it`() {
         val registered = register("+79991234567")
-        controller.associateDriver(registered.identityId, AssociateDriverRequest("ILDAR001"), bearer(registered.token))
+        controller.associateDriver(registered.identityId, AssociateDriverRequest(registered.identityId), bearer(registered.token))
 
         val loginResponse = assertNotNull(controller.login(LoginRequest("+79991234567", "correct-horse-battery-staple")).body)
         val verified = assertNotNull(sessionTokenVerifier.verify(bearer(loginResponse.token)))
 
-        assertEquals("ILDAR001", verified.drv)
+        assertEquals(registered.identityId, verified.drv)
+    }
+
+    @Test
+    fun `associating an arbitrary driver id with your own token returns 400`() {
+        val registered = register("+79991234567")
+
+        val response = controller.associateDriver(
+            registered.identityId,
+            AssociateDriverRequest("somebody-elses-driver"),
+            bearer(registered.token)
+        )
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
     }
 }

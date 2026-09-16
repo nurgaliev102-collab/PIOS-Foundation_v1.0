@@ -1,6 +1,8 @@
 package com.pios.ordermanagement.api
 
 import com.pios.ordermanagement.application.RetrieveOrdersHandler
+import com.pios.ordermanagement.application.DriverOrderAccess
+import com.pios.ordermanagement.application.DriverOrderAccessUnavailableException
 import com.pios.ordermanagement.domain.Order
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -41,11 +43,9 @@ import org.springframework.web.bind.annotation.RestController
  *   `sub`, that passenger's own orders (ADR-060 Decision 2: `Order.origin`
  *   is, from this ADR forward, the authenticated passenger's `identityId`).
  * - `Authorization: Bearer` with `?ids=<uuid>,<uuid>,…` — only for a
- *   driver-linked token (`drv != null`), the subset of those ids that
- *   exist. This does **not** verify the driver actually holds a proposal
- *   for each id (ADR-060 Decision 3, a disclosed, Product-Owner-accepted
- *   limitation) — Order Management has no driver concept and does not call
- *   Dispatch to acquire one (ADR-060 Decision 3's own "why not").
+ *   driver-linked token (`drv != null`). The result is intersected with
+ *   the orders Dispatch confirms were actually proposed to that driver.
+ *   Caller-supplied ids therefore never grant access by themselves.
  *
  * Every other combination is 401 (auth failure) or 400 (malformed
  * parameters) per the access matrix — never a silent empty list, and never
@@ -64,7 +64,8 @@ import org.springframework.web.bind.annotation.RestController
 class OrderQueryController(
     private val retrieveOrdersHandler: RetrieveOrdersHandler,
     private val ownerCredentialGate: OwnerCredentialGate,
-    private val sessionTokenVerifier: SessionTokenVerifier
+    private val sessionTokenVerifier: SessionTokenVerifier,
+    private val driverOrderAccess: DriverOrderAccess
 ) {
 
     @GetMapping
@@ -103,7 +104,8 @@ class OrderQueryController(
                 }
             }
             ids != null -> {
-                if (verified.drv == null) {
+                val driverId = verified.drv
+                if (driverId == null) {
                     return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
                 }
                 val idList = ids.split(",")
@@ -111,11 +113,16 @@ class OrderQueryController(
                     return ResponseEntity.badRequest().build()
                 }
                 val idSet = idList.toSet()
-                ResponseEntity.ok(
-                    retrieveOrdersHandler.handleAll()
-                        .filter { it.id.value in idSet }
-                        .map { it.toResponse() }
-                )
+                try {
+                    val accessibleIds = driverOrderAccess.accessibleOrderIds(driverId, authorization!!)
+                    ResponseEntity.ok(
+                        retrieveOrdersHandler.handleAll()
+                            .filter { it.id.value in idSet && it.id.value in accessibleIds }
+                            .map { it.toResponse() }
+                    )
+                } catch (_: DriverOrderAccessUnavailableException) {
+                    ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build()
+                }
             }
             else -> ResponseEntity.status(HttpStatus.FORBIDDEN).build()
         }

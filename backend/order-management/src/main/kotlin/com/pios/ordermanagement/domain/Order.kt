@@ -107,10 +107,20 @@ import java.util.UUID
  * default (an order with no known explicit intent remains eligible for
  * automatic First Refusal, exactly today's implicit behavior). Set once,
  * at submission, and never changes for the rest of the order's lifecycle,
- * mirroring every other optional field's own immutability. Carries no
- * driver identity — Order Management does not own that information — only
- * the bare fact that one is already spoken for; see [OrderSubmitted]'s own
- * KDoc for how this crosses the module boundary.
+ * mirroring every other optional field's own immutability.
+ *
+ * Correction, 2026-09-16 (ADR-076): the sentence that used to end this
+ * paragraph -- "carries no driver identity, Order Management does not own
+ * that information" -- is no longer true. [requestedDriverId] now lives on
+ * this same aggregate, appended last, exactly the same "plain nullable
+ * field, no new Value Object" precedent this whole KDoc block already
+ * documents for [requestedPickupAt] and [passengerCount]. Order Management
+ * does not validate that a named id is a real driver (it has no way to);
+ * it only asserts, in [submit], that [requestedDriverId] is never set
+ * without [explicitDriverIntent] also being true -- a named driver is
+ * meaningless without the caller also declaring they already know who
+ * they want. See [OrderSubmitted]'s own KDoc for how both facts cross the
+ * module boundary together.
  *
  * [passengerCount] (PIOS Group and Long-Distance Rides Roadmap, Stage 2 --
  * group orders) is the passenger's own statement of how many people this
@@ -159,7 +169,8 @@ class Order private constructor(
     val isTest: Boolean = false,
     val explicitDriverIntent: Boolean = false,
     val passengerCount: Int? = null,
-    val notes: String? = null
+    val notes: String? = null,
+    val requestedDriverId: String? = null
 ) {
     var status: OrderStatus = status
         private set
@@ -193,6 +204,15 @@ class Order private constructor(
         return OrderCancelled(orderId = id)
     }
 
+    /** Dispatch exhausted the offer window without ever creating a proposal. */
+    fun markUnfulfilled(): OrderUnfulfilled {
+        check(status == OrderStatus.SUBMITTED) {
+            "Order ${id.value} cannot be unfulfilled from status $status"
+        }
+        status = OrderStatus.UNFULFILLED
+        return OrderUnfulfilled(orderId = id)
+    }
+
     companion object {
         /**
          * Submits a new order, per the Submit Order command
@@ -220,11 +240,18 @@ class Order private constructor(
             isTest: Boolean = false,
             explicitDriverIntent: Boolean = false,
             passengerCount: Int? = null,
-            notes: String? = null
+            notes: String? = null,
+            requestedDriverId: String? = null
         ): SubmittedOrder {
             require(passengerCount == null || passengerCount > 0) { "passengerCount must be positive" }
             require(notes == null || notes.length <= MAX_NOTES_LENGTH) {
                 "notes must be at most $MAX_NOTES_LENGTH characters"
+            }
+            require(requestedDriverId == null || requestedDriverId.isNotBlank()) {
+                "requestedDriverId must not be blank"
+            }
+            require(requestedDriverId == null || explicitDriverIntent) {
+                "requestedDriverId requires explicitDriverIntent"
             }
             val order = Order(
                 id = OrderId(UUID.randomUUID().toString()),
@@ -238,7 +265,8 @@ class Order private constructor(
                 isTest = isTest,
                 explicitDriverIntent = explicitDriverIntent,
                 passengerCount = passengerCount,
-                notes = notes
+                notes = notes,
+                requestedDriverId = requestedDriverId
             )
             return SubmittedOrder(
                 order = order,
@@ -246,7 +274,9 @@ class Order private constructor(
                     orderId = order.id,
                     origin = origin,
                     explicitDriverIntent = explicitDriverIntent,
-                    isTest = isTest
+                    isTest = isTest,
+                    requestedDriverId = requestedDriverId,
+                    requestedPickupAt = requestedPickupAt
                 )
             )
         }

@@ -33,11 +33,12 @@ class PostgreSQLAssignmentLifecycleTest {
 
     @Test
     fun `an assignment created through PostgreSQL can be restored by id and accepted`() {
-        val created = service.handle(AssignOrderCommand(OrderReference("postgres-lifecycle-order-1"), DriverReference("postgres-lifecycle-driver-1")))
+        val orderId = OrderReference("postgres-lifecycle-order-1-${java.util.UUID.randomUUID()}")
+        val created = service.handle(AssignOrderCommand(orderId, DriverReference("postgres-lifecycle-driver-1")))
 
         val event = service.acceptAssignment(AcceptAssignmentCommand(created.assignment.id))
 
-        assertEquals(OrderReference("postgres-lifecycle-order-1"), event.orderId)
+        assertEquals(orderId, event.orderId)
         assertEquals(AssignmentStatus.ACCEPTED, repository.findById(created.assignment.id)?.status)
     }
 
@@ -63,7 +64,10 @@ class PostgreSQLAssignmentLifecycleTest {
     @Test
     fun `an assignment can be carried through the full ride lifecycle and its trip restored at each step`() {
         val created = service.handle(
-            AssignOrderCommand(OrderReference("postgres-lifecycle-order-2"), DriverReference("postgres-lifecycle-driver-2"))
+            AssignOrderCommand(
+                OrderReference("postgres-lifecycle-order-2-${java.util.UUID.randomUUID()}"),
+                DriverReference("postgres-lifecycle-driver-2")
+            )
         )
 
         service.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
@@ -80,10 +84,6 @@ class PostgreSQLAssignmentLifecycleTest {
 
     @Test
     fun `the full ride lifecycle never changes the assignment's own persisted status in PostgreSQL`() {
-        // Randomized, not a fixed literal like the two tests above (Task 11's
-        // own known, deliberately-not-fixed-at-source test-hygiene finding) --
-        // this is a new test, so it is written correctly from the start
-        // rather than repeating that same latent residual-data risk.
         val created = service.handle(
             AssignOrderCommand(
                 OrderReference("postgres-lifecycle-order-3-${java.util.UUID.randomUUID()}"),

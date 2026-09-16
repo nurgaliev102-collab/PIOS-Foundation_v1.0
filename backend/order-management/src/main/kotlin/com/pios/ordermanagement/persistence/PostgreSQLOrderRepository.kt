@@ -169,7 +169,7 @@ class PostgreSQLOrderRepository(
     override fun save(order: Order) {
         jdbcTemplate.update(
             """
-            INSERT INTO orders (id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test, explicit_driver_intent, passenger_count, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO orders (id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test, explicit_driver_intent, passenger_count, notes, requested_driver_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status
             """.trimIndent(),
             order.id.value,
@@ -183,13 +183,19 @@ class PostgreSQLOrderRepository(
             order.isTest,
             order.explicitDriverIntent,
             order.passengerCount,
-            order.notes
+            order.notes,
+            order.requestedDriverId
         )
     }
 
-    override fun findById(id: OrderId): Order? {
+    override fun findById(id: OrderId): Order? = findById(id, forUpdate = false)
+
+    override fun findByIdForUpdate(id: OrderId): Order? = findById(id, forUpdate = true)
+
+    private fun findById(id: OrderId, forUpdate: Boolean): Order? {
         val rows = jdbcTemplate.query(
-            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test, explicit_driver_intent, passenger_count, notes FROM orders WHERE id = ?",
+            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test, explicit_driver_intent, passenger_count, notes, requested_driver_id FROM orders WHERE id = ?" +
+                if (forUpdate) " FOR UPDATE" else "",
             { rs, _ ->
                 reconstruct(
                     id = rs.getString("id"),
@@ -203,7 +209,8 @@ class PostgreSQLOrderRepository(
                     isTest = rs.getBoolean("is_test"),
                     explicitDriverIntent = rs.getBoolean("explicit_driver_intent"),
                     passengerCount = rs.getInt("passenger_count").let { if (rs.wasNull()) null else it },
-                    notes = rs.getString("notes")
+                    notes = rs.getString("notes"),
+                    requestedDriverId = rs.getString("requested_driver_id")
                 )
             },
             id.value
@@ -213,7 +220,7 @@ class PostgreSQLOrderRepository(
 
     override fun findAll(): List<Order> =
         jdbcTemplate.query(
-            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test, explicit_driver_intent, passenger_count, notes FROM orders"
+            "SELECT id, status, origin, destination, passenger_name, created_at, pickup_address, requested_pickup_at, is_test, explicit_driver_intent, passenger_count, notes, requested_driver_id FROM orders"
         ) { rs, _ ->
             reconstruct(
                 id = rs.getString("id"),
@@ -227,7 +234,8 @@ class PostgreSQLOrderRepository(
                 isTest = rs.getBoolean("is_test"),
                 explicitDriverIntent = rs.getBoolean("explicit_driver_intent"),
                 passengerCount = rs.getInt("passenger_count").let { if (rs.wasNull()) null else it },
-                notes = rs.getString("notes")
+                notes = rs.getString("notes"),
+                requestedDriverId = rs.getString("requested_driver_id")
             )
         }
 
@@ -243,7 +251,8 @@ class PostgreSQLOrderRepository(
         isTest: Boolean,
         explicitDriverIntent: Boolean,
         passengerCount: Int?,
-        notes: String?
+        notes: String?,
+        requestedDriverId: String?
     ): Order {
         val constructor = Order::class.java.getDeclaredConstructor(
             String::class.java,
@@ -257,6 +266,7 @@ class PostgreSQLOrderRepository(
             Boolean::class.java,
             Boolean::class.java,
             Integer::class.java,
+            String::class.java,
             String::class.java
         )
         constructor.isAccessible = true
@@ -272,7 +282,8 @@ class PostgreSQLOrderRepository(
             isTest,
             explicitDriverIntent,
             passengerCount,
-            notes
+            notes,
+            requestedDriverId
         )
     }
 }

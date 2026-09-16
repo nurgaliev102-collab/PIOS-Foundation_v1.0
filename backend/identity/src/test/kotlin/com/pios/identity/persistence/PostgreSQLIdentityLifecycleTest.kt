@@ -43,16 +43,16 @@ class PostgreSQLIdentityLifecycleTest {
         // the exact two-step sequence DriverHome.tsx's own onboarding
         // performs (ADR-039).
         val registrationRepository = freshRepository()
-        val created = CreateIdentityApplicationService(registrationRepository).handle(CreateIdentityCommand(null))
+        val created = CreateIdentityApplicationService(registrationRepository).handle(CreateIdentityCommand(uniqueTestPhone()))
         AssociateDriverApplicationService(registrationRepository, sessionTokenIssuer)
-            .handle(AssociateDriverCommand(created.id.value, "postgres-identity-lifecycle-driver-1"))
+            .handle(AssociateDriverCommand(created.id.value, created.id.value))
 
         // Reopen (device restart): a brand new repository/handler pair,
         // backed by nothing but the database itself.
         val reopened = RetrieveIdentityHandler(freshRepository()).handle(created.id)
 
         assertEquals(created.id, reopened.id)
-        assertEquals("postgres-identity-lifecycle-driver-1", reopened.driverId)
+        assertEquals(created.id.value, reopened.driverId)
     }
 
     @Test
@@ -63,7 +63,7 @@ class PostgreSQLIdentityLifecycleTest {
     }
 
     @Test
-    fun `re-registering a driver association on reopen overwrites the previous one, not duplicates it`() {
+    fun `reopening cannot reassign an identity to a different driver`() {
         val repository = freshRepository()
         // ADR-055 added a unique index on `identities.phone`; this test's
         // own phone value must therefore be unique per run, not a shared
@@ -76,17 +76,15 @@ class PostgreSQLIdentityLifecycleTest {
         val phone = uniqueTestPhone()
         val created = CreateIdentityApplicationService(repository).handle(CreateIdentityCommand(phone))
         AssociateDriverApplicationService(repository, sessionTokenIssuer)
-            .handle(AssociateDriverCommand(created.id.value, "postgres-identity-lifecycle-driver-2a"))
+            .handle(AssociateDriverCommand(created.id.value, created.id.value))
 
-        // A later reopen associating a different driver id (e.g. this
-        // device re-ran onboarding after losing its own local pointer,
-        // per BackendIdentityProvider's 404-recovery path) -- the backend
-        // itself does not forbid this; it simply reflects the latest call.
-        AssociateDriverApplicationService(freshRepository(), sessionTokenIssuer)
-            .handle(AssociateDriverCommand(created.id.value, "postgres-identity-lifecycle-driver-2b"))
+        assertFailsWith<IllegalArgumentException> {
+            AssociateDriverApplicationService(freshRepository(), sessionTokenIssuer)
+                .handle(AssociateDriverCommand(created.id.value, "somebody-elses-driver"))
+        }
 
         val reopened = RetrieveIdentityHandler(freshRepository()).handle(created.id)
-        assertEquals("postgres-identity-lifecycle-driver-2b", reopened.driverId)
+        assertEquals(created.id.value, reopened.driverId)
         assertEquals(phone, reopened.phone?.value)
     }
 

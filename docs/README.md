@@ -79,6 +79,9 @@ Architecture Decision Records. Every change to an architectural decision is reco
 | [ADR-071](ADR/ADR-071-In-App-Poll-Derived-Notification-Surface.md) | In-App, Poll-Derived Notification Surface | **Accepted** |
 | [ADR-073](ADR/ADR-073-Driver-To-Driver-Referral-Single-Hop-Origin-Fact.md) | Driver-to-Driver Referral — Single-Hop Origin Fact | **Accepted** |
 | [ADR-074](ADR/ADR-074-Subscription-Billing-Bounded-Context-Foundation.md) | Subscription/Billing Foundation — a New Bounded Context That Gates Nothing | **Accepted, container only** |
+| [ADR-075](ADR/ADR-075-Guest-First-Passenger-Identity-And-In-Place-Upgrade.md) | Guest-First Passenger Identity and In-Place Upgrade | **Accepted — documents already-built, uncommitted, undeployed code** |
+| [ADR-076](ADR/ADR-076-Server-Authorized-Named-Driver-Offer.md) | Server-Authorized Named-Driver Offer — `requestedDriverId`, and No Client-Created Proposals | **Accepted — documents already-built, uncommitted, undeployed code; supersedes ADR-066's passenger branch** |
+| [ADR-077](ADR/ADR-077-Dispatch-Routing-Obligation-Bounded-Retry-And-Unfulfilled-Order.md) | Dispatch Routing Obligation, Bounded Retry, and `UNFULFILLED` as an Order Terminal State | **Accepted — documents already-built, uncommitted, undeployed code; amends ADR-068 Part 4** |
 
 Note (Sprint 1 — Foundation Stabilization): this table is also missing ADR-027 through ADR-034, which exist as real files under `docs/ADR/` but were never added here — a pre-existing indexing gap found during this sprint's own documentation-sync work, left uncorrected here since it is outside this sprint's authorized scope; recorded for Sprint 2.
 

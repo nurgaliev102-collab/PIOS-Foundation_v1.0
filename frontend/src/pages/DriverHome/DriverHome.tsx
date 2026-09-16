@@ -38,7 +38,7 @@ import {
 } from '../../features/notifications'
 import styles from './DriverHome.module.css'
 
-const MIN_PASSWORD_LENGTH = 8
+const MIN_PASSWORD_LENGTH = 10
 
 // ADR-038/ADR-039: today's only IdentityProvider/InvitationProvider — see
 // those files' own KDoc for why this is safe to instantiate once,
@@ -601,13 +601,6 @@ function todaysNewClientCount(connections: ConnectionListItem[]): number {
  * supplied id — ADR-039 does not change that contract). Never shown to
  * the person creating the profile; they only ever provide a display name.
  */
-function generateDriverId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `driver-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-}
-
 /**
  * Driver Home — Sprint 1: the first real mobile-first screen of PIOS.
  * Sprint 2 — Driver Invitation Flow: Copy and Share are wired to real
@@ -693,7 +686,6 @@ export function DriverHome() {
   const [nameInput, setNameInput] = useState('')
   const [nameError, setNameError] = useState<string | null>(null)
   const [isCreatingDriver, setIsCreatingDriver] = useState(false)
-  const pendingDriverId = useRef<string | null>(null)
 
   const [status, setStatus] = useState<Status>('loading')
   const [driver, setDriver] = useState<DriverInfo | null>(null)
@@ -1042,7 +1034,7 @@ export function DriverHome() {
         }
         setProposals(result)
         setProposalsStatus('ready')
-        loadAssignments(active, result)
+        loadAssignments(active, result, token)
         loadOrderDetails(active, Array.from(new Set(result.map((p) => p.orderId))), token)
         // Minimal In-Ride Messaging (Product Cycle): scoped per proposal,
         // not per order -- see [loadMessages]'s own KDoc.
@@ -1073,7 +1065,7 @@ export function DriverHome() {
    * `.then` that just resolved them — reading state here would see the
    * previous poll's value.
    */
-  function loadAssignments(active: boolean, currentProposals: ProposalListItem[]) {
+  function loadAssignments(active: boolean, currentProposals: ProposalListItem[], token: string) {
     const acceptedOrderIds = Array.from(
       new Set(currentProposals.filter((p) => p.status === 'ACCEPTED').map((p) => p.orderId))
     )
@@ -1082,6 +1074,7 @@ export function DriverHome() {
     }
     request<AssignmentInfo[]>(`/v1/assignments?orderIds=${acceptedOrderIds.join(',')}`, {
       baseUrl: DISPATCH_BASE_URL,
+      headers: { Authorization: `Bearer ${token}` },
     })
       .then((results) => {
         if (!active) {
@@ -1253,12 +1246,17 @@ export function DriverHome() {
       // reuse whichever id this attempt already committed to, and treat a
       // 409 (the previous attempt's create already landed) as success
       // rather than a failure.
-      const newDriverId = pendingDriverId.current ?? generateDriverId()
-      pendingDriverId.current = newDriverId
+      if (!identity) {
+        throw new Error('driver profile creation requires an authenticated identity')
+      }
+      const newDriverId = identity.identityId
       try {
         await request('/v1/drivers', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${identity.token}`,
+          },
           body: JSON.stringify({
             driverId: newDriverId,
             displayName: trimmed,
@@ -1275,7 +1273,6 @@ export function DriverHome() {
         }
       }
       const updated = await identityProvider.attachDriver(newDriverId)
-      pendingDriverId.current = null
       setIdentity(updated)
     } catch {
       setNameError('Не удалось создать профиль. Проверьте связь с интернетом и попробуйте ещё раз.')

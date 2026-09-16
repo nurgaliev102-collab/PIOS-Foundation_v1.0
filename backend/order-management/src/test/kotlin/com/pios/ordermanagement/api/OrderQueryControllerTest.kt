@@ -2,6 +2,8 @@ package com.pios.ordermanagement.api
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.ordermanagement.application.RetrieveOrdersHandler
+import com.pios.ordermanagement.application.DriverOrderAccess
+import com.pios.ordermanagement.application.DriverOrderAccessUnavailableException
 import com.pios.ordermanagement.domain.Order
 import com.pios.ordermanagement.domain.OrderOrigin
 import com.pios.ordermanagement.persistence.InMemoryOrderRepository
@@ -56,7 +58,15 @@ class OrderQueryControllerTest {
 
     private val repository = InMemoryOrderRepository()
     private val handler = RetrieveOrdersHandler(repository)
-    private val controller = OrderQueryController(handler, ownerCredentialGate, sessionTokenVerifier)
+    private val accessibleOrdersByDriver = mutableMapOf<String, Set<String>>()
+    private var driverAccessUnavailable = false
+    private val driverOrderAccess = DriverOrderAccess { driverId, _ ->
+        if (driverAccessUnavailable) {
+            throw DriverOrderAccessUnavailableException(IllegalStateException("dispatch unavailable"))
+        }
+        accessibleOrdersByDriver[driverId].orEmpty()
+    }
+    private val controller = OrderQueryController(handler, ownerCredentialGate, sessionTokenVerifier, driverOrderAccess)
 
     // --- Token minting test helper (see class KDoc) ---
 
@@ -220,6 +230,7 @@ class OrderQueryControllerTest {
     fun `a driver receives only the subset of requested ids that exist`() {
         val ownOrder = seedOrder(passengerAId)
         seedOrder(passengerBId) // never named in `ids` -- must not appear
+        accessibleOrdersByDriver["driver-1"] = setOf(ownOrder.id.value)
 
         val response = controller.listOrders(driverToken, null, "${ownOrder.id.value},not-a-real-id")
 
@@ -238,13 +249,25 @@ class OrderQueryControllerTest {
     }
 
     @Test
-    fun `either driver's token may fetch a named order -- ids grants no per-order ownership check (ADR-060 Decision 3, disclosed)`() {
+    fun `a different driver cannot fetch an order that was not proposed to them`() {
         val order = seedOrder(passengerAId)
+        accessibleOrdersByDriver["driver-1"] = setOf(order.id.value)
 
         val response = controller.listOrders(otherDriverToken, null, order.id.value)
 
         assertEquals(HttpStatus.OK, response.statusCode)
-        assertEquals(1, response.body?.size)
+        assertEquals(emptyList(), response.body)
+    }
+
+    @Test
+    fun `driver order query fails closed when Dispatch access verification is unavailable`() {
+        val order = seedOrder(passengerAId)
+        driverAccessUnavailable = true
+
+        val response = controller.listOrders(driverToken, null, order.id.value)
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.statusCode)
+        assertNull(response.body)
     }
 
     // --- Shape guards: 400, checked after authentication ---

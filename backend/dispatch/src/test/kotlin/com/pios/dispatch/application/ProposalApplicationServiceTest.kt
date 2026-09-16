@@ -273,7 +273,7 @@ class ProposalApplicationServiceTest {
     @Test
     fun `handling a command for a driver marked unavailable is rejected`() {
         val availabilityRepository = InMemoryDriverAvailabilityRepository()
-        availabilityRepository.upsert(DriverAvailabilityRecord(driver, available = false))
+        availabilityRepository.upsert(DriverAvailabilityRecord(driver, available = false, isTest = false))
         val gatedService = ProposalApplicationService(repository, driverAvailabilityRepository = availabilityRepository)
 
         assertFailsWith<IllegalStateException> {
@@ -282,9 +282,35 @@ class ProposalApplicationServiceTest {
     }
 
     @Test
+    fun `a known off-line driver may receive an advance request but not an immediate one`() {
+        val availabilityRepository = InMemoryDriverAvailabilityRepository()
+        availabilityRepository.upsert(DriverAvailabilityRecord(driver, available = false, isTest = false))
+        val gatedService = ProposalApplicationService(repository, driverAvailabilityRepository = availabilityRepository)
+
+        val result = gatedService.handle(
+            ProposeDriverCommand(order, driver, requestedPickupAt = java.time.Instant.parse("2099-08-25T06:30:00Z"))
+        )
+
+        assertEquals(order, result.proposal.order)
+    }
+
+    @Test
+    fun `advance request still rejects an unknown driver classification`() {
+        val availabilityRepository = InMemoryDriverAvailabilityRepository()
+        availabilityRepository.upsert(DriverAvailabilityRecord(driver, available = false))
+        val gatedService = ProposalApplicationService(repository, driverAvailabilityRepository = availabilityRepository)
+
+        assertFailsWith<IllegalStateException> {
+            gatedService.handle(
+                ProposeDriverCommand(order, driver, requestedPickupAt = java.time.Instant.parse("2099-08-25T06:30:00Z"))
+            )
+        }
+    }
+
+    @Test
     fun `handling a command for a driver marked available succeeds`() {
         val availabilityRepository = InMemoryDriverAvailabilityRepository()
-        availabilityRepository.upsert(DriverAvailabilityRecord(driver, available = true))
+        availabilityRepository.upsert(DriverAvailabilityRecord(driver, available = true, isTest = false))
         val gatedService = ProposalApplicationService(repository, driverAvailabilityRepository = availabilityRepository)
 
         val result = gatedService.handle(ProposeDriverCommand(order, driver))
@@ -308,7 +334,7 @@ class ProposalApplicationServiceTest {
         val orderForArturSecond = OrderReference("order-for-artur-second")
 
         // Step 2: Артур is AVAILABLE, the other 3 stay UNAVAILABLE (default, no record).
-        availabilityRepository.upsert(DriverAvailabilityRecord(artur, available = true))
+        availabilityRepository.upsert(DriverAvailabilityRecord(artur, available = true, isTest = false))
 
         // Step 4: proposing Артур succeeds.
         val proposedArtur = gatedService.handle(ProposeDriverCommand(orderForArtur, artur))
@@ -320,7 +346,7 @@ class ProposalApplicationServiceTest {
         }
 
         // Step 6: Артур goes UNAVAILABLE.
-        availabilityRepository.upsert(DriverAvailabilityRecord(artur, available = false))
+        availabilityRepository.upsert(DriverAvailabilityRecord(artur, available = false, isTest = false))
 
         // Step 7: proposing Артур again is now rejected too.
         assertFailsWith<IllegalStateException> {

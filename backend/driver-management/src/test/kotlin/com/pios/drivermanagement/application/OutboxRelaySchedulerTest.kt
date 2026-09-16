@@ -72,7 +72,15 @@ class OutboxRelaySchedulerTest {
                 )
             )
 
-            val received = observer.receiveMessageContaining(marker)
+            // Other integration tests and the V13 replay can leave many
+            // unrelated outbox events for the same shared observer queue.
+            // A fixed 20-message budget can miss this marker even when the
+            // scheduler has published it correctly.
+            val received = observer.receiveMessageContaining(
+                marker,
+                maxAttempts = 300,
+                perAttemptTimeoutMillis = 150L
+            )
             assertTrue(received != null)
 
             var markedPublished = false

@@ -39,6 +39,10 @@ logging:
 # milliseconds, between the end of one OutboxRelayScheduler tick and the
 # start of the next -- a configuration default, not a product invariant.
 pios:
+  dispatch:
+    base-url: http://127.0.0.1:8084
+    connect-timeout-ms: 1500
+    read-timeout-ms: 3000
   outbox:
     relay:
       fixed-delay-ms: 2000

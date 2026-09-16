@@ -41,7 +41,7 @@ class OrderSubmittedEnvelopeTest {
 
         assertTrue(envelope.get("eventId").asText().isNotBlank())
         assertEquals("OrderSubmitted", envelope.get("eventType").asText())
-        assertEquals(1, envelope.get("eventVersion").asInt())
+        assertEquals(3, envelope.get("eventVersion").asInt())
         assertEquals(submitted.event.occurredAt.toString(), envelope.get("occurredAt").asText())
         assertEquals(submitted.order.id.value, envelope.get("payload").get("orderId").asText())
 
@@ -57,7 +57,7 @@ class OrderSubmittedEnvelopeTest {
         assertEquals(false, envelope.get("payload").get("explicitDriverIntent").asBoolean())
         assertEquals(false, envelope.get("payload").get("isTest").asBoolean())
         assertEquals(
-            setOf("orderId", "passengerReference", "explicitDriverIntent", "isTest"),
+            setOf("orderId", "passengerReference", "explicitDriverIntent", "isTest", "requestedDriverId", "requestedPickupAt"),
             envelope.get("payload").fieldNames().asSequence().toSet()
         )
 
@@ -70,12 +70,28 @@ class OrderSubmittedEnvelopeTest {
 
     @Test
     fun `Test 1 -- explicit driver intent set at submission is carried through to the envelope`() {
-        val submitted = service.submitOrder(SubmitOrderCommand(origin, explicitDriverIntent = true))
+        val submitted = service.submitOrder(
+            SubmitOrderCommand(origin, explicitDriverIntent = true, requestedDriverId = "driver-explicit")
+        )
 
         val record = outboxRepository.findUnpublished().single { it.aggregateId == submitted.order.id.value }
         val envelope = objectMapper.readTree(record.payload)
 
         assertEquals(true, envelope.get("payload").get("explicitDriverIntent").asBoolean())
+        assertEquals("driver-explicit", envelope.get("payload").get("requestedDriverId").asText())
+    }
+
+    @Test
+    fun `a future pickup is included in the dispatch event`() {
+        val future = java.time.Instant.parse("2099-08-25T06:30:00Z")
+        val submitted = service.submitOrder(
+            SubmitOrderCommand(origin, requestedPickupAt = future, explicitDriverIntent = true, requestedDriverId = "driver-future")
+        )
+
+        val record = outboxRepository.findUnpublished().single { it.aggregateId == submitted.order.id.value }
+        val envelope = objectMapper.readTree(record.payload)
+
+        assertEquals(future.toString(), envelope.get("payload").get("requestedPickupAt").asText())
     }
 
     @Test

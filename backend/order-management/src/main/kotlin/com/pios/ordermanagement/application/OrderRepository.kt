@@ -26,5 +26,7 @@ import com.pios.ordermanagement.domain.OrderId
 interface OrderRepository {
     fun save(order: Order)
     fun findById(id: OrderId): Order?
+    /** Lock the row for a status transition inside the caller's transaction. */
+    fun findByIdForUpdate(id: OrderId): Order? = findById(id)
     fun findAll(): List<Order>
 }

@@ -1,5 +1,7 @@
 # ADR-066: Proposal Participant Authorization — `passengerReference` on `Proposal`, and Who May Create, Read, or Act on One
 
+> **Amendment pointer (2026-09-16), added per `ADR-015`.** `ADR-076` (Server-Authorized Named-Driver Offer) **supersedes this ADR's passenger branch for `POST /v1/proposals`**. That endpoint (`ProposalController.createProposalHttp`) now returns **403 to every `Bearer` caller** and admits only the owner/coordinator `Basic` credential; a passenger no longer creates proposals at all. The driver of a passenger-initiated offer is instead named at order submission (`Order.requestedDriverId`, `OrderSubmitted` v3) and offered server-side by Dispatch. **Decision 10's named residual — "an authenticated passenger can still create a proposal on another passenger's own `orderId`" — is thereby closed**, not by validation but by removing the capability. Everything else in this ADR (the `passengerReference` field on `Proposal`, the read/act authorization on every other endpoint, Decisions 7 and 8) is unchanged and still in force. This ADR's text is retained, not rewritten (`CLAUDE.md`, "Never Delete Documentation"); `ProposalController.createProposalHttp`'s own KDoc still describes the superseded behavior and is named as a required correction in `ADR-076`'s Blocking Prerequisites.
+
 ## Status
 
 **Recommendation, ready for Product Owner ratification as written.** The answer to

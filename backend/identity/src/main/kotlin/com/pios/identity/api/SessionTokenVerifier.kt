@@ -32,7 +32,7 @@ class SessionTokenVerifier(
 ) {
     private val objectMapper = ObjectMapper()
 
-    data class VerifiedToken(val sub: String, val drv: String?)
+    data class VerifiedToken(val sub: String, val drv: String?, val guest: Boolean = false)
 
     /**
      * Verifies [authorizationHeader] (the raw `Authorization` header
@@ -79,7 +79,8 @@ class SessionTokenVerifier(
         if (expNode.asLong() <= Instant.now().epochSecond) {
             return null
         }
-        return VerifiedToken(sub, drv)
+        val guest = payloadNode.get("gst")?.takeIf { it.isBoolean }?.asBoolean() ?: false
+        return VerifiedToken(sub, drv, guest)
     }
 
     private fun extractBearerToken(header: String?): String? {

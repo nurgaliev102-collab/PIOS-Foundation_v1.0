@@ -28,8 +28,10 @@ internal class OrderSubmittedMessagePublisher(connectionFactory: ConnectionFacto
         passengerReference: String,
         explicitDriverIntent: Boolean = false,
         isTest: Boolean = false,
+        requestedDriverId: String? = null,
+        requestedPickupAt: String? = null,
         eventId: String = UUID.randomUUID().toString(),
-        eventVersion: Int = 1
+        eventVersion: Int = if (requestedPickupAt != null) 3 else if (requestedDriverId == null) 1 else 2
     ) {
         val envelope = objectMapper.writeValueAsString(
             mapOf(
@@ -41,7 +43,9 @@ internal class OrderSubmittedMessagePublisher(connectionFactory: ConnectionFacto
                     "orderId" to orderId,
                     "passengerReference" to passengerReference,
                     "explicitDriverIntent" to explicitDriverIntent,
-                    "isTest" to isTest
+                    "isTest" to isTest,
+                    "requestedDriverId" to requestedDriverId,
+                    "requestedPickupAt" to requestedPickupAt
                 )
             )
         )

@@ -29,12 +29,14 @@ class OrderCancelledConsumerIntegrationTest {
     private val dataSource = PostgreSQLTestDatabase.dataSource
     private val proposalRepository = PostgreSQLProposalRepository(JdbcTemplate(dataSource))
     private val orderCancelledRepository = PostgreSQLOrderCancelledRepository(JdbcTemplate(dataSource))
+    private val dispatchRequests = PostgreSQLDispatchRequestRepository(JdbcTemplate(dataSource))
     private val transactionRunner = SpringTransactionRunner(TransactionTemplate(DataSourceTransactionManager(dataSource)))
     private val proposalApplicationService = ProposalApplicationService(proposalRepository, transactionRunner)
     private val applicationService = OrderCancelledApplicationService(
         orderCancelledRepository,
         proposalRepository,
         proposalApplicationService,
+        dispatchRequests,
         transactionRunner
     )
     private val listener = OrderCancelledListener(applicationService, ObjectMapper())

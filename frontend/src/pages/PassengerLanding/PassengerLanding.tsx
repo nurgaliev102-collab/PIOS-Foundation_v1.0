@@ -32,7 +32,7 @@ import styles from './PassengerLanding.module.css'
 const identityProvider = new BackendIdentityProvider()
 
 const MAX_NAME_LENGTH = 50
-const MIN_PASSWORD_LENGTH = 8
+const MIN_PASSWORD_LENGTH = 10
 
 // Connection reliability audit (2026-09-12): see [bootstrapCircleOfTrust]'s
 // own KDoc for why retrying is safe. One initial attempt plus two retries;
@@ -105,6 +105,7 @@ export function PassengerLanding() {
   const [password, setPassword] = useState('')
   const [authError, setAuthError] = useState<string | null>(null)
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
+  const [guestSessionStatus, setGuestSessionStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
   const [addStatus, setAddStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
   // P1 UX audit (2026-09-12): see [handleSessionExpiredError]'s own KDoc.
   const [sessionExpired, setSessionExpired] = useState(false)
@@ -275,6 +276,20 @@ export function PassengerLanding() {
 
   function handleContinue() {
     setStep('auth')
+  }
+
+  async function handleGuestOrder() {
+    if (guestSessionStatus === 'submitting') {
+      return
+    }
+    setGuestSessionStatus('submitting')
+    try {
+      const guest = await identityProvider.createGuest()
+      setIdentity(guest)
+      navigate(`/i/${driverCode ?? ''}/request`)
+    } catch {
+      setGuestSessionStatus('error')
+    }
   }
 
   function handleFieldChange(setter: (value: string) => void) {
@@ -556,8 +571,17 @@ export function PassengerLanding() {
                 Section 5: reachable without scrolling past two full
                 explanatory sections first, unchanged action/handler. */}
             <div className={styles.actionRow}>
-              <Button label="Начать" variant="primary" onClick={handleContinue} />
+              <Button
+                label="Заказать без регистрации"
+                variant="primary"
+                loading={guestSessionStatus === 'submitting'}
+                onClick={() => void handleGuestOrder()}
+              />
+              <Button label="Начать" variant="secondary" onClick={handleContinue} />
             </div>
+            {guestSessionStatus === 'error' && (
+              <StatusMessage tone="error">Не удалось начать. Проверьте связь и попробуйте ещё раз.</StatusMessage>
+            )}
 
             <Card>
               <h2 className={styles.stepsTitle}>Как работает PIOS</h2>

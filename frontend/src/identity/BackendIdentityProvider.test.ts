@@ -131,4 +131,60 @@ describe('BackendIdentityProvider.network path selection', () => {
     const headers = (init.headers ?? {}) as Record<string, string>
     expect(headers['Content-Type']).toBe('application/json')
   })
+
+  it('creates and persists a guest session through the same-origin guest endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          identityId: 'guest-1',
+          driverId: null,
+          token: 'guest-token',
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          guest: true,
+        }),
+        { status: 201 }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await new BackendIdentityProvider().createGuest()
+
+    expect(result.guest).toBe(true)
+    expect(fetchMock.mock.calls[0][0]).toBe('/v1/identities/guest')
+    expect(new BackendIdentityProvider().getStoredIdentity()?.identityId).toBe('guest-1')
+  })
+
+  it('upgrades the current guest in place and replaces its token', async () => {
+    localStorage.setItem(
+      'pios.identity',
+      JSON.stringify({
+        identityId: 'guest-1',
+        driverId: null,
+        token: 'guest-token',
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        guest: true,
+      })
+    )
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          identityId: 'guest-1',
+          driverId: null,
+          token: 'registered-token',
+          expiresAt: new Date(Date.now() + 120_000).toISOString(),
+          guest: false,
+        }),
+        { status: 200 }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await new BackendIdentityProvider().upgradeGuest('+79991234567', 'password123')
+
+    expect(result.identityId).toBe('guest-1')
+    expect(result.guest).toBe(false)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/v1/identities/me/register')
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer guest-token')
+  })
 })

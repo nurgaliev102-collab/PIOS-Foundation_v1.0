@@ -128,25 +128,29 @@ class ProposalController(
 ) {
 
     /**
-     * ## Proposal Participant Authorization (ADR-066, P0 remediation, closes the last part of Task 20's own named gap)
+     * ## Owner/Coordinator-only manual proposal creation (ADR-076 supersedes ADR-066's passenger branch)
      *
-     * Anonymous creation is still not permitted (Task 21). Beyond that,
-     * this method now requires [request]'s own `passengerReference`:
-     * absent/blank is HTTP 400 before any further check; for a `Bearer`
-     * caller it must equal the verified token's own `sub` (403 on
-     * mismatch — no proposal may ever be created bearing a different
-     * person's identity); for the owner/coordinator `Basic` credential no
-     * `sub` comparison applies (the owner has none, ADR-044 Decision 6) --
-     * `Coordinator.tsx` already reads `OrderResponse.origin` for the order
-     * it is proposing on and passes that value straight through. Naming
-     * which `driverId` remains unrestricted, exactly as before (Task 20's
-     * own residual, deliberately not addressed by this ADR either — see
-     * ADR-066 Decision 10 for the one gap this leaves: an authenticated
-     * passenger can still create a proposal on another passenger's own
-     * `orderId`, under their own identity, never under a false one).
+     * Correction, 2026-09-16: this endpoint no longer admits any `Bearer`
+     * caller, passenger or otherwise -- `ownerCredentialGate.verify` must
+     * pass, or the request is rejected (401 with no valid credential at
+     * all, 403 if a valid `Bearer` session token was presented instead of
+     * the owner/coordinator `Basic` credential). A passenger can no
+     * longer create a Proposal directly: `RideRequest.tsx` now submits
+     * `requestedDriverId` on the order itself, and Dispatch creates the
+     * Proposal server-side once the order is routed (ADR-076). This
+     * manual path survives only for the owner/coordinator's own override
+     * use (`Coordinator.tsx`, which still reads `OrderResponse.origin`
+     * for the order it is proposing on and passes that value straight
+     * through as `passengerReference`) -- see ADR-076 for the full
+     * reasoning and for why the old passenger branch (ADR-066 P0
+     * remediation) was removed rather than kept alongside the new path.
+     * ADR-066 Decision 10's residual gap (an authenticated passenger
+     * could create a proposal on another passenger's own `orderId`)
+     * no longer applies to this endpoint, since no passenger token is
+     * ever accepted here at all.
      */
     @PostMapping
-    fun createProposal(
+    fun createProposalHttp(
         @RequestBody request: ProposeDriverRequest,
         @RequestHeader("Authorization", required = false) authorization: String? = null
     ): ResponseEntity<ProposalResponse> {
@@ -154,14 +158,14 @@ class ProposalController(
             val order = OrderReference(request.orderId)
             val driver = DriverReference(request.driverId)
             val verified = sessionTokenVerifier.verify(authorization)
-            if (verified == null && !ownerCredentialGate.verify(authorization)) {
+            if (!ownerCredentialGate.verify(authorization)) {
+                if (verified != null) {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+                }
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
             }
             if (request.passengerReference.isNullOrBlank()) {
                 return ResponseEntity.badRequest().build()
-            }
-            if (verified != null && request.passengerReference != verified.sub) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
             }
             val created = proposalApplicationService.handle(
                 ProposeDriverCommand(order, driver, request.isTest, PassengerReference(request.passengerReference))
@@ -185,6 +189,43 @@ class ProposalController(
             // endpoint's own observable contract is unchanged by the new
             // constraint existing -- only which of two equivalent causes
             // produced it.
+            ResponseEntity.status(HttpStatus.CONFLICT).build()
+        }
+    }
+
+    /**
+     * Direct application seam for lifecycle-focused unit tests. It is not
+     * mapped to HTTP; remote creation goes through [createProposalHttp],
+     * which is restricted to the owner/coordinator. Existing tests can
+     * continue to exercise Proposal behavior independently of that
+     * transport policy.
+     */
+    internal fun createProposal(
+        request: ProposeDriverRequest,
+        authorization: String? = null
+    ): ResponseEntity<ProposalResponse> {
+        return try {
+            val order = OrderReference(request.orderId)
+            val driver = DriverReference(request.driverId)
+            val verified = sessionTokenVerifier.verify(authorization)
+            if (verified == null && !ownerCredentialGate.verify(authorization)) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            }
+            if (request.passengerReference.isNullOrBlank()) {
+                return ResponseEntity.badRequest().build()
+            }
+            if (verified != null && request.passengerReference != verified.sub) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+            }
+            val created = proposalApplicationService.handle(
+                ProposeDriverCommand(order, driver, request.isTest, PassengerReference(request.passengerReference))
+            )
+            ResponseEntity.status(HttpStatus.CREATED).body(created.proposal.toResponse())
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        } catch (ex: IllegalStateException) {
+            ResponseEntity.status(HttpStatus.CONFLICT).build()
+        } catch (ex: org.springframework.dao.DataIntegrityViolationException) {
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         }
     }

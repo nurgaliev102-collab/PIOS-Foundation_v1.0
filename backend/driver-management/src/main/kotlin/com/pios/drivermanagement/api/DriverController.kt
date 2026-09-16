@@ -136,21 +136,42 @@ class DriverController(
     private val updateVehicleApplicationService: UpdateVehicleApplicationService,
     private val updateLongDistancePreferenceApplicationService: UpdateLongDistancePreferenceApplicationService,
     private val sessionTokenVerifier: SessionTokenVerifier,
+    private val ownerCredentialGate: OwnerCredentialGate,
     private val driverRepository: DriverRepository
 ) {
 
+    /** Direct application seam retained for focused unit tests; it is not an HTTP endpoint. */
+    internal fun createDriver(request: CreateDriverRequest): ResponseEntity<DriverResponse> = persistDriver(request)
+
     @PostMapping
-    fun createDriver(@RequestBody request: CreateDriverRequest): ResponseEntity<DriverResponse> =
-        try {
-            val driver = createDriverApplicationService.handle(
-                CreateDriverCommand(DriverId(request.driverId), request.displayName, request.isTest, request.invitedByDriverId)
-            )
-            ResponseEntity.status(HttpStatus.CREATED).body(driver.toResponse())
-        } catch (ex: DriverAlreadyExistsException) {
-            ResponseEntity.status(HttpStatus.CONFLICT).build()
+    fun createDriver(
+        @RequestBody request: CreateDriverRequest,
+        @RequestHeader("Authorization", required = false) authorization: String?
+    ): ResponseEntity<DriverResponse> {
+        return try {
+            val ownerRequest = authorization?.startsWith("Basic ") == true
+            if (ownerRequest) {
+                if (!ownerCredentialGate.verify(authorization)) {
+                    return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+                }
+            } else {
+                val verified = sessionTokenVerifier.verify(authorization)
+                    ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+                if (verified.guest) {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+                }
+                if (verified.sub != request.driverId || (verified.drv != null && verified.drv != request.driverId)) {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+                }
+                if (request.isTest) {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+                }
+            }
+            persistDriver(request)
         } catch (ex: IllegalArgumentException) {
             ResponseEntity.badRequest().build()
         }
+    }
 
     @GetMapping("/{driverId}")
     fun getDriver(@PathVariable driverId: String): ResponseEntity<DriverResponse> =
@@ -164,8 +185,30 @@ class DriverController(
         }
 
     @GetMapping
-    fun listDrivers(): ResponseEntity<List<DriverResponse>> =
+    fun listDrivers(
+        @RequestHeader("Authorization", required = false) authorization: String?
+    ): ResponseEntity<List<DriverResponse>> =
+        if (ownerCredentialGate.verify(authorization)) {
+            ResponseEntity.ok(retrieveDriverAvailabilityHandler.handleAll().map { it.toResponse() })
+        } else {
+            ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+        }
+
+    /** Direct application seam retained for focused unit tests; it is not an HTTP endpoint. */
+    internal fun listDrivers(): ResponseEntity<List<DriverResponse>> =
         ResponseEntity.ok(retrieveDriverAvailabilityHandler.handleAll().map { it.toResponse() })
+
+    private fun persistDriver(request: CreateDriverRequest): ResponseEntity<DriverResponse> =
+        try {
+            val driver = createDriverApplicationService.handle(
+                CreateDriverCommand(DriverId(request.driverId), request.displayName, request.isTest, request.invitedByDriverId)
+            )
+            ResponseEntity.status(HttpStatus.CREATED).body(driver.toResponse())
+        } catch (ex: DriverAlreadyExistsException) {
+            ResponseEntity.status(HttpStatus.CONFLICT).build()
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        }
 
     @PostMapping("/{driverId}/vehicle")
     fun updateVehicle(

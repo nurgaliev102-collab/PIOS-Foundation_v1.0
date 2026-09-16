@@ -18,26 +18,26 @@ class AssociateDriverApplicationServiceTest {
 
     @Test
     fun `associating a driver updates and persists the identity`() {
-        val identity = createService.handle(CreateIdentityCommand(null))
+        val identity = createService.handle(CreateIdentityCommand("+79991234567"))
         assertNull(identity.driverId)
 
-        val outcome = service.handle(AssociateDriverCommand(identity.id.value, "ILDAR001"))
+        val outcome = service.handle(AssociateDriverCommand(identity.id.value, identity.id.value))
 
-        assertEquals("ILDAR001", outcome.identity.driverId)
-        assertEquals("ILDAR001", repository.findById(identity.id)?.driverId)
+        assertEquals(identity.id.value, outcome.identity.driverId)
+        assertEquals(identity.id.value, repository.findById(identity.id)?.driverId)
     }
 
     @Test
     fun `associating a driver issues a fresh session token carrying the new driverId (ADR-055 Decision 6 addendum)`() {
-        val identity = createService.handle(CreateIdentityCommand(null))
+        val identity = createService.handle(CreateIdentityCommand("+79991234567"))
 
-        val outcome = service.handle(AssociateDriverCommand(identity.id.value, "ILDAR001"))
+        val outcome = service.handle(AssociateDriverCommand(identity.id.value, identity.id.value))
 
         assertNotNull(outcome.token)
         val verifier = SessionTokenVerifier(secretBase64 = secret)
         val verified = assertNotNull(verifier.verify("Bearer ${outcome.token}"))
         assertEquals(identity.id.value, verified.sub)
-        assertEquals("ILDAR001", verified.drv)
+        assertEquals(identity.id.value, verified.drv)
     }
 
     @Test
@@ -49,10 +49,39 @@ class AssociateDriverApplicationServiceTest {
 
     @Test
     fun `associating a blank driver id fails`() {
-        val identity = createService.handle(CreateIdentityCommand(null))
+        val identity = createService.handle(CreateIdentityCommand("+79991234567"))
 
         assertFailsWith<IllegalArgumentException> {
             service.handle(AssociateDriverCommand(identity.id.value, ""))
+        }
+    }
+
+    @Test
+    fun `an identity cannot claim a driver id owned outside its identity boundary`() {
+        val identity = createService.handle(CreateIdentityCommand("+79991234567"))
+
+        assertFailsWith<IllegalArgumentException> {
+            service.handle(AssociateDriverCommand(identity.id.value, "somebody-elses-driver"))
+        }
+        assertNull(repository.findById(identity.id)?.driverId)
+    }
+
+    @Test
+    fun `associating the same driver twice is idempotent`() {
+        val identity = createService.handle(CreateIdentityCommand("+79991234567"))
+        service.handle(AssociateDriverCommand(identity.id.value, identity.id.value))
+
+        val outcome = service.handle(AssociateDriverCommand(identity.id.value, identity.id.value))
+
+        assertEquals(identity.id.value, outcome.identity.driverId)
+    }
+
+    @Test
+    fun `a guest identity cannot be associated with a driver`() {
+        val identity = createService.handle(CreateIdentityCommand(null))
+
+        assertFailsWith<IllegalArgumentException> {
+            service.handle(AssociateDriverCommand(identity.id.value, identity.id.value))
         }
     }
 }

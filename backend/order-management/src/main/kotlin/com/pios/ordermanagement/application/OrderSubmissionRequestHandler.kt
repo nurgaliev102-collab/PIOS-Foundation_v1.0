@@ -2,6 +2,7 @@ package com.pios.ordermanagement.application
 
 import com.pios.ordermanagement.domain.OrderOrigin
 import org.springframework.stereotype.Service
+import java.time.Clock
 import java.time.Instant
 import java.time.format.DateTimeParseException
 
@@ -48,7 +49,8 @@ import java.time.format.DateTimeParseException
  */
 @Service
 class OrderSubmissionRequestHandler(
-    private val orderLifecycleApplicationService: OrderLifecycleApplicationService
+    private val orderLifecycleApplicationService: OrderLifecycleApplicationService,
+    private val clock: Clock = Clock.systemUTC()
 ) {
     fun handle(
         passengerReference: String,
@@ -59,7 +61,8 @@ class OrderSubmissionRequestHandler(
         isTest: Boolean = false,
         explicitDriverIntent: Boolean = false,
         passengerCount: Int? = null,
-        notes: String? = null
+        notes: String? = null,
+        requestedDriverId: String? = null
     ): String {
         val submitted = orderLifecycleApplicationService.submitOrder(
             SubmitOrderCommand(
@@ -71,7 +74,8 @@ class OrderSubmissionRequestHandler(
                 isTest = isTest,
                 explicitDriverIntent = explicitDriverIntent,
                 passengerCount = passengerCount,
-                notes = notes
+                notes = notes,
+                requestedDriverId = requestedDriverId
             )
         )
         return submitted.order.id.value
@@ -87,10 +91,12 @@ class OrderSubmissionRequestHandler(
      */
     private fun parseRequestedPickupAt(requestedPickupAt: String?): Instant? {
         if (requestedPickupAt == null) return null
-        return try {
+        val parsed = try {
             Instant.parse(requestedPickupAt)
         } catch (ex: DateTimeParseException) {
             throw IllegalArgumentException("requestedPickupAt must be a valid ISO-8601 instant", ex)
         }
+        require(parsed.isAfter(clock.instant())) { "requestedPickupAt must be in the future" }
+        return parsed
     }
 }

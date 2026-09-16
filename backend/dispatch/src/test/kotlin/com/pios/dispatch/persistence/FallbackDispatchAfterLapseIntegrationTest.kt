@@ -91,7 +91,7 @@ class FallbackDispatchAfterLapseIntegrationTest {
         val fallbackDriver = DriverReference("driver-fallback-${UUID.randomUUID()}")
 
         primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
         markAvailableSinceFarPast(fallbackDriver)
 
         val primaryProposal = proposalApplicationService.handle(
@@ -124,7 +124,7 @@ class FallbackDispatchAfterLapseIntegrationTest {
         val fallbackProposal = assertNotNull((fallbackOutcome as? com.pios.dispatch.application.FallbackDispatchOutcome.Proposed)?.proposal)
         assertEquals(fallbackDriver, fallbackProposal.driver)
 
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(wouldBeSecondFallback, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(wouldBeSecondFallback, available = true, isTest = false))
         cleanupDriverIds.add(wouldBeSecondFallback.driverId)
 
         lapseApplicationService.lapseStaleProposals(now = Instant.now().plusSeconds(6 * 60))

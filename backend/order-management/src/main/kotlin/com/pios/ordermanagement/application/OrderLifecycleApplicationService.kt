@@ -5,6 +5,7 @@ import com.pios.ordermanagement.domain.Order
 import com.pios.ordermanagement.domain.OrderCancelled
 import com.pios.ordermanagement.domain.OrderCompleted
 import com.pios.ordermanagement.domain.OrderSubmitted
+import com.pios.ordermanagement.domain.OrderUnfulfilled
 import com.pios.ordermanagement.domain.SubmittedOrder
 import org.springframework.stereotype.Service
 import java.util.UUID
@@ -69,7 +70,8 @@ class OrderLifecycleApplicationService(
             command.isTest,
             command.explicitDriverIntent,
             command.passengerCount,
-            command.notes
+            command.notes,
+            command.requestedDriverId
         )
         orderRepository.save(submitted.order)
         outboxRepository.save(outboxRecordFor(submitted.event))
@@ -99,7 +101,7 @@ class OrderLifecycleApplicationService(
      * Order identified by [CompleteOrderCommand.orderId] has been saved.
      */
     fun completeOrder(command: CompleteOrderCommand): OrderCompleted = transactionRunner.run {
-        val order = orderRepository.findById(command.orderId) ?: throw OrderNotFoundException(command.orderId)
+        val order = orderRepository.findByIdForUpdate(command.orderId) ?: throw OrderNotFoundException(command.orderId)
         completeOrder(order, command)
     }
 
@@ -126,8 +128,22 @@ class OrderLifecycleApplicationService(
      * [CancelOrderCommand.orderId] has been saved.
      */
     fun cancelOrder(command: CancelOrderCommand): OrderCancelled = transactionRunner.run {
-        val order = orderRepository.findById(command.orderId) ?: throw OrderNotFoundException(command.orderId)
+        val order = orderRepository.findByIdForUpdate(command.orderId) ?: throw OrderNotFoundException(command.orderId)
         cancelOrder(order, command)
+    }
+
+    fun markUnfulfilled(order: Order): OrderUnfulfilled = transactionRunner.run {
+        val event = order.markUnfulfilled()
+        orderRepository.save(order)
+        outboxRepository.save(
+            OutboxRecord(
+                aggregateId = order.id.value,
+                eventType = "OrderUnfulfilled",
+                routingKey = "order.unfulfilled",
+                payload = envelopeFor("OrderUnfulfilled", order.id.value, event.occurredAt.toString())
+            )
+        )
+        event
     }
 
     /**
@@ -149,13 +165,15 @@ class OrderLifecycleApplicationService(
             mapOf(
                 "eventId" to UUID.randomUUID().toString(),
                 "eventType" to "OrderSubmitted",
-                "eventVersion" to 1,
+                "eventVersion" to 3,
                 "occurredAt" to event.occurredAt.toString(),
                 "payload" to mapOf(
                     "orderId" to event.orderId.value,
                     "passengerReference" to event.origin.reference,
                     "explicitDriverIntent" to event.explicitDriverIntent,
-                    "isTest" to event.isTest
+                    "isTest" to event.isTest,
+                    "requestedDriverId" to event.requestedDriverId,
+                    "requestedPickupAt" to event.requestedPickupAt?.toString()
                 )
             )
         )

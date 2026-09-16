@@ -7,6 +7,7 @@ import com.pios.dispatch.application.AssignmentRepository
 import com.pios.dispatch.application.CompleteAssignmentCommand
 import com.pios.dispatch.application.DispatchAssignmentApplicationService
 import com.pios.dispatch.application.NoOpTripRepository
+import com.pios.dispatch.application.ProposalRepository
 import com.pios.dispatch.application.StartAssignmentCommand
 import com.pios.dispatch.application.TripRepository
 import com.pios.dispatch.domain.Assignment
@@ -150,7 +151,9 @@ class AssignmentController(
     private val dispatchAssignmentApplicationService: DispatchAssignmentApplicationService,
     private val assignmentRepository: AssignmentRepository,
     private val tripRepository: TripRepository = NoOpTripRepository,
-    private val sessionTokenVerifier: SessionTokenVerifier
+    private val sessionTokenVerifier: SessionTokenVerifier,
+    private val ownerCredentialGate: OwnerCredentialGate? = null,
+    private val proposalRepository: ProposalRepository? = null
 ) {
 
     @Deprecated(
@@ -158,7 +161,18 @@ class AssignmentController(
             "(Sprint IMPLEMENTATION-004, ProposalAssignmentOrchestrationService). Retained for manual override; not removed."
     )
     @PostMapping
-    fun assignOrder(@RequestBody request: AssignOrderRequest): ResponseEntity<AssignOrderResponse> =
+    fun assignOrderHttp(
+        @RequestBody request: AssignOrderRequest,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<AssignOrderResponse> {
+        if (ownerCredentialGate?.verify(authorization) != true) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+        }
+        return assignOrder(request)
+    }
+
+    /** Direct application seam for lifecycle tests; not mapped to HTTP. */
+    internal fun assignOrder(request: AssignOrderRequest): ResponseEntity<AssignOrderResponse> =
         try {
             val order = OrderReference(request.orderId)
             val driver = DriverReference(request.driverId)
@@ -173,33 +187,55 @@ class AssignmentController(
         }
 
     @GetMapping
-    fun listAssignments(
+    fun listAssignmentsHttp(
+        @RequestHeader("Authorization", required = false) authorization: String? = null,
         @RequestParam(required = false) orderId: String? = null,
         @RequestParam(required = false) orderIds: String? = null
-    ): ResponseEntity<List<AssignmentResponse>> =
-        try {
-            when {
-                orderId != null && orderIds != null -> ResponseEntity.badRequest().build()
-                orderId != null -> ResponseEntity.ok(
-                    assignmentRepository.findByOrder(OrderReference(orderId))
-                        .map { it.toResponse(tripRepository.findByAssignmentId(it.id)) }
-                )
-                orderIds != null -> {
-                    val idList = orderIds.split(",")
-                    if (idList.isEmpty() || idList.any { it.isBlank() } || idList.size > MAX_ORDER_IDS) {
-                        ResponseEntity.badRequest().build()
-                    } else {
-                        ResponseEntity.ok(
-                            assignmentRepository.findByOrders(idList.map { OrderReference(it) })
-                                .map { it.toResponse(tripRepository.findByAssignmentId(it.id)) }
-                        )
-                    }
-                }
-                else -> ResponseEntity.badRequest().build()
-            }
-        } catch (ex: IllegalArgumentException) {
-            ResponseEntity.badRequest().build()
+    ): ResponseEntity<List<AssignmentResponse>> {
+        if (ownerCredentialGate?.verify(authorization) == true) {
+            return listAssignments(orderId, orderIds)
         }
+        val verified = sessionTokenVerifier.verify(authorization)
+            ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+        val response = listAssignments(orderId, orderIds)
+        if (!response.statusCode.is2xxSuccessful) {
+            return response
+        }
+        val authorized = response.body.orEmpty().filter { assignment ->
+            assignment.driverId == verified.drv ||
+                proposalRepository?.findByOrder(OrderReference(assignment.orderId))
+                    ?.any { it.passengerReference?.passengerId == verified.sub } == true
+        }
+        return ResponseEntity.ok(authorized)
+    }
+
+    /** Direct application seam for repository/lifecycle tests; not mapped to HTTP. */
+    internal fun listAssignments(
+        orderId: String? = null,
+        orderIds: String? = null
+    ): ResponseEntity<List<AssignmentResponse>> = try {
+        when {
+            orderId != null && orderIds != null -> ResponseEntity.badRequest().build()
+            orderId != null -> ResponseEntity.ok(
+                assignmentRepository.findByOrder(OrderReference(orderId))
+                    .map { it.toResponse(tripRepository.findByAssignmentId(it.id)) }
+            )
+            orderIds != null -> {
+                val idList = orderIds.split(",")
+                if (idList.isEmpty() || idList.any { it.isBlank() } || idList.size > MAX_ORDER_IDS) {
+                    ResponseEntity.badRequest().build()
+                } else {
+                    ResponseEntity.ok(
+                        assignmentRepository.findByOrders(idList.map { OrderReference(it) })
+                            .map { it.toResponse(tripRepository.findByAssignmentId(it.id)) }
+                    )
+                }
+            }
+            else -> ResponseEntity.badRequest().build()
+        }
+    } catch (ex: IllegalArgumentException) {
+        ResponseEntity.badRequest().build()
+    }
 
     /**
      * Task 23: requires a `Bearer` session token verifying as the exact

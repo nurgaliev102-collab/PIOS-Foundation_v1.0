@@ -698,6 +698,27 @@ class ProposalControllerTest {
     // --- Task 21: Proposal API Security Remediation ---
 
     @Test
+    fun `HTTP create -- a passenger cannot manufacture a proposal for an arbitrary order`() {
+        val response = controller.createProposalHttp(
+            proposeRequest("order-http-secure", "driver-not-in-any-relationship"),
+            authorization = passengerToken()
+        )
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+        assertTrue(repository.findByOrder(OrderReference("order-http-secure")).isEmpty())
+    }
+
+    @Test
+    fun `HTTP create -- owner coordinator can create a manual proposal`() {
+        val response = controller.createProposalHttp(
+            proposeRequest("order-http-owner", "driver-owner-selected"),
+            authorization = ownerAuth()
+        )
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+    }
+
+    @Test
     fun `create -- anonymous, no Authorization header, is rejected`() {
         val response = controller.createProposal(proposeRequest("order-sec-create-1", "driver-1"))
 
@@ -1162,6 +1183,32 @@ class ProposalControllerTest {
         )
 
         assertEquals(HttpStatus.CREATED, response.statusCode)
+    }
+
+    @Test
+    fun `available test driver cannot receive a real order`() {
+        val fixture = GatedFixture()
+        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-test"), available = true, isTest = true))
+
+        val response = fixture.controller.createProposal(
+            ProposeDriverRequest("order-real", "driver-test", isTest = false, passengerReference = "gated-fixture-passenger"),
+            authorization = fixture.passengerAuthorization()
+        )
+
+        assertEquals(HttpStatus.CONFLICT, response.statusCode)
+    }
+
+    @Test
+    fun `available driver with unknown classification cannot receive a real order`() {
+        val fixture = GatedFixture()
+        fixture.availabilityRepository.upsert(DriverAvailabilityRecord(DriverReference("driver-unknown"), available = true))
+
+        val response = fixture.controller.createProposal(
+            ProposeDriverRequest("order-real", "driver-unknown", isTest = false, passengerReference = "gated-fixture-passenger"),
+            authorization = fixture.passengerAuthorization()
+        )
+
+        assertEquals(HttpStatus.CONFLICT, response.statusCode)
     }
 
     // --- isTest (Owner Control Center test/production data separation, 2026-08-17) ---

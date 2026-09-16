@@ -3,6 +3,9 @@ package com.pios.identity.api
 import com.pios.identity.application.AssociateDriverApplicationService
 import com.pios.identity.application.AssociateDriverCommand
 import com.pios.identity.application.AssociateDriverOutcome
+import com.pios.identity.application.CreateGuestIdentityApplicationService
+import com.pios.identity.application.GuestIdentityOutcome
+import com.pios.identity.application.GuestIdentityRateLimiter
 import com.pios.identity.application.IdentityNotFoundException
 import com.pios.identity.application.LoginApplicationService
 import com.pios.identity.application.LoginCommand
@@ -12,8 +15,11 @@ import com.pios.identity.application.RegisterIdentityApplicationService
 import com.pios.identity.application.RegisterIdentityCommand
 import com.pios.identity.application.RegisterIdentityOutcome
 import com.pios.identity.application.RetrieveIdentityHandler
+import com.pios.identity.application.UpgradeGuestIdentityApplicationService
+import com.pios.identity.application.UpgradeGuestIdentityCommand
 import com.pios.identity.domain.Identity
 import com.pios.identity.domain.IdentityId
+import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -24,6 +30,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import java.net.InetAddress
 
 /**
  * Identity's REST entry points (ADR-038, ADR-039, ADR-055) — Register,
@@ -70,9 +77,41 @@ class IdentityController(
     private val loginApplicationService: LoginApplicationService,
     private val retrieveIdentityHandler: RetrieveIdentityHandler,
     private val associateDriverApplicationService: AssociateDriverApplicationService,
-    private val sessionTokenVerifier: SessionTokenVerifier
+    private val sessionTokenVerifier: SessionTokenVerifier,
+    private val createGuestIdentityApplicationService: CreateGuestIdentityApplicationService,
+    private val guestIdentityRateLimiter: GuestIdentityRateLimiter,
+    private val upgradeGuestIdentityApplicationService: UpgradeGuestIdentityApplicationService
 ) {
     private val logger = LoggerFactory.getLogger(IdentityController::class.java)
+
+    @PostMapping("/guest")
+    fun createGuest(
+        request: HttpServletRequest,
+        @RequestHeader("X-PIOS-Client-IP", required = false) proxiedClientIp: String?
+    ): ResponseEntity<AuthResponse> = createGuestFromAddress(request.remoteAddr, proxiedClientIp)
+
+    /** Transport-independent seam for the socket/proxy trust decision. */
+    internal fun createGuestFromAddress(remoteAddress: String, proxiedClientIp: String?): ResponseEntity<AuthResponse> {
+        // A public client can supply CF-Connecting-IP or X-Forwarded-For itself.
+        // Only the same-host frontend proxy may override the socket address,
+        // and that proxy replaces X-PIOS-Client-IP instead of forwarding it.
+        val clientKey = if (isLoopbackAddress(remoteAddress)) {
+            proxiedClientIp?.takeIf(::isLiteralIpAddress) ?: remoteAddress
+        } else {
+            remoteAddress
+        }
+        if (!guestIdentityRateLimiter.tryAcquire(clientKey)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build()
+        }
+        return ResponseEntity.status(HttpStatus.CREATED).body(createGuestIdentityApplicationService.handle().toResponse())
+    }
+
+    private fun isLiteralIpAddress(value: String): Boolean =
+        value.length in 2..45 && value.matches(Regex("[0-9A-Fa-f:.]+")) &&
+            runCatching { InetAddress.getByName(value) }.isSuccess
+
+    private fun isLoopbackAddress(value: String): Boolean =
+        isLiteralIpAddress(value) && InetAddress.getByName(value).isLoopbackAddress
 
     /**
      * Observability fix (`docs/PIOS_PATH_TO_PUBLIC_LAUNCH.md` Part B6,
@@ -108,6 +147,33 @@ class IdentityController(
             )
             LoginOutcome.Failure -> ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
         }
+
+    @PostMapping("/me/register")
+    fun upgradeGuest(
+        @RequestBody request: RegisterIdentityRequest,
+        @RequestHeader("Authorization", required = false) authorization: String?
+    ): ResponseEntity<AuthResponse> {
+        val verified = sessionTokenVerifier.verify(authorization)
+            ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+        if (!verified.guest) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).build()
+        }
+        return try {
+            ResponseEntity.ok(
+                upgradeGuestIdentityApplicationService.handle(
+                    UpgradeGuestIdentityCommand(verified.sub, request.phone, request.password)
+                ).toResponse()
+            )
+        } catch (ex: PhoneAlreadyRegisteredException) {
+            ResponseEntity.status(HttpStatus.CONFLICT).build()
+        } catch (ex: IdentityNotFoundException) {
+            ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        } catch (ex: IllegalStateException) {
+            ResponseEntity.status(HttpStatus.CONFLICT).build()
+        }
+    }
 
     @GetMapping("/me")
     fun getOwnIdentity(
@@ -156,6 +222,9 @@ class IdentityController(
         if (verified.sub != id) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
         }
+        if (verified.guest) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+        }
         return try {
             val outcome = associateDriverApplicationService.handle(AssociateDriverCommand(id, request.driverId))
             ResponseEntity.ok(outcome.toResponse())
@@ -173,4 +242,7 @@ class IdentityController(
 
     private fun AssociateDriverOutcome.toResponse() =
         AuthResponse(identity.id.value, identity.driverId, token, expiresAt.toString())
+
+    private fun GuestIdentityOutcome.toResponse() =
+        AuthResponse(identity.id.value, identity.driverId, token, expiresAt.toString(), guest = true)
 }

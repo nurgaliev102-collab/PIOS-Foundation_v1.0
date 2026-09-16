@@ -1,5 +1,7 @@
 # ADR-055: Session Authentication — Password Credential and Signed Session Token
 
+> **Amendment pointer (2026-09-16), added per `ADR-015`.** `ADR-075` (Guest-First Passenger Identity) **narrows Decision 3's removal of credential-less identity creation**. A credential-less identity may again be created, through `POST /v1/identities/guest`, bounded by a per-client creation limiter. Decision 3's stated reason for the removal — *"leaving it would let anyone mint a credential-less identity and attach a driver reference to it"* — is answered directly instead of by the endpoint's absence: a token carrying the new `gst` claim is refused **403** by both `DriverController` (driver creation) and `IdentityController.associateDriver` (driver association). The `gst` claim is additive to this ADR's token payload; a token minted before it reads as `false`, and modules that do not parse it are unaffected. Nothing else in this ADR — the HMAC scheme, the shared secret, the stateless no-revocation model, the 30-day TTL for registered identities — is changed. Guest tokens use a separate, shorter TTL (`pios.session.guest-ttl-seconds`, default 7 days).
+
 ## Status
 
 Proposed. This is the "future ADR" ADR-038 Consequences line 52 requires *before `identity` gains a second real capability*, and the "authorization model" ADR-054 Evolution Path item 5 names for its own Part 6 limitation. Both gates are used here deliberately; neither was bypassed.

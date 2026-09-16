@@ -41,7 +41,9 @@ class RegisterIdentityApplicationService(
     private val transactionRunner: TransactionRunner = NoOpTransactionRunner
 ) {
     fun handle(command: RegisterIdentityCommand): RegisterIdentityOutcome = transactionRunner.run {
-        require(command.password.isNotBlank()) { "password must not be blank" }
+        require(command.password.length in MIN_PASSWORD_LENGTH..MAX_PASSWORD_LENGTH) {
+            "password must contain between $MIN_PASSWORD_LENGTH and $MAX_PASSWORD_LENGTH characters"
+        }
         val phone = Phone(command.phone)
         if (identityRepository.findByPhone(phone) != null) {
             throw PhoneAlreadyRegisteredException(phone)
@@ -68,5 +70,10 @@ class RegisterIdentityApplicationService(
 
         val issued = sessionTokenIssuer.issue(identity.id.value, identity.driverId)
         RegisterIdentityOutcome(identity, issued.token, issued.expiresAt)
+    }
+
+    companion object {
+        const val MIN_PASSWORD_LENGTH = 10
+        const val MAX_PASSWORD_LENGTH = 128
     }
 }

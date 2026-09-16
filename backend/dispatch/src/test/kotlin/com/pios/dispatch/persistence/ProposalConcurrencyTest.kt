@@ -79,7 +79,7 @@ class ProposalConcurrencyTest {
         val passenger = PassengerReference("concurrency-passenger-${UUID.randomUUID()}")
         val primaryDriver = DriverReference("concurrency-driver-${UUID.randomUUID()}")
         primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
 
         val outcomes = Collections.synchronizedList(mutableListOf<FirstRefusalOutcome>())
 
@@ -109,8 +109,8 @@ class ProposalConcurrencyTest {
         val primaryDriver = DriverReference("concurrency-primary-${UUID.randomUUID()}")
         val explicitDriver = DriverReference("concurrency-explicit-${UUID.randomUUID()}")
         primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(explicitDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(explicitDriver, available = true, isTest = false))
 
         var automaticOutcome: FirstRefusalOutcome? = null
         var explicitFailed = false
@@ -157,8 +157,8 @@ class ProposalConcurrencyTest {
         val primaryDriver = DriverReference("concurrency-primary-${UUID.randomUUID()}")
         val explicitDriver = DriverReference("concurrency-explicit-${UUID.randomUUID()}")
         primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, primaryDriver))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(explicitDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(explicitDriver, available = true, isTest = false))
 
         var automaticOutcome: FirstRefusalOutcome? = null
 
@@ -182,8 +182,8 @@ class ProposalConcurrencyTest {
         val order = OrderReference("lifecycle-order-${UUID.randomUUID()}")
         val firstDriver = DriverReference("lifecycle-driver-1-${UUID.randomUUID()}")
         val secondDriver = DriverReference("lifecycle-driver-2-${UUID.randomUUID()}")
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(firstDriver, available = true))
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(secondDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(firstDriver, available = true, isTest = false))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(secondDriver, available = true, isTest = false))
 
         val created = proposalApplicationService.handle(ProposeDriverCommand(order, firstDriver))
         proposalApplicationService.declineProposal(DeclineProposalCommand(created.proposal.id))

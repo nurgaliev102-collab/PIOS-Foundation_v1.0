@@ -66,7 +66,7 @@ class AssignmentCompletedApplicationService(
         val isNewEvent = assignmentCompletedRepository.markProcessed(command.eventId)
         if (isNewEvent) {
             val orderId = OrderId(command.orderReference)
-            val order = orderRepository.findById(orderId) ?: throw OrderNotFoundException(orderId)
+            val order = orderRepository.findByIdForUpdate(orderId) ?: throw OrderNotFoundException(orderId)
             if (order.status == OrderStatus.SUBMITTED) {
                 orderLifecycleApplicationService.completeOrder(order, CompleteOrderCommand(order.id))
             } else {

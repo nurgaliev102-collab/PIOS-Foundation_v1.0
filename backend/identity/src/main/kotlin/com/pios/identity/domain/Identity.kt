@@ -43,4 +43,6 @@ class Identity(
      * does not need to reach into this class's private state to change it.
      */
     fun withDriverId(driverId: String): Identity = Identity(id, phone, driverId, createdAt)
+
+    fun withPhone(phone: Phone): Identity = Identity(id, phone, driverId, createdAt)
 }

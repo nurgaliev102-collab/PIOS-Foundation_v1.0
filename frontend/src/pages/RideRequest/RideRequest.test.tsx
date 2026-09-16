@@ -165,9 +165,35 @@ describe('RideRequest', () => {
 
     expect(await screen.findByText('Недоступен')).toBeInTheDocument()
     expect(screen.getByText(/Вы можете заказать поездку заранее/)).toBeInTheDocument()
-    // Not gated, unlike the circle-of-trust step's own per-driver choice --
-    // this screen has no alternative driver to offer instead.
+    // Advance booking stays possible, but immediate pickup is disabled.
     expect(screen.getByRole('button', { name: 'Заказать поездку' })).toBeEnabled()
+    await waitFor(() => expect(screen.getByLabelText('Когда')).toHaveValue('later'))
+    expect(screen.getByRole('option', { name: 'Сейчас' })).toBeDisabled()
+  })
+
+  it('submits an advance request for an off-line selected driver without browser-side proposal creation', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'UNAVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+    renderAt('driver-1')
+
+    await waitFor(() => expect(screen.getByLabelText('Когда')).toHaveValue('later'))
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Аэропорт')
+    fireEvent.change(screen.getByLabelText('Дата и время подачи'), { target: { value: '2099-08-25T06:30' } })
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-advance' })
+    mockedRequest.mockResolvedValue([])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
+    const submitCall = mockedRequest.mock.calls.find(([path, options]) =>
+      path === '/v1/orders' && (options as RequestInit | undefined)?.method === 'POST')
+    const body = JSON.parse((submitCall?.[1] as RequestInit).body as string)
+    expect(body.requestedDriverId).toBe('driver-1')
+    expect(body.requestedPickupAt).toBe(new Date('2099-08-25T06:30').toISOString())
+    expect(mockedRequest.mock.calls.some(([path, options]) =>
+      path === '/v1/proposals' && (options as RequestInit | undefined)?.method === 'POST')).toBe(false)
   })
 
   it('shows the driver as available on the order form, with no scheduling hint', async () => {
@@ -196,7 +222,6 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-explicit' }) // POST /v1/orders
-    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
     mockedRequest.mockResolvedValue([{ status: 'OPEN' }]) // status poll, from here on
 
     await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
@@ -207,6 +232,27 @@ describe('RideRequest', () => {
     expect(submitCall).toBeDefined()
     const body = JSON.parse((submitCall?.[1] as RequestInit).body as string)
     expect(body.explicitDriverIntent).toBe(true)
+    expect(body.requestedDriverId).toBe('driver-1')
+  })
+
+  it('does not claim the driver received a direct order when Dispatch has no proposal', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Аэропорт')
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-unoffered' })
+    mockedRequest.mockResolvedValue([])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText(/Ищем возможность передать заказ выбранному водителю/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Повторить' })).not.toBeInTheDocument()
+    expect(mockedRequest.mock.calls.some(([path, options]) =>
+      path === '/v1/proposals' && (options as RequestInit | undefined)?.method === 'POST')).toBe(false)
   })
 
   // --- Passenger count (PIOS Group and Long-Distance Rides Roadmap, Stage 2) ---
@@ -224,7 +270,6 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Сколько пассажиров (необязательно)'), '4')
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-group' }) // POST /v1/orders
-    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
     mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
 
     await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
@@ -248,7 +293,6 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-solo' }) // POST /v1/orders
-    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
     mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
 
     await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
@@ -293,7 +337,6 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Пожелания к поездке'), 'Детское кресло, встретить у подъезда')
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-notes' }) // POST /v1/orders
-    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
     mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
 
     await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
@@ -317,7 +360,6 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-no-notes' }) // POST /v1/orders
-    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
     mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
 
     await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
@@ -350,7 +392,6 @@ describe('RideRequest', () => {
     fireEvent.change(notesField, { target: { value: tooLong } })
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-notes-long' }) // POST /v1/orders
-    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
     mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
 
     await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
@@ -376,7 +417,6 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-provenance' }) // POST /v1/orders
-    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
     mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
 
     await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
@@ -391,7 +431,7 @@ describe('RideRequest', () => {
 
   // --- Proposal API security (Task 21: Proposal API Security Remediation) ---
 
-  it('sends this passenger\'s own Bearer token on POST /v1/proposals, since that endpoint now requires authentication', async () => {
+  it('does not let the browser create a proposal directly', async () => {
     mockMeResponse()
     mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
     mockedRequest.mockResolvedValueOnce([])
@@ -403,7 +443,6 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-auth' }) // POST /v1/orders
-    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
     mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
 
     await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
@@ -411,14 +450,12 @@ describe('RideRequest', () => {
     expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
 
     const proposalCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/proposals')
-    expect(proposalCall).toBeDefined()
-    const headers = (proposalCall?.[1] as RequestInit).headers as Record<string, string>
-    expect(headers.Authorization).toBe(`Bearer ${TEST_IDENTITY.token}`)
+    expect(proposalCall).toBeUndefined()
   })
 
   // --- Proposal Participant Authorization (ADR-066, P0 remediation) ---
 
-  it('sends passengerReference matching this passenger\'s own identity on POST /v1/proposals', async () => {
+  it('carries the chosen driver inside the authenticated order submission', async () => {
     mockMeResponse()
     mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
     mockedRequest.mockResolvedValueOnce([])
@@ -430,16 +467,16 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-passenger-ref' }) // POST /v1/orders
-    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
     mockedRequest.mockResolvedValue([{ status: 'OPEN' }])
 
     await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
 
     expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
 
-    const proposalCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/proposals')
-    const body = JSON.parse((proposalCall?.[1] as RequestInit).body as string)
+    const submitCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/orders')
+    const body = JSON.parse((submitCall?.[1] as RequestInit).body as string)
     expect(body.passengerReference).toBe(TEST_IDENTITY.identityId)
+    expect(body.requestedDriverId).toBe('driver-1')
   })
 
   // --- Cancellation (P0-2 Tier 1, docs/SPRINT_PILOT_BLOCKERS.md; ADR-053) ---
@@ -537,10 +574,9 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
 
     await userEvent.selectOptions(screen.getByLabelText('Когда'), 'later')
-    fireEvent.change(screen.getByLabelText('Дата и время подачи'), { target: { value: '2026-08-25T06:30' } })
+    fireEvent.change(screen.getByLabelText('Дата и время подачи'), { target: { value: '2099-08-25T06:30' } })
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-scheduled' }) // POST /v1/orders
-    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
     mockedRequest.mockResolvedValue([{ status: 'OPEN' }]) // status poll, from here on
 
     await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
@@ -550,7 +586,7 @@ describe('RideRequest', () => {
     const submitCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/orders')
     expect(submitCall).toBeDefined()
     const body = JSON.parse((submitCall?.[1] as RequestInit).body as string)
-    expect(body.requestedPickupAt).toBe(new Date('2026-08-25T06:30').toISOString())
+    expect(body.requestedPickupAt).toBe(new Date('2099-08-25T06:30').toISOString())
   })
 
   it('requires a date and time when "Заранее" is chosen', async () => {
@@ -696,7 +732,6 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-1' }) // POST /v1/orders
-    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
     mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }]) // status poll
     mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }]) // GET /v1/assignments?orderId=order-1
 
@@ -718,7 +753,6 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-1' }) // POST /v1/orders
-    mockedRequest.mockResolvedValueOnce({}) // POST /v1/proposals
     mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }]) // status poll
     mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }]) // GET /v1/assignments?orderId=order-1
 
@@ -745,7 +779,6 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-1' })
-    mockedRequest.mockResolvedValueOnce({})
     mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
     mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }])
 
@@ -767,7 +800,6 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-1' })
-    mockedRequest.mockResolvedValueOnce({})
     mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
     mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }])
 
@@ -807,7 +839,6 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-1' })
-    mockedRequest.mockResolvedValueOnce({})
     mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
     mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }])
 
@@ -840,7 +871,6 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-1' })
-    mockedRequest.mockResolvedValueOnce({})
     mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
     mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }])
 
@@ -1047,7 +1077,7 @@ describe('RideRequest', () => {
 
     renderAt('driver-1')
 
-    await screen.findByText(/Ждём ответа водителя/)
+    await screen.findByText(/Ищем возможность передать заказ выбранному водителю/)
     expect(screen.queryByText('Сессия истекла. Войдите снова.')).not.toBeInTheDocument()
   })
 
@@ -1107,7 +1137,6 @@ describe('RideRequest', () => {
     await userEvent.type(screen.getByLabelText('Куда'), 'Новый адрес назначения')
 
     mockedRequest.mockResolvedValueOnce({ orderId: 'order-new' })
-    mockedRequest.mockResolvedValueOnce({}) // attemptProposal's own POST /v1/proposals
     mockedRequest.mockResolvedValue([{ status: 'OPEN' }]) // the new order's own status poll, from here on
 
     await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
@@ -1300,8 +1329,8 @@ describe('RideRequest', () => {
     renderAt('driver-1')
     await screen.findByRole('heading', { name: 'Кому доверить эту поездку?' })
 
-    expect(screen.getByText('Сейчас недоступен. Вот кому ещё вы доверяете:')).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: 'Вызвать' })[0]).toBeDisabled()
+    expect(screen.getByText('Сейчас не на линии. Можно предложить ему поездку на другое время.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Заказать заранее' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Выбрать' })).not.toBeDisabled()
   })
 
@@ -1372,13 +1401,46 @@ describe('RideRequest (driverless discovery entry, ADR-070)', () => {
     expect(mockedRequest).toHaveBeenCalledTimes(1)
   })
 
-  it('shows an honest "please sign in" message with no session, instead of a broken redirect', async () => {
+  it('lets a new passenger start the order flow as a guest without registration', async () => {
     localStorage.clear()
 
     renderAtDiscovery()
 
-    expect(await screen.findByText('Чтобы отправить заказ, войдите в аккаунт.')).toBeInTheDocument()
+    const continueButton = await screen.findByRole('button', { name: 'Продолжить без регистрации' })
     expect(mockedRequest).not.toHaveBeenCalled()
+
+    mockedRequest.mockResolvedValueOnce({
+      identityId: 'guest-1',
+      driverId: null,
+      token: 'guest-token',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      guest: true,
+    })
+    await userEvent.click(continueButton)
+
+    expect(await screen.findByLabelText('Откуда')).toBeInTheDocument()
+    const guestCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/identities/guest')
+    expect(guestCall).toBeDefined()
+    expect((guestCall?.[1] as RequestInit).method).toBe('POST')
+    expect(JSON.parse(localStorage.getItem('pios.identity') ?? '{}').guest).toBe(true)
+  })
+
+  it('rejects a pickup time that is already in the past', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Аэропорт')
+    await userEvent.selectOptions(screen.getByLabelText('Когда'), 'later')
+    fireEvent.change(screen.getByLabelText('Дата и время подачи'), { target: { value: '2000-01-01T00:00' } })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(screen.getByText('Выберите время в будущем.')).toBeInTheDocument()
+    expect(mockedRequest.mock.calls.some(([path]) => path === '/v1/orders')).toBe(false)
   })
 
   it('submits with explicitDriverIntent omitted (defaults to false) and never calls POST /v1/proposals', async () => {
@@ -1421,12 +1483,30 @@ describe('RideRequest (driverless discovery entry, ADR-070)', () => {
 
     expect(
       await screen.findByText(
-        'Сейчас нет доступного водителя. Если кто-то станет доступен, пока вы на этом экране, вы увидите предложение здесь — либо попробуйте отправить заказ ещё раз позже.',
+        'Ищем доступного водителя. Если предложение не появится в течение двух минут, заказ закроется автоматически.',
       )
     ).toBeInTheDocument()
     // Never the driver-linked path's own "waiting for a response" wording --
     // that would misstate the fact that no driver has even been matched yet.
     expect(screen.queryByText(/Ждём ответа водителя/)).not.toBeInTheDocument()
+  })
+
+  it('shows the terminal unfulfilled state from Order Management when the retry window expires', async () => {
+    mockMeResponse()
+    renderAtDiscovery()
+    await userEvent.type(await screen.findByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Аэропорт')
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-no-offer' })
+    mockedRequest.mockResolvedValueOnce([]) // proposal poll
+    mockedRequest.mockResolvedValueOnce([
+      { id: 'order-no-offer', status: 'UNFULFILLED', requestedPickupAt: null },
+    ]) // authenticated order-status poll
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('Не удалось найти водителя. Заказ закрыт, поездка не подтверждена.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Отменить заказ' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Создать новый заказ' })).toBeInTheDocument()
   })
 
   it('shows the real matched driver once Fallback Dispatch creates a Proposal, reusing the existing driver display', async () => {

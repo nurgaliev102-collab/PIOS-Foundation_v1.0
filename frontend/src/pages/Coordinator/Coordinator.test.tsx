@@ -75,7 +75,7 @@ describe('Coordinator', () => {
 
     const driversCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/drivers')
     expect(driversCall).toBeDefined()
-    expect((driversCall?.[1] as RequestInit | undefined)?.headers).toBeUndefined()
+    expect((driversCall?.[1] as RequestInit).headers).toMatchObject({ Authorization: EXPECTED_BASIC_HEADER })
 
     const ordersCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/orders')
     expect(ordersCall).toBeDefined()

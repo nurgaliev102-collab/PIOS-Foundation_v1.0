@@ -238,14 +238,14 @@ class OrderSubmissionControllerTest {
     @Test
     fun `a request with a requested pickup instant persists it`() {
         val response = controller.submitOrder(
-            SubmitOrderRequest("passenger-scheduled", requestedPickupAt = "2026-08-25T06:30:00Z"),
+            SubmitOrderRequest("passenger-scheduled", requestedPickupAt = "2099-08-25T06:30:00Z"),
             authorization = passengerToken("passenger-scheduled")
         )
 
         assertEquals(HttpStatus.CREATED, response.statusCode)
         val orderId = assertNotNull(response.body).orderId
         assertEquals(
-            java.time.Instant.parse("2026-08-25T06:30:00Z"),
+            java.time.Instant.parse("2099-08-25T06:30:00Z"),
             repository.findById(OrderId(orderId))?.requestedPickupAt
         )
     }
@@ -270,6 +270,17 @@ class OrderSubmissionControllerTest {
         )
 
         assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
+    @Test
+    fun `a requested pickup instant in the past returns 400 without saving an order`() {
+        val response = controller.submitOrder(
+            SubmitOrderRequest("passenger-past-schedule", requestedPickupAt = "2000-01-01T00:00:00Z"),
+            authorization = passengerToken("passenger-past-schedule")
+        )
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+        assertEquals(null, response.body)
     }
 
     // --- isTest (Owner Control Center test/production data separation, 2026-08-17) ---

@@ -1,6 +1,7 @@
 package com.pios.dispatch.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.pios.dispatch.application.DispatchRequestApplicationService
 import com.pios.dispatch.application.DriverAvailabilityRecord
 import com.pios.dispatch.application.FallbackDispatchApplicationService
 import com.pios.dispatch.application.FirstRefusalApplicationService
@@ -117,10 +118,16 @@ class ChannelOneDiscoveryRealOrderSubmissionIntegrationTest {
     private val proposalRepository = PostgreSQLProposalRepository(JdbcTemplate(dataSource))
     private val driverAvailabilityRepository = PostgreSQLDriverAvailabilityRepository(JdbcTemplate(dataSource))
     private val primaryDriverRepository = PostgreSQLPrimaryDriverRepository(JdbcTemplate(dataSource))
-    private val proposalApplicationService = ProposalApplicationService(proposalRepository, transactionRunner, driverAvailabilityRepository)
+    private val dispatchRequests = PostgreSQLDispatchRequestRepository(JdbcTemplate(dataSource))
+    private val proposalApplicationService = ProposalApplicationService(proposalRepository, transactionRunner, driverAvailabilityRepository, dispatchRequests)
     private val firstRefusalApplicationService = FirstRefusalApplicationService(primaryDriverRepository, proposalApplicationService, driverAvailabilityRepository)
     private val fallbackDispatchApplicationService = FallbackDispatchApplicationService(driverAvailabilityRepository, proposalApplicationService)
-    private val firstRefusalListener = OrderSubmittedFirstRefusalListener(firstRefusalApplicationService, fallbackDispatchApplicationService, ObjectMapper())
+    private val dispatchRequestApplicationService = DispatchRequestApplicationService(
+        dispatchRequests, proposalRepository, proposalApplicationService,
+        firstRefusalApplicationService, fallbackDispatchApplicationService,
+        PostgreSQLOutboxRepository(JdbcTemplate(dataSource)), transactionRunner, ObjectMapper()
+    )
+    private val firstRefusalListener = OrderSubmittedFirstRefusalListener(dispatchRequestApplicationService, ObjectMapper())
     private val firstRefusalHarness = OrderSubmittedFirstRefusalTestListenerHarness(RabbitMQTestConnection.connectionFactory, firstRefusalListener)
 
     @AfterTest
@@ -132,7 +139,7 @@ class ChannelOneDiscoveryRealOrderSubmissionIntegrationTest {
     fun `a real driverless submission, with explicitDriverIntent left at its default, reaches Fallback Dispatch and produces a real Proposal`() {
         val passengerReference = "channel-1-passenger-${UUID.randomUUID()}"
         val strangerDriver = DriverReference("channel-1-stranger-driver-${UUID.randomUUID()}")
-        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(strangerDriver, available = true))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(strangerDriver, available = true, isTest = false))
         // No PrimaryDriverRepository row for [passengerReference] -- no
         // primary. No TrustedDriverRepository is even wired into
         // [fallbackDispatchApplicationService] -- no trusted connection can

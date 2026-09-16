@@ -116,6 +116,25 @@ class RabbitMQConsumerTopologyConfiguration {
             .to(dispatchEventsExchange)
             .with(ASSIGNMENT_COMPLETED_ROUTING_KEY)
 
+    @Bean
+    fun dispatchExhaustedDeadLetterQueue(): Queue =
+        QueueBuilder.durable(DISPATCH_EXHAUSTED_DEAD_LETTER_QUEUE_NAME).build()
+
+    @Bean
+    fun dispatchExhaustedQueue(): Queue =
+        QueueBuilder.durable(DISPATCH_EXHAUSTED_QUEUE_NAME)
+            .withArgument("x-dead-letter-exchange", "")
+            .withArgument("x-dead-letter-routing-key", DISPATCH_EXHAUSTED_DEAD_LETTER_QUEUE_NAME)
+            .build()
+
+    @Bean
+    fun dispatchExhaustedBinding(
+        dispatchExhaustedQueue: Queue,
+        dispatchEventsExchange: TopicExchange
+    ): Binding = BindingBuilder.bind(dispatchExhaustedQueue)
+        .to(dispatchEventsExchange)
+        .with(DISPATCH_EXHAUSTED_ROUTING_KEY)
+
     companion object {
         const val PRODUCER_EXCHANGE_NAME = "dispatch.events"
         const val QUEUE_NAME = "order-management.from-dispatch"
@@ -124,5 +143,8 @@ class RabbitMQConsumerTopologyConfiguration {
         const val ASSIGNMENT_COMPLETED_QUEUE_NAME = "order-management.from-dispatch.assignment-completed"
         const val ASSIGNMENT_COMPLETED_DEAD_LETTER_QUEUE_NAME = "order-management.from-dispatch.assignment-completed.dlq"
         const val ASSIGNMENT_COMPLETED_ROUTING_KEY = "assignment.completed"
+        const val DISPATCH_EXHAUSTED_QUEUE_NAME = "order-management.from-dispatch.exhausted"
+        const val DISPATCH_EXHAUSTED_DEAD_LETTER_QUEUE_NAME = "order-management.from-dispatch.exhausted.dlq"
+        const val DISPATCH_EXHAUSTED_ROUTING_KEY = "dispatch.exhausted"
     }
 }
