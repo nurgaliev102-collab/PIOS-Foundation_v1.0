@@ -206,4 +206,40 @@ class FirstRefusalApplicationServiceTest {
         assertIs<FirstRefusalOutcome.Proposed>(outcome)
         assertEquals(primaryDriver, outcome.proposal.driver)
     }
+
+    // --- excludeDrivers (ADR-078, Dispatch Recovery After Proposal Decline or Lapse, Decision B) ---
+
+    @Test
+    fun `excludeDrivers defaults to empty, so every pre-existing caller keeps proposing an eligible primary driver unchanged`() {
+        primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, primaryDriver))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
+
+        val outcome = service.attempt(order, passenger)
+
+        assertIs<FirstRefusalOutcome.Proposed>(outcome)
+        assertEquals(primaryDriver, outcome.proposal.driver)
+    }
+
+    @Test
+    fun `a primary driver who is a member of excludeDrivers is skipped, never re-offered the same order`() {
+        primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, primaryDriver))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
+
+        val outcome = service.attempt(order, passenger, excludeDrivers = setOf(primaryDriver))
+
+        val ineligible = assertIs<FirstRefusalOutcome.PrimaryDriverIneligible>(outcome)
+        assertEquals(primaryDriver, ineligible.driver)
+        assertEquals(emptyList(), proposalRepository.findByOrder(order))
+    }
+
+    @Test
+    fun `excludeDrivers containing an unrelated driver does not affect an eligible primary driver`() {
+        primaryDriverRepository.upsert(PrimaryDriverRecord(passenger, primaryDriver))
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(primaryDriver, available = true, isTest = false))
+
+        val outcome = service.attempt(order, passenger, excludeDrivers = setOf(DriverReference("driver-unrelated")))
+
+        val proposed = assertIs<FirstRefusalOutcome.Proposed>(outcome)
+        assertEquals(primaryDriver, proposed.proposal.driver)
+    }
 }

@@ -29,6 +29,16 @@ internal class InMemoryDispatchRequestRepository : DispatchRequestRepository {
         records.computeIfPresent(orderId) { _, value -> value.copy(state = DispatchRequestState.CANCELLED) }
     }
 
+    override fun reopenIfOffered(orderId: String, nextAttemptAt: Instant) {
+        records.computeIfPresent(orderId) { _, value ->
+            if (value.state == DispatchRequestState.OFFERED) {
+                value.copy(state = DispatchRequestState.PENDING, nextAttemptAt = nextAttemptAt)
+            } else {
+                value
+            }
+        }
+    }
+
     private fun update(orderId: String, state: DispatchRequestState) {
         records.computeIfPresent(orderId) { _, value -> value.copy(state = state) }
     }

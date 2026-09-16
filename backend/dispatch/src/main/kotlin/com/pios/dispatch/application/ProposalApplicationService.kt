@@ -1,5 +1,6 @@
 package com.pios.dispatch.application
 
+import com.pios.dispatch.domain.OrderReference
 import com.pios.dispatch.domain.Proposal
 import com.pios.dispatch.domain.ProposalAccepted
 import com.pios.dispatch.domain.ProposalCreated
@@ -300,6 +301,7 @@ class ProposalApplicationService(
         }
         val event = proposal.decline()
         proposalRepository.save(proposal)
+        reopenRoutingObligation(event.orderId)
         event
     }
 
@@ -325,6 +327,7 @@ class ProposalApplicationService(
         }
         val event = proposal.lapse()
         proposalRepository.save(proposal)
+        reopenRoutingObligation(event.orderId)
         event
     }
 
@@ -363,5 +366,34 @@ class ProposalApplicationService(
         val proposal = proposalRepository.findById(command.proposalId)
             ?: throw ProposalNotFoundException(command.proposalId)
         withdrawProposal(proposal, command)
+    }
+
+    /**
+     * Reopens [order]'s routing obligation from `OFFERED` back to
+     * `PENDING` (ADR-078, Dispatch Recovery After Proposal Decline or
+     * Lapse, Decision A) — called only from [declineProposal] (the
+     * driver's own refusal, `Proposal.decline`) and [lapseProposal]
+     * (`Proposal.lapse`), inside the same [transactionRunner] boundary
+     * those methods already open, so the reopen and the proposal's own
+     * resolution commit or roll back together (ADR-078: wiring this
+     * outside that transaction would silently fail to fix the defect on a
+     * rollback).
+     *
+     * Deliberately **not** called from [declinePriceProposal] (the
+     * passenger's own price refusal — ADR-078 Decision C, preserving the
+     * 2026-09-05 "no automatic reroute to another driver" instruction) or
+     * from [withdrawProposal] (ADR-053's order-cancellation path, which
+     * already produces a `CANCELLED` tombstone this reopen must not
+     * fight).
+     *
+     * [dispatchRequestRepository] defaults to `null`, identical to every
+     * other optional collaborator in this class — a test/caller that
+     * supplies none continues to behave exactly as before this method's
+     * addition, and [DispatchRequestRepository.reopenIfOffered] is itself
+     * a no-op for any state other than `OFFERED`, so calling this after an
+     * order has already reached `CANCELLED`/`UNFULFILLED` is safe.
+     */
+    private fun reopenRoutingObligation(order: OrderReference) {
+        dispatchRequestRepository?.reopenIfOffered(order.orderId, Instant.now())
     }
 }

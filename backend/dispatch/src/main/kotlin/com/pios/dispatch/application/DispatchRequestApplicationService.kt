@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import com.pios.dispatch.domain.PassengerReference
+import com.pios.dispatch.domain.Proposal
+import com.pios.dispatch.domain.ProposalStatus
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.time.Clock
@@ -74,9 +76,17 @@ class DispatchRequestApplicationService(
         val record: DispatchRequestRecord = requests.findForUpdate(orderId) ?: return
         if (record.state != DispatchRequestState.PENDING) return
         val order: OrderReference = OrderReference(orderId)
+        val orderProposals: List<Proposal> = proposals.findByOrder(order)
         // A manual offer or an earlier event delivery wins. In particular,
-        // never declare an order unfulfilled after *any* proposal exists.
-        if (proposals.findByOrder(order).isNotEmpty()) {
+        // never declare an order unfulfilled while a live or positively
+        // resolved proposal exists. Narrowed from "any proposal exists"
+        // (ADR-078, Dispatch Recovery After Proposal Decline or Lapse,
+        // Decision A requirement 3): a DECLINED/LAPSED proposal no longer
+        // counts, so a row this method itself just reopened from OFFERED
+        // back to PENDING (DispatchRequestRepository.reopenIfOffered) is
+        // not immediately re-marked OFFERED by that same now-resolved
+        // proposal on this very sweep.
+        if (hasUnresolvedOrAcceptedProposal(orderProposals)) {
             requests.markOffered(orderId)
             return
         }
@@ -86,22 +96,51 @@ class DispatchRequestApplicationService(
             outbox.save(createExhaustedEvent(orderId, now))
             return
         }
-        attemptOffer(record, order)
-        if (proposals.findByOrder(order).isNotEmpty()) {
+        attemptOffer(record, order, orderProposals)
+        // Re-read after attemptOffer, then apply the identical narrowed
+        // predicate -- a DECLINED/LAPSED proposal already present before
+        // this attempt (the reopened row's own refusal) must not be
+        // mistaken for a fresh offer just made; only a new OPEN (or
+        // otherwise unresolved/positive) proposal means this attempt
+        // actually produced an offer.
+        if (hasUnresolvedOrAcceptedProposal(proposals.findByOrder(order))) {
             requests.markOffered(orderId)
         } else {
             requests.scheduleRetry(orderId, now.plus(RETRY_INTERVAL))
         }
     }
 
-    private fun attemptOffer(record: DispatchRequestRecord, order: OrderReference) {
+    private fun hasUnresolvedOrAcceptedProposal(orderProposals: List<Proposal>): Boolean =
+        orderProposals.any {
+            it.status == ProposalStatus.OPEN ||
+                it.status == ProposalStatus.PRICE_PROPOSED ||
+                it.status == ProposalStatus.ACCEPTED
+        }
+
+    private fun attemptOffer(record: DispatchRequestRecord, order: OrderReference, orderProposals: List<Proposal>) {
         val passenger: PassengerReference = PassengerReference(record.passengerReference)
+        // ADR-078 Decision B: every driver who has already declined or
+        // lapsed on this order is excluded from a resumed attempt, across
+        // all three branches below.
+        val excludeDrivers: Set<DriverReference> = orderProposals
+            .filter { it.status == ProposalStatus.DECLINED || it.status == ProposalStatus.LAPSED }
+            .map { it.driver }
+            .toSet()
         if (record.requestedDriverId != null) {
+            val namedDriver = DriverReference(record.requestedDriverId)
+            if (namedDriver in excludeDrivers) {
+                // PIOS does not substitute a random driver for the one a
+                // client came to (Proposal.kt's ratified principle,
+                // ADR-078 Decision B): an order that named a driver who
+                // has already refused it falls through to UNFULFILLED at
+                // window expiry, it is never retried with a substitute.
+                return
+            }
             try {
                 proposalService.handle(
                     ProposeDriverCommand(
                         order = order,
-                        driver = DriverReference(record.requestedDriverId),
+                        driver = namedDriver,
                         isTest = record.isTest,
                         passengerReference = passenger,
                         requestedPickupAt = record.requestedPickupAt
@@ -120,10 +159,11 @@ class DispatchRequestApplicationService(
             order = order,
             passengerReference = passenger,
             isTest = record.isTest,
-            requestedPickupAt = record.requestedPickupAt
+            requestedPickupAt = record.requestedPickupAt,
+            excludeDrivers = excludeDrivers
         )
         if (first is FirstRefusalOutcome.NoPrimaryDriver || first is FirstRefusalOutcome.PrimaryDriverIneligible) {
-            fallback.attempt(order = order, passengerReference = passenger, isTest = record.isTest)
+            fallback.attempt(order = order, passengerReference = passenger, isTest = record.isTest, excludeDrivers = excludeDrivers)
         }
     }
 

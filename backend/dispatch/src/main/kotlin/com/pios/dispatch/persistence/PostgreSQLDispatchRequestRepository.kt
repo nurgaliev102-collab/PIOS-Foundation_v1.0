@@ -70,6 +70,13 @@ class PostgreSQLDispatchRequestRepository(private val jdbcTemplate: JdbcTemplate
         )
     }
 
+    override fun reopenIfOffered(orderId: String, nextAttemptAt: Instant) {
+        jdbcTemplate.update(
+            "UPDATE dispatch_requests SET state = 'PENDING', next_attempt_at = ? WHERE order_id = ? AND state = 'OFFERED'",
+            Timestamp.from(nextAttemptAt), orderId
+        )
+    }
+
     override fun markCancelled(orderId: String) {
         jdbcTemplate.update(
             """

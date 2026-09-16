@@ -127,13 +127,23 @@ class FirstRefusalApplicationService(
      * caller/test (Task 14) continues to behave exactly as before this
      * parameter's own addition. See this class's own "Explicit driver
      * intent" KDoc for what passing `true` guarantees.
+     *
+     * [excludeDrivers] (ADR-078, Dispatch Recovery After Proposal Decline
+     * or Lapse, Decision B) is an additive parameter, defaulting to
+     * `emptySet()` so every existing caller/test continues to behave
+     * exactly as before its addition. When the passenger's primary driver
+     * is a member of [excludeDrivers], this attempt is skipped exactly as
+     * if that primary driver were ineligible — a primary driver who has
+     * already declined or lapsed on this same order must not be
+     * re-offered it every retry for the rest of the routing window.
      */
     fun attempt(
         order: OrderReference,
         passengerReference: PassengerReference,
         isTest: Boolean = false,
         explicitDriverIntentDeclared: Boolean = false,
-        requestedPickupAt: Instant? = null
+        requestedPickupAt: Instant? = null,
+        excludeDrivers: Set<DriverReference> = emptySet()
     ): FirstRefusalOutcome {
         if (explicitDriverIntentDeclared) {
             return FirstRefusalOutcome.ExplicitDriverIntentDeclared
@@ -141,6 +151,10 @@ class FirstRefusalApplicationService(
 
         val primary = primaryDriverRepository.findByPassenger(passengerReference)
             ?: return FirstRefusalOutcome.NoPrimaryDriver
+
+        if (primary.primaryDriverId in excludeDrivers) {
+            return FirstRefusalOutcome.PrimaryDriverIneligible(primary.primaryDriverId)
+        }
 
         if (!isEligible(primary.primaryDriverId, isTest, requestedPickupAt)) {
             return FirstRefusalOutcome.PrimaryDriverIneligible(primary.primaryDriverId)

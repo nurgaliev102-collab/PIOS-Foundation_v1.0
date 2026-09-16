@@ -4,6 +4,7 @@ import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import com.pios.dispatch.domain.ProposalStatus
 import com.pios.dispatch.persistence.InMemoryProposalRepository
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -28,8 +29,18 @@ class OrderCancelledApplicationServiceTest {
 
     private val orderCancelledRepository = InMemoryOrderCancelledRepository()
     private val proposalRepository = InMemoryProposalRepository()
-    private val proposalApplicationService = ProposalApplicationService(proposalRepository)
     private val dispatchRequests = InMemoryDispatchRequestRepository()
+
+    // ADR-078: dispatchRequestRepository is wired here (unlike this class's
+    // pre-ADR-078 shape) specifically so `an order cancellation withdraws...`
+    // below can prove the withdraw path never reopens the CANCELLED
+    // tombstone it shares this exact repository instance with -- every
+    // other existing test in this class is unaffected, since none of them
+    // ever inserts a dispatch_requests row for the orders they use, so
+    // ProposalApplicationService.handle's own routing-state check
+    // (`routingState != CANCELLED && != UNFULFILLED`) still sees `null` and
+    // behaves exactly as before this wiring.
+    private val proposalApplicationService = ProposalApplicationService(proposalRepository, dispatchRequestRepository = dispatchRequests)
     private val service = OrderCancelledApplicationService(
         orderCancelledRepository, proposalRepository, proposalApplicationService, dispatchRequests
     )
@@ -89,5 +100,37 @@ class OrderCancelledApplicationServiceTest {
 
         assertEquals(ProposalStatus.WITHDRAWN, proposalRepository.findById(proposalA.id)?.status)
         assertEquals(ProposalStatus.OPEN, proposalRepository.findById(proposalB.id)?.status)
+    }
+
+    // --- ADR-078 (Dispatch Recovery After Proposal Decline or Lapse), Decision A requirement 2 ---
+
+    @Test
+    fun `an order cancellation withdraws the proposal but never reopens the CANCELLED tombstone, even though withdraw resolves a proposal in the same flow`() {
+        val order = OrderReference("order-6")
+        val proposal = proposalApplicationService.handle(ProposeDriverCommand(order, DriverReference("driver-6"))).proposal
+        val now = Instant.now()
+        dispatchRequests.insertIfAbsent(
+            DispatchRequestRecord(
+                orderId = order.orderId,
+                passengerReference = "passenger-6",
+                isTest = false,
+                explicitDriverIntent = false,
+                requestedDriverId = null,
+                requestedPickupAt = null,
+                submittedAt = now,
+                expiresAt = now.plusSeconds(120),
+                nextAttemptAt = now
+            )
+        )
+        dispatchRequests.markOffered(order.orderId)
+
+        service.handle(OrderCancelledUpdateCommand(eventId = "event-6", orderReference = order.orderId))
+
+        // Proposal.withdraw (ADR-053) resolves the proposal in the same
+        // handle() call that writes the CANCELLED tombstone -- proving
+        // ADR-078's reopen (wired only into decline/lapse, never withdraw)
+        // does not fire here, and the tombstone is never disturbed.
+        assertEquals(ProposalStatus.WITHDRAWN, proposalRepository.findById(proposal.id)?.status)
+        assertEquals(DispatchRequestState.CANCELLED, dispatchRequests.findForUpdate(order.orderId)?.state)
     }
 }
