@@ -1,4 +1,4 @@
--- V20: a durable routing record for an OrderSubmitted event. A CANCELLED row can
+-- V19: a durable routing record for an OrderSubmitted event. A CANCELLED row can
 -- be written before the submitted event arrives (the two events have
 -- separate RabbitMQ queues), preventing a late offer for a cancelled order.
 CREATE TABLE dispatch_requests (
