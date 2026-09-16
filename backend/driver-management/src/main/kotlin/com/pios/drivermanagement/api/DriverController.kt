@@ -66,13 +66,23 @@ import org.springframework.web.bind.annotation.RestController
  * default availability; a [driverId] that already identifies a saved
  * Driver surfaces as [DriverAlreadyExistsException], mapped to 409
  * Conflict, the same status Dispatch's own `ProposalController` uses for
- * its own conflicting-creation cases. Left unauthenticated by this
- * controller, including after Task 25 (below) -- Task 24's own audit
- * classified this endpoint LOW/informational, not a remediation target:
- * it is a pre-authentication "first contact" action creating a brand-new
- * resource named by a caller-generated, unguessable UUID, the same
- * legitimate shape `IdentityController.register` already has, not a
- * mutation of an existing, already-owned resource.
+ * its own conflicting-creation cases.
+ *
+ * As of `8206ff3` (2026-09-16, the ADR-076 hardening pass), this endpoint
+ * is **no longer unauthenticated** -- the paragraph that used to say so is
+ * corrected here rather than left to contradict the code below it. Two
+ * paths are accepted: an owner `Basic` credential (checked first, via
+ * [ownerCredentialGate]), or a `Bearer` session token whose own `sub`
+ * names this exact [driverId] and whose `drv`, if present, also matches --
+ * i.e. an already-authenticated identity self-registering as this driver,
+ * the same self-only shape `declareAvailability` below already requires. A
+ * guest token (`verified.guest`) is rejected with 403. **Creating an
+ * `isTest` driver requires the owner credential regardless of which
+ * `Bearer` token is presented** -- a self-registering, non-owner caller is
+ * forbidden from setting [CreateDriverRequest.isTest] at all, closing the
+ * gap Task 24's LOW/informational classification of this endpoint had left
+ * open once `isTest` existed as a caller-controlled flag. No unauthenticated
+ * path remains.
  *
  * ## Task 25 (Orders Cancellation & Driver Availability Security Remediation)
  *
