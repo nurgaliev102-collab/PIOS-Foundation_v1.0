@@ -84,6 +84,9 @@ class Trip private constructor(
     var completedAt: Instant? = null
         private set
 
+    var termination: Termination? = null
+        private set
+
     /**
      * Records that the driver has reached the passenger. Only a
      * [TripStatus.CREATED] trip may arrive — unlike [Assignment.arrive],
@@ -122,6 +125,15 @@ class Trip private constructor(
         statusChangedAt = at
         completedAt = at
         return TripCompleted(orderId = order, driverId = driver)
+    }
+
+    fun terminate(fact: Termination) {
+        check(status != TripStatus.COMPLETED && status != TripStatus.TERMINATED) {
+            "Trip ${id.value} cannot be terminated from status $status"
+        }
+        status = TripStatus.TERMINATED
+        statusChangedAt = fact.terminatedAt
+        termination = fact
     }
 
     companion object {

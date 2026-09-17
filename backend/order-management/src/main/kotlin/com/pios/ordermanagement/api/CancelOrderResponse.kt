@@ -9,4 +9,4 @@ package com.pios.ordermanagement.api
  * supplied it), and [status] confirms the transition without exposing
  * anything [OrderResponse]'s own fuller, list-query shape carries.
  */
-data class CancelOrderResponse(val orderId: String, val status: String)
+data class CancelOrderResponse(val orderId: String, val status: String, val requestId: String? = null)

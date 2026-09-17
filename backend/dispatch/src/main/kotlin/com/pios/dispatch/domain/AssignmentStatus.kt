@@ -20,5 +20,6 @@ enum class AssignmentStatus {
     ACCEPTED,
     ARRIVED,
     IN_PROGRESS,
-    COMPLETED
+    COMPLETED,
+    TERMINATED
 }

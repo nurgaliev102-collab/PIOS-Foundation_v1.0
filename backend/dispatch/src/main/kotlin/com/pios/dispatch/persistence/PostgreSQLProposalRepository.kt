@@ -236,7 +236,10 @@ class PostgreSQLProposalRepository(
                 proposal.decline(respondedAt)
             }
             ProposalStatus.LAPSED -> proposal.lapse(respondedAt)
-            ProposalStatus.WITHDRAWN -> proposal.withdraw(respondedAt)
+            ProposalStatus.WITHDRAWN -> {
+                if (statedPrice != null) proposal.proposePrice(statedPrice, statedEtaMinutes, respondedAt)
+                proposal.withdraw(respondedAt)
+            }
             ProposalStatus.OPEN -> Unit
         }
         return proposal

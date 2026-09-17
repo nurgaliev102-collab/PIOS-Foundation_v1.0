@@ -135,6 +135,36 @@ class RabbitMQConsumerTopologyConfiguration {
         .to(dispatchEventsExchange)
         .with(DISPATCH_EXHAUSTED_ROUTING_KEY)
 
+    @Bean
+    fun cancellationResolvedDeadLetterQueue(): Queue =
+        QueueBuilder.durable(CANCELLATION_RESOLVED_DEAD_LETTER_QUEUE_NAME).build()
+
+    @Bean
+    fun cancellationResolvedQueue(): Queue = QueueBuilder.durable(CANCELLATION_RESOLVED_QUEUE_NAME)
+        .withArgument("x-dead-letter-exchange", "")
+        .withArgument("x-dead-letter-routing-key", CANCELLATION_RESOLVED_DEAD_LETTER_QUEUE_NAME)
+        .build()
+
+    @Bean
+    fun cancellationResolvedBinding(cancellationResolvedQueue: Queue, dispatchEventsExchange: TopicExchange): Binding =
+        BindingBuilder.bind(cancellationResolvedQueue).to(dispatchEventsExchange)
+            .with(CANCELLATION_RESOLVED_ROUTING_KEY)
+
+    @Bean
+    fun commitmentTerminatedDeadLetterQueue(): Queue =
+        QueueBuilder.durable(COMMITMENT_TERMINATED_DEAD_LETTER_QUEUE_NAME).build()
+
+    @Bean
+    fun commitmentTerminatedQueue(): Queue = QueueBuilder.durable(COMMITMENT_TERMINATED_QUEUE_NAME)
+        .withArgument("x-dead-letter-exchange", "")
+        .withArgument("x-dead-letter-routing-key", COMMITMENT_TERMINATED_DEAD_LETTER_QUEUE_NAME)
+        .build()
+
+    @Bean
+    fun commitmentTerminatedBinding(commitmentTerminatedQueue: Queue, dispatchEventsExchange: TopicExchange): Binding =
+        BindingBuilder.bind(commitmentTerminatedQueue).to(dispatchEventsExchange)
+            .with(COMMITMENT_TERMINATED_ROUTING_KEY)
+
     companion object {
         const val PRODUCER_EXCHANGE_NAME = "dispatch.events"
         const val QUEUE_NAME = "order-management.from-dispatch"
@@ -146,5 +176,11 @@ class RabbitMQConsumerTopologyConfiguration {
         const val DISPATCH_EXHAUSTED_QUEUE_NAME = "order-management.from-dispatch.exhausted"
         const val DISPATCH_EXHAUSTED_DEAD_LETTER_QUEUE_NAME = "order-management.from-dispatch.exhausted.dlq"
         const val DISPATCH_EXHAUSTED_ROUTING_KEY = "dispatch.exhausted"
+        const val CANCELLATION_RESOLVED_QUEUE_NAME = "order-management.from-dispatch.cancellation-resolved"
+        const val CANCELLATION_RESOLVED_DEAD_LETTER_QUEUE_NAME = "order-management.from-dispatch.cancellation-resolved.dlq"
+        const val CANCELLATION_RESOLVED_ROUTING_KEY = "order.cancellation-resolved"
+        const val COMMITMENT_TERMINATED_QUEUE_NAME = "order-management.from-dispatch.commitment-terminated"
+        const val COMMITMENT_TERMINATED_DEAD_LETTER_QUEUE_NAME = "order-management.from-dispatch.commitment-terminated.dlq"
+        const val COMMITMENT_TERMINATED_ROUTING_KEY = "commitment.terminated"
     }
 }

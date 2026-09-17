@@ -44,18 +44,29 @@ class OrderCancelledApplicationService(
     private val proposalRepository: ProposalRepository,
     private val proposalApplicationService: ProposalApplicationService,
     private val dispatchRequestRepository: DispatchRequestRepository,
-    private val transactionRunner: TransactionRunner = NoOpTransactionRunner
+    private val transactionRunner: TransactionRunner = NoOpTransactionRunner,
+    private val assignmentRepository: AssignmentRepository? = null,
+    private val tripRepository: TripRepository? = null,
+    private val orderGuard: OrderGuard = NoOpOrderGuard
 ) {
     private val logger = LoggerFactory.getLogger(OrderCancelledApplicationService::class.java)
 
     fun handle(command: OrderCancelledUpdateCommand) = transactionRunner.run {
+        val order = OrderReference(command.orderReference)
+        orderGuard.lock(order)
+        val assignment = assignmentRepository?.findByOrder(order)?.firstOrNull()
+        val trip = assignment?.let { tripRepository?.findByAssignmentId(it.id) }
+        check(assignment == null || trip?.status == com.pios.dispatch.domain.TripStatus.TERMINATED) {
+            "Legacy OrderCancelled cannot stop an active or completed Trip for ${order.orderId}"
+        }
         val isNewEvent = orderCancelledRepository.markProcessed(command.eventId)
         if (isNewEvent) {
-            val order = OrderReference(command.orderReference)
             // The cancellation tombstone must exist even when this event
             // arrives before OrderSubmitted on its independent queue.
             dispatchRequestRepository.markCancelled(order.orderId)
-            val openProposal = proposalRepository.findByOrder(order).firstOrNull { it.status == ProposalStatus.OPEN }
+            val openProposal = proposalRepository.findByOrder(order).firstOrNull {
+                it.status == ProposalStatus.OPEN || it.status == ProposalStatus.PRICE_PROPOSED
+            }
             if (openProposal != null) {
                 proposalApplicationService.withdrawProposal(openProposal, WithdrawProposalCommand(openProposal.id))
             } else {

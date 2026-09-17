@@ -187,7 +187,7 @@ function computeOrderMetrics(orders: OrderListItem[]): PilotOrderMetrics {
   return {
     total: orders.length,
     completed: orders.filter((order) => order.status === 'COMPLETED').length,
-    cancelled: orders.filter((order) => order.status === 'CANCELLED').length,
+    cancelled: orders.filter((order) => order.status === 'CANCELLED' && !order.commitmentTerminated).length,
     open: orders.filter((order) => order.status === 'SUBMITTED').length,
   }
 }

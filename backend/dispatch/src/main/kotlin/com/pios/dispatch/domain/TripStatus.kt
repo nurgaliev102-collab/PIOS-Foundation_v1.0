@@ -26,5 +26,6 @@ enum class TripStatus {
     CREATED,
     ARRIVED,
     IN_PROGRESS,
-    COMPLETED
+    COMPLETED,
+    TERMINATED
 }

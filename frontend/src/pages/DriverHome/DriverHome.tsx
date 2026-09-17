@@ -182,7 +182,7 @@ const PROPOSAL_STATUS_LABEL: Record<ProposalListItem['status'], string> = {
   WITHDRAWN: 'Отменено пассажиром',
 }
 
-type AssignmentStatusValue = 'CREATED' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED'
+type AssignmentStatusValue = 'CREATED' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED' | 'TERMINATED'
 type AssignmentActionStatus = 'idle' | 'submitting' | 'error'
 
 interface AssignmentInfo {
@@ -191,6 +191,10 @@ interface AssignmentInfo {
   driverId: string
   status: AssignmentStatusValue
   statusChangedAt: string | null
+  terminationInitiator?: string | null
+  terminationReasonCode?: string | null
+  terminatedAt?: string | null
+  terminationNote?: string | null
 }
 
 interface OrderListItem {
@@ -734,6 +738,9 @@ export function DriverHome() {
   // has none yet, so never appears here.
   const [assignments, setAssignments] = useState<Record<string, AssignmentInfo>>({})
   const [assignmentActions, setAssignmentActions] = useState<Record<string, AssignmentActionStatus>>({})
+  const [terminationReasons, setTerminationReasons] = useState<Record<string, string>>({})
+  const [terminationNotes, setTerminationNotes] = useState<Record<string, string>>({})
+  const terminationRequestIds = useRef<Record<string, { payload: string; requestId: string }>>({})
   // UX audit (docs/PIOS_DRIVER_HOME_UX_AUDIT.md Section 5/9, "COMPLETE"):
   // a dedicated, transient acknowledgment for ride completion -- its own
   // state, separate from [feedback] (copy/share), so a completion message
@@ -1131,6 +1138,42 @@ export function DriverHome() {
       }
     } catch {
       setAssignmentActions((current) => ({ ...current, [assignmentId]: 'error' }))
+    }
+  }
+
+  async function terminateAssignment(assignment: AssignmentInfo) {
+    if (!identity || assignmentActions[assignment.assignmentId] === 'submitting') return
+    const reasonCode = terminationReasons[assignment.assignmentId]
+    if (!reasonCode) {
+      setAssignmentActions((current) => ({ ...current, [assignment.assignmentId]: 'error' }))
+      return
+    }
+    const note = terminationNotes[assignment.assignmentId]?.trim() || null
+    const payload = JSON.stringify({ reasonCode, note })
+    const existing = terminationRequestIds.current[assignment.assignmentId]
+    const requestId = existing?.payload === payload ? existing.requestId : crypto.randomUUID()
+    terminationRequestIds.current[assignment.assignmentId] = { payload, requestId }
+    setAssignmentActions((current) => ({ ...current, [assignment.assignmentId]: 'submitting' }))
+    try {
+      await request(`/v1/assignments/${assignment.assignmentId}/terminate`, {
+        method: 'POST',
+        baseUrl: DISPATCH_BASE_URL,
+        headers: { Authorization: `Bearer ${identity.token}` },
+        body: JSON.stringify({ requestId, reasonCode, note }),
+      })
+      setAssignments((current) => ({
+        ...current,
+        [assignment.orderId]: {
+          ...assignment,
+          status: 'TERMINATED',
+          terminationInitiator: 'DRIVER',
+          terminationReasonCode: reasonCode,
+          terminationNote: note,
+        },
+      }))
+      setAssignmentActions((current) => ({ ...current, [assignment.assignmentId]: 'idle' }))
+    } catch {
+      setAssignmentActions((current) => ({ ...current, [assignment.assignmentId]: 'error' }))
     }
   }
 
@@ -1994,6 +2037,17 @@ export function DriverHome() {
             // Assignment itself has loaded (see ActiveRidePanel's own
             // `primaryAction?` KDoc).
             if (proposal.status === 'ACCEPTED') {
+              if (assignment?.status === 'TERMINATED') {
+                return (
+                  <Card key={proposal.proposalId}>
+                    <RideStatus status="TERMINATED" label="Поездка прекращена" />
+                    {details}
+                    <Text role="body" tone="secondary">
+                      Причина: {assignment.terminationReasonCode ?? 'не указана'}
+                    </Text>
+                  </Card>
+                )
+              }
               const primaryAction =
                 assignment && (assignment.status === 'CREATED' || assignment.status === 'ACCEPTED')
                   ? { label: 'Прибыл', onClick: () => respondToAssignment(assignment.assignmentId, 'arrive') }
@@ -2006,8 +2060,8 @@ export function DriverHome() {
                         }
                       : undefined
               return (
+                <div key={proposal.proposalId}>
                 <ActiveRidePanel
-                  key={proposal.proposalId}
                   orderCode={orderCode}
                   status={(assignment?.status as RideLifecycleStatus | undefined) ?? 'ACCEPTED'}
                   statusLabel={PROPOSAL_STATUS_LABEL.ACCEPTED}
@@ -2016,6 +2070,39 @@ export function DriverHome() {
                   submitting={Boolean(assignment && assignmentActions[assignment.assignmentId] === 'submitting')}
                   error={Boolean(assignment && assignmentActions[assignment.assignmentId] === 'error')}
                 />
+                {assignment && assignment.status !== 'COMPLETED' && (
+                  <Card>
+                    <FormField label="Причина прекращения" htmlFor={`termination-reason-${assignment.assignmentId}`}>
+                      <Select
+                        id={`termination-reason-${assignment.assignmentId}`}
+                        value={terminationReasons[assignment.assignmentId] ?? ''}
+                        onChange={(event) => setTerminationReasons((current) => ({ ...current, [assignment.assignmentId]: event.target.value }))}
+                      >
+                        <option value="">Выберите причину</option>
+                        <option value="CANNOT_FULFILL">Не могу выполнить поездку</option>
+                        <option value="PASSENGER_UNRESPONSIVE">Пассажир не отвечает</option>
+                        <option value="PASSENGER_NO_SHOW">Пассажир не вышел</option>
+                        <option value="TRIP_CONDITIONS_CHANGED">Условия поездки изменились</option>
+                        <option value="OTHER">Другая причина</option>
+                      </Select>
+                    </FormField>
+                    <FormField label="Комментарий (необязательно)" htmlFor={`termination-note-${assignment.assignmentId}`}>
+                      <Textarea
+                        id={`termination-note-${assignment.assignmentId}`}
+                        maxLength={2000}
+                        value={terminationNotes[assignment.assignmentId] ?? ''}
+                        onChange={(event) => setTerminationNotes((current) => ({ ...current, [assignment.assignmentId]: event.target.value }))}
+                      />
+                    </FormField>
+                    <Button
+                      label="Прекратить поездку"
+                      variant="destructive"
+                      loading={assignmentActions[assignment.assignmentId] === 'submitting'}
+                      onClick={() => void terminateAssignment(assignment)}
+                    />
+                  </Card>
+                )}
+                </div>
               )
             }
 

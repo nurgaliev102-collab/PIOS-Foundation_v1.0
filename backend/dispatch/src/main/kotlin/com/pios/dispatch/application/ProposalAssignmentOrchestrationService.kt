@@ -103,7 +103,8 @@ class ProposalAssignmentOrchestrationService(
     private val proposalRepository: ProposalRepository,
     private val proposalApplicationService: ProposalApplicationService,
     private val dispatchAssignmentApplicationService: DispatchAssignmentApplicationService,
-    private val transactionRunner: TransactionRunner = NoOpTransactionRunner
+    private val transactionRunner: TransactionRunner = NoOpTransactionRunner,
+    private val orderGuard: OrderGuard = NoOpOrderGuard
 ) {
 
     /**
@@ -121,14 +122,17 @@ class ProposalAssignmentOrchestrationService(
     fun acceptProposal(command: AcceptProposalCommand): ProposalAcceptanceOutcome = transactionRunner.run {
         val proposal = proposalRepository.findById(command.proposalId)
             ?: throw ProposalNotFoundException(command.proposalId)
+        orderGuard.lock(proposal.order)
+        val lockedProposal = proposalRepository.findById(command.proposalId)
+            ?: throw ProposalNotFoundException(command.proposalId)
 
-        proposalApplicationService.acceptProposalWithinCallerTransaction(proposal, command)
+        proposalApplicationService.acceptProposalWithinCallerTransaction(lockedProposal, command)
 
         val assignmentCreated = dispatchAssignmentApplicationService.handleWithinCallerTransaction(
-            AssignOrderCommand(proposal.order, proposal.driver, isTest = proposal.isTest)
+            AssignOrderCommand(lockedProposal.order, lockedProposal.driver, isTest = lockedProposal.isTest)
         )
 
-        ProposalAcceptanceOutcome(proposal, assignmentCreated)
+        ProposalAcceptanceOutcome(lockedProposal, assignmentCreated)
     }
 
     /**
@@ -145,14 +149,17 @@ class ProposalAssignmentOrchestrationService(
     fun confirmPrice(command: ConfirmPriceCommand): ProposalAcceptanceOutcome = transactionRunner.run {
         val proposal = proposalRepository.findById(command.proposalId)
             ?: throw ProposalNotFoundException(command.proposalId)
+        orderGuard.lock(proposal.order)
+        val lockedProposal = proposalRepository.findById(command.proposalId)
+            ?: throw ProposalNotFoundException(command.proposalId)
 
-        proposalApplicationService.confirmPriceWithinCallerTransaction(proposal, command)
+        proposalApplicationService.confirmPriceWithinCallerTransaction(lockedProposal, command)
 
         val assignmentCreated = dispatchAssignmentApplicationService.handleWithinCallerTransaction(
-            AssignOrderCommand(proposal.order, proposal.driver, isTest = proposal.isTest)
+            AssignOrderCommand(lockedProposal.order, lockedProposal.driver, isTest = lockedProposal.isTest)
         )
 
-        ProposalAcceptanceOutcome(proposal, assignmentCreated)
+        ProposalAcceptanceOutcome(lockedProposal, assignmentCreated)
     }
 }
 

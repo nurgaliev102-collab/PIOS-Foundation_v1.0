@@ -21,6 +21,7 @@ export type RideLifecycleStatus =
   | 'ARRIVED'
   | 'IN_PROGRESS'
   | 'COMPLETED'
+  | 'TERMINATED'
   | 'UNFULFILLED'
 
 export interface RideStatusProps {
@@ -52,6 +53,7 @@ const toneForStatus: Record<RideLifecycleStatus, StatusTone> = {
   ARRIVED: 'success',
   IN_PROGRESS: 'success',
   COMPLETED: 'success',
+  TERMINATED: 'warning',
   UNFULFILLED: 'error',
 }
 

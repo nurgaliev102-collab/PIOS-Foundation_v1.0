@@ -60,5 +60,6 @@ data class OrderResponse(
     val requestedPickupAt: String? = null,
     val isTest: Boolean = false,
     val passengerCount: Int? = null,
-    val notes: String? = null
+    val notes: String? = null,
+    val commitmentTerminated: Boolean = false
 )

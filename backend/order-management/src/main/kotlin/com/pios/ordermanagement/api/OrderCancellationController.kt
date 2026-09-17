@@ -1,18 +1,38 @@
 package com.pios.ordermanagement.api
 
-import com.pios.ordermanagement.application.CancelOrderCommand
+import com.pios.ordermanagement.application.OrderCancellationCoordinationService
+import com.pios.ordermanagement.application.RequestOrderCancellationCommand
 import com.pios.ordermanagement.application.OrderLifecycleApplicationService
 import com.pios.ordermanagement.application.OrderNotFoundException
 import com.pios.ordermanagement.application.OrderRepository
 import com.pios.ordermanagement.domain.OrderId
-import com.pios.ordermanagement.domain.OrderStatus
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import java.util.UUID
+
+data class CancelOrderRequest(
+    val requestId: String? = null,
+    val reasonCode: String? = null,
+    val note: String? = null,
+    val initiator: String? = null
+)
+
+data class OrderCancellationStatusResponse(
+    val orderId: String,
+    val requestId: String?,
+    val outcome: String?,
+    val initiator: String?,
+    val reasonCode: String?,
+    val note: String?,
+    val terminatedAt: String?
+)
 
 /**
  * Order Management's Cancel Order REST entry point (P0-2 Tier 1;
@@ -71,7 +91,7 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/v1/orders")
 class OrderCancellationController(
-    private val orderLifecycleApplicationService: OrderLifecycleApplicationService,
+    private val coordination: OrderCancellationCoordinationService,
     private val orderRepository: OrderRepository,
     private val sessionTokenVerifier: SessionTokenVerifier
 ) {
@@ -79,7 +99,8 @@ class OrderCancellationController(
     @PostMapping("/{orderId}/cancel")
     fun cancelOrder(
         @PathVariable orderId: String,
-        @RequestHeader("Authorization", required = false) authorization: String? = null
+        @RequestHeader("Authorization", required = false) authorization: String? = null,
+        @RequestBody(required = false) request: CancelOrderRequest? = null
     ): ResponseEntity<CancelOrderResponse> {
         return try {
             val id = OrderId(orderId)
@@ -90,8 +111,17 @@ class OrderCancellationController(
             if (order.origin.reference != verified.sub) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
             }
-            val event = orderLifecycleApplicationService.cancelOrder(CancelOrderCommand(id))
-            ResponseEntity.ok(CancelOrderResponse(event.orderId.value, OrderStatus.CANCELLED.name))
+            if (request?.initiator != null) return ResponseEntity.badRequest().build()
+            val record = coordination.request(
+                RequestOrderCancellationCommand(
+                    requestId = request?.requestId ?: UUID.randomUUID().toString(),
+                    orderId = id.value,
+                    reasonCode = request?.reasonCode,
+                    note = request?.note
+                )
+            )
+            ResponseEntity.status(HttpStatus.ACCEPTED)
+                .body(CancelOrderResponse(id.value, record.outcome, record.requestId))
         } catch (ex: OrderNotFoundException) {
             ResponseEntity.notFound().build()
         } catch (ex: IllegalArgumentException) {
@@ -99,5 +129,30 @@ class OrderCancellationController(
         } catch (ex: IllegalStateException) {
             ResponseEntity.status(HttpStatus.CONFLICT).build()
         }
+    }
+
+    @GetMapping("/{orderId}/cancellation")
+    fun cancellationStatus(
+        @PathVariable orderId: String,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<OrderCancellationStatusResponse> {
+        val verified = sessionTokenVerifier.verify(authorization)
+            ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+        val order = try { orderRepository.findById(OrderId(orderId)) } catch (_: IllegalArgumentException) { null }
+            ?: return ResponseEntity.notFound().build()
+        if (order.origin.reference != verified.sub) return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+        val request = coordination.findLatest(orderId)
+        val fact = coordination.findTermination(orderId)
+        return ResponseEntity.ok(
+            OrderCancellationStatusResponse(
+                orderId,
+                request?.requestId ?: fact?.requestId,
+                request?.outcome,
+                fact?.initiator,
+                fact?.reasonCode,
+                fact?.note,
+                fact?.terminatedAt?.toString()
+            )
+        )
     }
 }

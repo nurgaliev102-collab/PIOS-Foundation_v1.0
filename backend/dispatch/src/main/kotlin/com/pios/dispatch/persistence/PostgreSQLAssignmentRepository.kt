@@ -193,6 +193,7 @@ class PostgreSQLAssignmentRepository(
                 assignment.start(startedAt)
                 assignment.complete(completedAt)
             }
+            AssignmentStatus.TERMINATED -> assignment.terminate(statusChangedAt)
         }
         return assignment
     }

@@ -3,11 +3,13 @@ package com.pios.ordermanagement.api
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.ordermanagement.application.CompleteOrderCommand
 import com.pios.ordermanagement.application.OrderLifecycleApplicationService
+import com.pios.ordermanagement.application.OrderCancellationCoordinationService
 import com.pios.ordermanagement.application.SubmitOrderCommand
 import com.pios.ordermanagement.domain.OrderId
 import com.pios.ordermanagement.domain.OrderOrigin
 import com.pios.ordermanagement.domain.OrderStatus
 import com.pios.ordermanagement.persistence.InMemoryOrderRepository
+import com.pios.ordermanagement.persistence.InMemoryOrderCancellationRequestRepository
 import org.springframework.http.HttpStatus
 import java.time.Instant
 import java.util.Base64
@@ -38,7 +40,14 @@ class OrderCancellationControllerTest {
     private val orderLifecycleApplicationService = OrderLifecycleApplicationService(repository)
     private val secret = Base64.getEncoder().encodeToString("order-cancellation-controller-test-secret".toByteArray())
     private val sessionTokenVerifier = SessionTokenVerifier(secretBase64 = secret)
-    private val controller = OrderCancellationController(orderLifecycleApplicationService, repository, sessionTokenVerifier)
+    private val requests = InMemoryOrderCancellationRequestRepository()
+    private val coordination = OrderCancellationCoordinationService(
+        repository, requests, orderLifecycleApplicationService,
+        com.pios.ordermanagement.application.NoOpOutboxRepository,
+        com.pios.ordermanagement.application.NoOpTransactionRunner,
+        ObjectMapper()
+    )
+    private val controller = OrderCancellationController(coordination, repository, sessionTokenVerifier)
 
     // --- Token minting test helper (mirrors ProposalControllerTest's own) ---
 
@@ -66,23 +75,23 @@ class OrderCancellationControllerTest {
         orderLifecycleApplicationService.submitOrder(SubmitOrderCommand(OrderOrigin(origin))).order.id.value
 
     @Test
-    fun `cancelling a submitted order returns 200 with CANCELLED status`() {
+    fun `cancelling a submitted order returns 202 pending Dispatch confirmation`() {
         val orderId = submittedOrderId()
 
         val response = controller.cancelOrder(orderId, authorization = passengerToken("passenger-1"))
 
-        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals(HttpStatus.ACCEPTED, response.statusCode)
         assertEquals(orderId, response.body?.orderId)
-        assertEquals(OrderStatus.CANCELLED.name, response.body?.status)
+        assertEquals("PENDING", response.body?.status)
     }
 
     @Test
-    fun `cancelling a submitted order persists CANCELLED through the repository`() {
+    fun `cancelling a submitted order does not prematurely persist CANCELLED`() {
         val orderId = submittedOrderId()
 
         controller.cancelOrder(orderId, authorization = passengerToken("passenger-1"))
 
-        assertEquals(OrderStatus.CANCELLED, repository.findById(OrderId(orderId))?.status)
+        assertEquals(OrderStatus.SUBMITTED, repository.findById(OrderId(orderId))?.status)
     }
 
     @Test
@@ -140,8 +149,8 @@ class OrderCancellationControllerTest {
 
         val response = controller.cancelOrder(orderId, authorization = passengerToken("passenger-owner"))
 
-        assertEquals(HttpStatus.OK, response.statusCode)
-        assertEquals("CANCELLED", response.body?.status)
+        assertEquals(HttpStatus.ACCEPTED, response.statusCode)
+        assertEquals("PENDING", response.body?.status)
     }
 
     @Test

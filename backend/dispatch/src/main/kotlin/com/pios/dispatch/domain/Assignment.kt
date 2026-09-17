@@ -161,6 +161,14 @@ class Assignment private constructor(
         return AssignmentCompleted(orderId = order, driverId = driver)
     }
 
+    fun terminate(at: Instant = Instant.now()) {
+        check(status != AssignmentStatus.COMPLETED && status != AssignmentStatus.TERMINATED) {
+            "Assignment ${id.value} cannot be terminated from status $status"
+        }
+        status = AssignmentStatus.TERMINATED
+        statusChangedAt = at
+    }
+
     companion object {
         /**
          * Creates a new assignment connecting [order] to [driver], per the

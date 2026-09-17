@@ -123,10 +123,12 @@ class ProposalApplicationService(
     private val proposalRepository: ProposalRepository,
     private val transactionRunner: TransactionRunner = NoOpTransactionRunner,
     private val driverAvailabilityRepository: DriverAvailabilityRepository? = null,
-    private val dispatchRequestRepository: DispatchRequestRepository? = null
+    private val dispatchRequestRepository: DispatchRequestRepository? = null,
+    private val orderGuard: OrderGuard = NoOpOrderGuard
 ) {
 
     fun handle(command: ProposeDriverCommand): ProposalCreated = transactionRunner.run {
+        orderGuard.lock(command.order)
         val routingState: DispatchRequestState? = dispatchRequestRepository
             ?.findForUpdate(command.order.orderId)?.state
         check(routingState != DispatchRequestState.CANCELLED && routingState != DispatchRequestState.UNFULFILLED) {
@@ -165,6 +167,7 @@ class ProposalApplicationService(
      * instance-supplied overload.
      */
     fun acceptProposal(proposal: Proposal, command: AcceptProposalCommand): ProposalAccepted = transactionRunner.run {
+        orderGuard.lock(proposal.order)
         acceptProposalWithinCallerTransaction(proposal, command)
     }
 
@@ -196,6 +199,7 @@ class ProposalApplicationService(
     fun acceptProposal(command: AcceptProposalCommand): ProposalAccepted = transactionRunner.run {
         val proposal = proposalRepository.findById(command.proposalId)
             ?: throw ProposalNotFoundException(command.proposalId)
+        orderGuard.lock(proposal.order)
         acceptProposal(proposal, command)
     }
 
@@ -207,6 +211,8 @@ class ProposalApplicationService(
      * overload.
      */
     fun proposePrice(proposal: Proposal, command: ProposePriceCommand): ProposalPriceProposed = transactionRunner.run {
+        orderGuard.lock(proposal.order)
+        check(proposalRepository.findById(proposal.id)?.status == proposal.status) { "Proposal changed concurrently" }
         proposePriceWithinCallerTransaction(proposal, command)
     }
 
@@ -244,6 +250,7 @@ class ProposalApplicationService(
      * must be the one referenced by [command].
      */
     fun confirmPrice(proposal: Proposal, command: ConfirmPriceCommand): ProposalAccepted = transactionRunner.run {
+        orderGuard.lock(proposal.order)
         confirmPriceWithinCallerTransaction(proposal, command)
     }
 
@@ -271,6 +278,8 @@ class ProposalApplicationService(
      * [proposal] must be the one referenced by [command].
      */
     fun declinePriceProposal(proposal: Proposal, command: DeclinePriceCommand): ProposalDeclined = transactionRunner.run {
+        orderGuard.lock(proposal.order)
+        check(proposalRepository.findById(proposal.id)?.status == proposal.status) { "Proposal changed concurrently" }
         require(proposal.id == command.proposalId) {
             "Proposal ${proposal.id.value} does not match command target ${command.proposalId.value}"
         }
@@ -296,6 +305,8 @@ class ProposalApplicationService(
      * [proposal] must be the one referenced by [command].
      */
     fun declineProposal(proposal: Proposal, command: DeclineProposalCommand): ProposalDeclined = transactionRunner.run {
+        orderGuard.lock(proposal.order)
+        check(proposalRepository.findById(proposal.id)?.status == proposal.status) { "Proposal changed concurrently" }
         require(proposal.id == command.proposalId) {
             "Proposal ${proposal.id.value} does not match command target ${command.proposalId.value}"
         }
@@ -322,6 +333,8 @@ class ProposalApplicationService(
      * [proposal] must be the one referenced by [command].
      */
     fun lapseProposal(proposal: Proposal, command: LapseProposalCommand): ProposalLapsed = transactionRunner.run {
+        orderGuard.lock(proposal.order)
+        check(proposalRepository.findById(proposal.id)?.status == proposal.status) { "Proposal changed concurrently" }
         require(proposal.id == command.proposalId) {
             "Proposal ${proposal.id.value} does not match command target ${command.proposalId.value}"
         }

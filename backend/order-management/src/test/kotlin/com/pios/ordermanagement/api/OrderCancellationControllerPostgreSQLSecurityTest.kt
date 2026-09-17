@@ -2,10 +2,12 @@ package com.pios.ordermanagement.api
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.ordermanagement.application.OrderLifecycleApplicationService
+import com.pios.ordermanagement.application.OrderCancellationCoordinationService
 import com.pios.ordermanagement.domain.Order
 import com.pios.ordermanagement.domain.OrderOrigin
 import com.pios.ordermanagement.domain.OrderStatus
 import com.pios.ordermanagement.persistence.PostgreSQLOrderRepository
+import com.pios.ordermanagement.persistence.PostgreSQLOrderCancellationRequestRepository
 import com.pios.ordermanagement.persistence.PostgreSQLTestDatabase
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
@@ -39,7 +41,14 @@ class OrderCancellationControllerPostgreSQLSecurityTest {
     private val repository = PostgreSQLOrderRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
     private val service = OrderLifecycleApplicationService(repository)
     private val secret = Base64.getEncoder().encodeToString("order-cancel-postgres-security-test-secret".toByteArray())
-    private val controller = OrderCancellationController(service, repository, SessionTokenVerifier(secretBase64 = secret))
+    private val requests = PostgreSQLOrderCancellationRequestRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
+    private val coordination = OrderCancellationCoordinationService(
+        repository, requests, service,
+        com.pios.ordermanagement.application.NoOpOutboxRepository,
+        com.pios.ordermanagement.application.NoOpTransactionRunner,
+        ObjectMapper()
+    )
+    private val controller = OrderCancellationController(coordination, repository, SessionTokenVerifier(secretBase64 = secret))
 
     private val objectMapper = ObjectMapper()
 
@@ -95,7 +104,8 @@ class OrderCancellationControllerPostgreSQLSecurityTest {
 
         val response = controller.cancelOrder(submitted.order.id.value, authorization = passengerToken(owner))
 
-        assertEquals(HttpStatus.OK, response.statusCode)
-        assertEquals(OrderStatus.CANCELLED, repository.findById(submitted.order.id)?.status)
+        assertEquals(HttpStatus.ACCEPTED, response.statusCode)
+        assertEquals(OrderStatus.SUBMITTED, repository.findById(submitted.order.id)?.status)
+        assertEquals("PENDING", requests.findById(response.body!!.requestId!!)?.outcome)
     }
 }

@@ -9,6 +9,7 @@ import com.pios.dispatch.domain.AssignmentCreated
 import com.pios.dispatch.domain.AssignmentId
 import com.pios.dispatch.domain.AssignmentStarted
 import com.pios.dispatch.domain.OrderAssigned
+import com.pios.dispatch.domain.OrderReference
 import com.pios.dispatch.domain.ProposalStatus
 import com.pios.dispatch.domain.Trip
 import com.pios.dispatch.domain.TripArrived
@@ -137,13 +138,17 @@ class DispatchAssignmentApplicationService(
     private val transactionRunner: TransactionRunner = NoOpTransactionRunner,
     private val objectMapper: ObjectMapper = ObjectMapper(),
     private val tripRepository: TripRepository = NoOpTripRepository,
-    private val proposalRepository: ProposalRepository = NoOpProposalRepository
+    private val proposalRepository: ProposalRepository = NoOpProposalRepository,
+    private val orderGuard: OrderGuard = NoOpOrderGuard,
+    private val dispatchRequestRepository: DispatchRequestRepository? = null
 ) {
 
     fun handle(
         command: AssignOrderCommand,
         existingAssignments: Collection<Assignment> = emptyList()
     ): AssignmentCreated = transactionRunner.run {
+        orderGuard.lock(command.order)
+        checkOrderIsAssignable(command.order)
         val created = Assignment.create(
             order = command.order,
             driver = command.driver,
@@ -181,6 +186,8 @@ class DispatchAssignmentApplicationService(
      * must keep using [handle] instead.
      */
     fun handleWithinCallerTransaction(command: AssignOrderCommand): AssignmentCreated {
+        orderGuard.lock(command.order)
+        checkOrderIsAssignable(command.order)
         val existingAssignments = assignmentRepository.findByOrder(command.order)
         val created = Assignment.create(
             order = command.order,
@@ -211,6 +218,13 @@ class DispatchAssignmentApplicationService(
         tripRepository.save(tripCreated.trip)
     }
 
+    private fun checkOrderIsAssignable(order: OrderReference) {
+        val state = dispatchRequestRepository?.findForUpdate(order.orderId)?.state
+        check(state != DispatchRequestState.CANCELLED && state != DispatchRequestState.UNFULFILLED) {
+            "Order ${order.orderId} is no longer assignable"
+        }
+    }
+
     /**
      * Confirms the given [assignment], per the Accept Assignment command.
      * [assignment] must be the one referenced by [command] — the caller
@@ -221,6 +235,7 @@ class DispatchAssignmentApplicationService(
         assignment: Assignment,
         command: AcceptAssignmentCommand
     ): AssignmentAccepted = transactionRunner.run {
+        orderGuard.lock(assignment.order)
         require(assignment.id == command.assignmentId) {
             "Assignment ${assignment.id.value} does not match command target ${command.assignmentId.value}"
         }
@@ -241,6 +256,7 @@ class DispatchAssignmentApplicationService(
     fun acceptAssignment(command: AcceptAssignmentCommand): AssignmentAccepted = transactionRunner.run {
         val assignment = assignmentRepository.findById(command.assignmentId)
             ?: throw AssignmentNotFoundException(command.assignmentId)
+        orderGuard.lock(assignment.order)
         acceptAssignment(assignment, command)
     }
 
@@ -267,6 +283,7 @@ class DispatchAssignmentApplicationService(
     fun arriveAssignment(command: ArriveAssignmentCommand): AssignmentArrived = transactionRunner.run {
         val assignment = assignmentRepository.findById(command.assignmentId)
             ?: throw AssignmentNotFoundException(command.assignmentId)
+        orderGuard.lock(assignment.order)
         val trip = tripFor(assignment)
         val tripEvent = trip.arrive()
         tripRepository.save(trip)
@@ -280,6 +297,7 @@ class DispatchAssignmentApplicationService(
     fun startAssignment(command: StartAssignmentCommand): AssignmentStarted = transactionRunner.run {
         val assignment = assignmentRepository.findById(command.assignmentId)
             ?: throw AssignmentNotFoundException(command.assignmentId)
+        orderGuard.lock(assignment.order)
         val trip = tripFor(assignment)
         val tripEvent = trip.start()
         tripRepository.save(trip)
@@ -299,6 +317,7 @@ class DispatchAssignmentApplicationService(
     fun completeAssignment(command: CompleteAssignmentCommand): AssignmentCompleted = transactionRunner.run {
         val assignment = assignmentRepository.findById(command.assignmentId)
             ?: throw AssignmentNotFoundException(command.assignmentId)
+        orderGuard.lock(assignment.order)
         val trip = tripFor(assignment)
         val tripEvent = trip.complete()
         tripRepository.save(trip)

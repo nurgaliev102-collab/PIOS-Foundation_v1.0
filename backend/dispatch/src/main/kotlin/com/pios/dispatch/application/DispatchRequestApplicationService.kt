@@ -38,12 +38,14 @@ class DispatchRequestApplicationService(
     private val outbox: OutboxRepository,
     private val transactionRunner: TransactionRunner,
     private val objectMapper: ObjectMapper,
-    private val clock: Clock = Clock.systemUTC()
+    private val clock: Clock = Clock.systemUTC(),
+    private val orderGuard: OrderGuard = NoOpOrderGuard
 ) {
     private val logger = LoggerFactory.getLogger(DispatchRequestApplicationService::class.java)
 
     fun routeSubmitted(command: RouteSubmittedOrderCommand) {
         transactionRunner.run {
+            orderGuard.lock(OrderReference(command.orderId))
             val record = DispatchRequestRecord(
                 orderId = command.orderId,
                 passengerReference = command.passengerReference,
@@ -73,6 +75,7 @@ class DispatchRequestApplicationService(
     }
 
     private fun attemptLocked(orderId: String) {
+        orderGuard.lock(OrderReference(orderId))
         val record: DispatchRequestRecord = requests.findForUpdate(orderId) ?: return
         if (record.state != DispatchRequestState.PENDING) return
         val order: OrderReference = OrderReference(orderId)

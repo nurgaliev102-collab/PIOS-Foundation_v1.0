@@ -143,7 +143,11 @@ interface ProposalStatusItem {
 }
 
 interface AssignmentStatusItem {
-  status: 'CREATED' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED'
+  status: 'CREATED' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED' | 'TERMINATED'
+}
+
+interface CancellationStatusItem {
+  outcome: 'PENDING' | 'TERMINATED' | 'NO_COMMITMENT' | 'REASON_REQUIRED' | 'ALREADY_COMPLETED' | 'ALREADY_TERMINATED' | null
 }
 
 /**
@@ -246,6 +250,7 @@ type PassengerRideStatus =
   | 'ARRIVED'
   | 'IN_PROGRESS'
   | 'COMPLETED'
+  | 'TERMINATED'
   | 'UNFULFILLED'
 
 /**
@@ -283,6 +288,8 @@ function formatRequestedPickupAt(requestedPickupAt: string | null): string | nul
  */
 function rideStatusLabel(status: PassengerRideStatus): string {
   switch (status) {
+    case 'TERMINATED':
+      return 'Поездка прекращена. Продолжать её нельзя.'
     case 'UNFULFILLED':
       return 'Не удалось найти водителя. Заказ закрыт, поездка не подтверждена.'
     case 'OPEN':
@@ -531,6 +538,16 @@ export function RideRequest() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [orderId, setOrderId] = useState<string | null>(null)
   const [rideStatus, setRideStatus] = useState<PassengerRideStatus>('OPEN')
+  // D-01: the polling effect below (`useEffect` on `[step, orderId,
+  // identity, driverCode]`) does not re-run when `rideStatus` changes --
+  // its own `poll()` closure would otherwise see a permanently stale
+  // value across every subsequent tick. This ref is the standard "latest
+  // ref" escape hatch, kept current by the dedicated effect right below,
+  // so `poll()` reads `rideStatusRef.current`, never `rideStatus` itself.
+  const rideStatusRef = useRef<PassengerRideStatus>('OPEN')
+  useEffect(() => {
+    rideStatusRef.current = rideStatus
+  }, [rideStatus])
   // Product Owner instruction, 2026-09-05: needed to call confirm-price/
   // decline-price on the exact proposal the driver named a price on --
   // read from the same poll every other proposal-derived field already
@@ -578,7 +595,9 @@ export function RideRequest() {
   // P0-2 Tier 1 (`docs/SPRINT_PILOT_BLOCKERS.md`; ADR-053): the passenger's
   // own way to stop waiting on an order no driver has accepted yet -- see
   // [handleCancelOrder]'s own KDoc.
-  const [cancelStatus, setCancelStatus] = useState<'idle' | 'submitting' | 'error'>('idle')
+  const [cancelStatus, setCancelStatus] = useState<'idle' | 'submitting' | 'pending' | 'reason-required' | 'error'>('idle')
+  const [terminationReason, setTerminationReason] = useState('')
+  const cancellationRequestId = useRef<string | null>(null)
   // Product audit follow-up (2026-09-12): [handleShareWithFriend]'s own
   // copy/share confirmation -- same transient-feedback shape as
   // DriverHome.tsx's own [feedback]/[feedbackTimeout].
@@ -774,6 +793,42 @@ export function RideRequest() {
     const currentIdentity = identity
     let active = true
     function poll() {
+      // D-01: only poll cancellation status once a commitment could exist
+      // to terminate (ACCEPTED/ARRIVED/IN_PROGRESS), or while this
+      // passenger's own request is outstanding -- termination is
+      // meaningless before an Assignment/Trip exists (ADR-080: Trip
+      // transitions from CREATED/ARRIVED/IN_PROGRESS only), and a
+      // pre-commitment cancel already goes through the existing,
+      // synchronous `/v1/orders/{id}/cancel` -> NO_COMMITMENT path below.
+      // Unconditionally polling this on every tick (every status, every
+      // order) would fire it for OPEN/DECLINED/LAPSED/WITHDRAWN/UNFULFILLED
+      // orders that can never have a commitment to terminate.
+      const currentRideStatus = rideStatusRef.current
+      const hasOrMayHaveHadCommitment =
+        currentRideStatus === 'ACCEPTED' || currentRideStatus === 'ARRIVED' || currentRideStatus === 'IN_PROGRESS' ||
+        cancellationRequestId.current !== null
+      if (hasOrMayHaveHadCommitment) {
+        request<CancellationStatusItem>(`/v1/orders/${orderId}/cancellation`, {
+          baseUrl: ORDER_MANAGEMENT_BASE_URL,
+          headers: { Authorization: `Bearer ${currentIdentity.token}` },
+        }).then((cancellation) => {
+          if (!active) return
+          if (cancellation.outcome === 'PENDING') setCancelStatus('pending')
+          if (cancellation.outcome === 'NO_COMMITMENT') {
+            setCancelStatus('idle')
+            setRideStatus('WITHDRAWN')
+          }
+          if (cancellation.outcome === 'TERMINATED' || cancellation.outcome === 'ALREADY_TERMINATED') {
+            setCancelStatus('idle')
+            setRideStatus('TERMINATED')
+          }
+          if (cancellation.outcome === 'REASON_REQUIRED') {
+            cancellationRequestId.current = null
+            setCancelStatus('reason-required')
+          }
+          if (cancellation.outcome === 'ALREADY_COMPLETED') setCancelStatus('error')
+        }).catch(() => { /* Existing status poll remains the fallback. */ })
+      }
       // Proposal Participant Authorization (ADR-066, P0 remediation):
       // `GET /v1/proposals?orderId=` now requires this passenger's own
       // Bearer token -- `currentIdentity` is already guaranteed non-null
@@ -1414,18 +1469,25 @@ export function RideRequest() {
    * before any JSX, when identity is null.
    */
   async function handleCancelOrder() {
-    if (!orderId || cancelStatus === 'submitting') {
+    if (!orderId || cancelStatus === 'submitting' || cancelStatus === 'pending') {
+      return
+    }
+    const hasCommitment = rideStatus === 'ACCEPTED' || rideStatus === 'ARRIVED' || rideStatus === 'IN_PROGRESS'
+    if (hasCommitment && !terminationReason) {
+      setCancelStatus('reason-required')
       return
     }
     setCancelStatus('submitting')
     try {
+      const requestId = cancellationRequestId.current ?? crypto.randomUUID()
+      cancellationRequestId.current = requestId
       await request(`/v1/orders/${orderId}/cancel`, {
         method: 'POST',
         baseUrl: ORDER_MANAGEMENT_BASE_URL,
         headers: { Authorization: `Bearer ${identity!.token}` },
+        body: JSON.stringify({ requestId, reasonCode: hasCommitment ? terminationReason : null }),
       })
-      setRideStatus('WITHDRAWN')
-      setCancelStatus('idle')
+      setCancelStatus('pending')
     } catch (error) {
       if (handleSessionExpiredError(error)) {
         return
@@ -1545,6 +1607,8 @@ export function RideRequest() {
     setRequestedPickupAt(null)
     hasFetchedRequestedPickupAt.current = false
     setCancelStatus('idle')
+    setTerminationReason('')
+    cancellationRequestId.current = null
     // ADR-070 Part 2, Q8: the driverless path's own matched-driver state
     // belongs to the order that just ended -- a repeat submission goes
     // through discovery matching again (Part 1 constraint 2 applies to
@@ -2202,6 +2266,30 @@ export function RideRequest() {
                     />
                   </div>
                 )}
+                {(rideStatus === 'ACCEPTED' || rideStatus === 'ARRIVED' || rideStatus === 'IN_PROGRESS') && (
+                  <div className={styles.actionRow}>
+                    <Select value={terminationReason} onChange={(event) => setTerminationReason(event.target.value)}>
+                      <option value="">Выберите причину прекращения</option>
+                      <option value="PLANS_CHANGED">Планы изменились</option>
+                      <option value="FOUND_ANOTHER_DRIVER">Нашёлся другой водитель</option>
+                      <option value="DRIVER_UNRESPONSIVE">Водитель не отвечает</option>
+                      <option value="CANNOT_CONTINUE">Не могу продолжить</option>
+                      <option value="OTHER">Другая причина</option>
+                    </Select>
+                    <Button
+                      label="Прекратить поездку"
+                      variant="destructive"
+                      loading={cancelStatus === 'submitting' || cancelStatus === 'pending'}
+                      onClick={() => void handleCancelOrder()}
+                    />
+                  </div>
+                )}
+                {cancelStatus === 'pending' && (
+                  <StatusMessage tone="information">Запрос обрабатывается. Поездка ещё не отменена.</StatusMessage>
+                )}
+                {cancelStatus === 'reason-required' && (
+                  <StatusMessage tone="warning">Водитель уже принял заказ. Выберите причину и подтвердите прекращение.</StatusMessage>
+                )}
                 {rideStatus === 'UNFULFILLED' && (
                   <div className={styles.actionRow}>
                     <Button label="Создать новый заказ" onClick={() => {
@@ -2223,7 +2311,7 @@ export function RideRequest() {
                     branch immediately below (Repeat Ride) -- none of these
                     three ever produced an actual ride, so they keep the
                     plain, unconditional "Заказать ещё раз" wording. */}
-                {(rideStatus === 'DECLINED' || rideStatus === 'LAPSED' || rideStatus === 'WITHDRAWN') && (
+                {(rideStatus === 'DECLINED' || rideStatus === 'LAPSED' || rideStatus === 'WITHDRAWN' || rideStatus === 'TERMINATED') && (
                   <div className={styles.actionRow}>
                     <Button label="Заказать ещё раз" variant="primary" onClick={handleOrderAgain} />
                   </div>

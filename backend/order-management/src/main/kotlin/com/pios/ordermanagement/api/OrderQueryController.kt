@@ -65,7 +65,8 @@ class OrderQueryController(
     private val retrieveOrdersHandler: RetrieveOrdersHandler,
     private val ownerCredentialGate: OwnerCredentialGate,
     private val sessionTokenVerifier: SessionTokenVerifier,
-    private val driverOrderAccess: DriverOrderAccess
+    private val driverOrderAccess: DriverOrderAccess,
+    private val cancellationRequests: com.pios.ordermanagement.application.OrderCancellationRequestRepository? = null
 ) {
 
     @GetMapping
@@ -140,7 +141,8 @@ class OrderQueryController(
             requestedPickupAt?.toString(),
             isTest,
             passengerCount,
-            notes
+            notes,
+            cancellationRequests?.findTermination(id.value) != null
         )
 
     companion object {

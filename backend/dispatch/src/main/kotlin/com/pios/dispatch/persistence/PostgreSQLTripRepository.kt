@@ -5,6 +5,9 @@ import com.pios.dispatch.domain.AssignmentId
 import com.pios.dispatch.domain.Trip
 import com.pios.dispatch.domain.TripId
 import com.pios.dispatch.domain.TripStatus
+import com.pios.dispatch.domain.Termination
+import com.pios.dispatch.domain.TerminationInitiator
+import com.pios.dispatch.domain.TerminationReasonCode
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Repository
 import java.sql.ResultSet
@@ -48,15 +51,21 @@ class PostgreSQLTripRepository(
             """
             INSERT INTO trips (
                 id, assignment_id, order_reference, driver_reference, status, status_changed_at,
-                arrived_at, started_at, completed_at, is_test
+                arrived_at, started_at, completed_at, is_test, termination_request_id,
+                termination_initiator, termination_reason_code, termination_note, terminated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 status = EXCLUDED.status,
                 status_changed_at = EXCLUDED.status_changed_at,
                 arrived_at = EXCLUDED.arrived_at,
                 started_at = EXCLUDED.started_at,
-                completed_at = EXCLUDED.completed_at
+                completed_at = EXCLUDED.completed_at,
+                termination_request_id = EXCLUDED.termination_request_id,
+                termination_initiator = EXCLUDED.termination_initiator,
+                termination_reason_code = EXCLUDED.termination_reason_code,
+                termination_note = EXCLUDED.termination_note,
+                terminated_at = EXCLUDED.terminated_at
             """.trimIndent(),
             trip.id.value,
             trip.assignmentId.value,
@@ -67,7 +76,12 @@ class PostgreSQLTripRepository(
             trip.arrivedAt?.let { Timestamp.from(it) },
             trip.startedAt?.let { Timestamp.from(it) },
             trip.completedAt?.let { Timestamp.from(it) },
-            trip.isTest
+            trip.isTest,
+            trip.termination?.requestId,
+            trip.termination?.initiator?.name,
+            trip.termination?.reasonCode?.name,
+            trip.termination?.note,
+            trip.termination?.terminatedAt?.let { Timestamp.from(it) }
         )
     }
 
@@ -75,7 +89,8 @@ class PostgreSQLTripRepository(
         val rows = jdbcTemplate.query(
             """
             SELECT id, assignment_id, order_reference, driver_reference, status, status_changed_at,
-                   arrived_at, started_at, completed_at, is_test
+                   arrived_at, started_at, completed_at, is_test, termination_request_id,
+                   termination_initiator, termination_reason_code, termination_note, terminated_at
             FROM trips WHERE id = ?
             """.trimIndent(),
             { rs, _ -> reconstruct(rs) },
@@ -88,7 +103,8 @@ class PostgreSQLTripRepository(
         val rows = jdbcTemplate.query(
             """
             SELECT id, assignment_id, order_reference, driver_reference, status, status_changed_at,
-                   arrived_at, started_at, completed_at, is_test
+                   arrived_at, started_at, completed_at, is_test, termination_request_id,
+                   termination_initiator, termination_reason_code, termination_note, terminated_at
             FROM trips WHERE assignment_id = ?
             """.trimIndent(),
             { rs, _ -> reconstruct(rs) },
@@ -128,6 +144,23 @@ class PostgreSQLTripRepository(
                 trip.arrive(arrivedAt)
                 trip.start(startedAt)
                 trip.complete(completedAt)
+            }
+            TripStatus.TERMINATED -> {
+                if (rs.getTimestamp("started_at") != null) {
+                    trip.arrive(arrivedAt)
+                    trip.start(startedAt)
+                } else if (rs.getTimestamp("arrived_at") != null) {
+                    trip.arrive(arrivedAt)
+                }
+                trip.terminate(
+                    Termination(
+                        requestId = rs.getString("termination_request_id"),
+                        initiator = TerminationInitiator.valueOf(rs.getString("termination_initiator")),
+                        reasonCode = TerminationReasonCode.valueOf(rs.getString("termination_reason_code")),
+                        terminatedAt = rs.getTimestamp("terminated_at").toInstant(),
+                        note = rs.getString("termination_note")
+                    )
+                )
             }
         }
         return trip

@@ -62,6 +62,7 @@ export interface OrderListItem {
   pickupAddress: string | null
   requestedPickupAt: string | null
   isTest: boolean
+  commitmentTerminated?: boolean
   /** PIOS Group and Long-Distance Rides Roadmap, Stage 2 -- `Order.passengerCount`, unchanged. */
   passengerCount?: number | null
 }

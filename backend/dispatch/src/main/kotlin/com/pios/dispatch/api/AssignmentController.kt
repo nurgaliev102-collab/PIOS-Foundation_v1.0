@@ -348,7 +348,11 @@ class AssignmentController(
             trip?.arrivedAt?.toString(),
             trip?.startedAt?.toString(),
             trip?.completedAt?.toString(),
-            isTest
+            isTest,
+            trip?.termination?.initiator?.name,
+            trip?.termination?.reasonCode?.name,
+            trip?.termination?.terminatedAt?.toString(),
+            trip?.termination?.note
         )
     }
 

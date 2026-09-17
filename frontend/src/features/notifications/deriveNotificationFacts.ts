@@ -77,10 +77,10 @@
 
 export type NotificationAudience = 'driver' | 'passenger'
 
-export type NotificationFactKind = 'D1' | 'D2' | 'D3' | 'D4' | 'D5' | 'D6' | 'D7' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7'
+export type NotificationFactKind = 'D1' | 'D2' | 'D3' | 'D4' | 'D5' | 'D6' | 'D7' | 'D8' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7' | 'P8'
 
 export type ProposalStatusValue = 'OPEN' | 'PRICE_PROPOSED' | 'ACCEPTED' | 'DECLINED' | 'LAPSED' | 'WITHDRAWN'
-export type AssignmentStatusValue = 'CREATED' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED'
+export type AssignmentStatusValue = 'CREATED' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED' | 'TERMINATED'
 
 /** The subset of `ProposalListItem`/`ProposalStatusItem` (both existing screens' own wire shapes) this derivation needs. */
 export interface NotificationProposalSnapshot {
@@ -307,6 +307,18 @@ export function deriveNotificationFacts(
         subject: { orderId: assignment.orderId },
       })
     }
+    if (before.status !== 'TERMINATED' && assignment.status === 'TERMINATED') {
+      facts.push({
+        id: `D8:${assignment.orderId}:TERMINATED`, kind: 'D8', audience: 'driver',
+        occurredAt: assignment.statusChangedAt, actionRequired: true,
+        subject: { orderId: assignment.orderId },
+      })
+      facts.push({
+        id: `P8:${assignment.orderId}:TERMINATED`, kind: 'P8', audience: 'passenger',
+        occurredAt: assignment.statusChangedAt, actionRequired: true,
+        subject: { orderId: assignment.orderId },
+      })
+    }
   }
 
   // --- Order-status transition (D5 -- the one type-only addition ADR-071 names) ---
@@ -319,7 +331,7 @@ export function deriveNotificationFacts(
     // proposal of this driver's that had actually reached ACCEPTED for
     // this order, not merely any proposal that ever existed for it.
     const acceptedProposal = current.proposals.find((p) => p.orderId === order.id && p.status === 'ACCEPTED')
-    if (!acceptedProposal) {
+    if (!acceptedProposal || current.assignments.some((a) => a.orderId === order.id && a.status === 'TERMINATED')) {
       continue
     }
     facts.push({

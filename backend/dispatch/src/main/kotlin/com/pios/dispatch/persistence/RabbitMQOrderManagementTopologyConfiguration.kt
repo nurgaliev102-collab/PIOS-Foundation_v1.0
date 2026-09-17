@@ -124,6 +124,25 @@ class RabbitMQOrderManagementTopologyConfiguration {
             .to(orderManagementEventsExchange)
             .with(ORDER_SUBMITTED_ROUTING_KEY)
 
+    @Bean
+    fun orderCancellationRequestedDeadLetterQueue(): Queue =
+        QueueBuilder.durable(CANCELLATION_REQUESTED_DEAD_LETTER_QUEUE_NAME).build()
+
+    @Bean
+    fun orderCancellationRequestedQueue(): Queue =
+        QueueBuilder.durable(CANCELLATION_REQUESTED_QUEUE_NAME)
+            .withArgument("x-dead-letter-exchange", "")
+            .withArgument("x-dead-letter-routing-key", CANCELLATION_REQUESTED_DEAD_LETTER_QUEUE_NAME)
+            .build()
+
+    @Bean
+    fun orderCancellationRequestedBinding(
+        orderCancellationRequestedQueue: Queue,
+        orderManagementEventsExchange: TopicExchange
+    ): Binding = BindingBuilder.bind(orderCancellationRequestedQueue)
+        .to(orderManagementEventsExchange)
+        .with(CANCELLATION_REQUESTED_ROUTING_KEY)
+
     companion object {
         const val PRODUCER_EXCHANGE_NAME = "order-management.events"
         const val QUEUE_NAME = "dispatch.from-order-management"
@@ -132,5 +151,8 @@ class RabbitMQOrderManagementTopologyConfiguration {
         const val ORDER_SUBMITTED_QUEUE_NAME = "dispatch.from-order-management.order-submitted"
         const val ORDER_SUBMITTED_DEAD_LETTER_QUEUE_NAME = "dispatch.from-order-management.order-submitted.dlq"
         const val ORDER_SUBMITTED_ROUTING_KEY = "order.submitted"
+        const val CANCELLATION_REQUESTED_QUEUE_NAME = "dispatch.from-order-management.cancellation-requested"
+        const val CANCELLATION_REQUESTED_DEAD_LETTER_QUEUE_NAME = "dispatch.from-order-management.cancellation-requested.dlq"
+        const val CANCELLATION_REQUESTED_ROUTING_KEY = "order.cancellation-requested"
     }
 }

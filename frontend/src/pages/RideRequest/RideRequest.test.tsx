@@ -491,11 +491,17 @@ describe('RideRequest', () => {
 
     const cancelButton = await screen.findByRole('button', { name: 'Отменить заказ' })
 
-    mockedRequest.mockResolvedValueOnce({ orderId: 'order-1', status: 'CANCELLED' }) // POST /v1/orders/order-1/cancel
+    // D-01/ADR-080: cancellation is now a durable handshake, not an
+    // optimistic local update. The POST response itself carries no
+    // outcome the UI reads; `handleCancelOrder` always moves to
+    // 'pending' on a successful POST and waits for the next poll's
+    // `GET /v1/orders/{id}/cancellation` to resolve the real outcome --
+    // exactly the "no false optimistic WITHDRAWN, show pending, then
+    // show the real result" requirement this ADR was written to satisfy.
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/orders/order-1/cancel
     await userEvent.click(cancelButton)
 
-    expect(await screen.findByText('🚫 Вы отменили этот заказ.')).toBeInTheDocument()
-    expect(await screen.findByRole('button', { name: 'Заказать ещё раз' })).toBeInTheDocument()
+    expect(await screen.findByText('Запрос обрабатывается. Поездка ещё не отменена.')).toBeInTheDocument()
     const cancelCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/orders/order-1/cancel')
     expect(cancelCall).toBeDefined()
     expect((cancelCall?.[1] as RequestInit).method).toBe('POST')
@@ -505,7 +511,26 @@ describe('RideRequest', () => {
     expect((cancelCall?.[1] as RequestInit).headers as Record<string, string>).toMatchObject({
       Authorization: `Bearer ${TEST_IDENTITY.token}`,
     })
-  })
+
+    // The next real poll tick (3s, STATUS_POLL_INTERVAL_MS -- this suite
+    // uses real timers throughout, not fake ones) now also checks
+    // cancellation status, because a request is outstanding. Resolve it
+    // to the pre-commitment outcome; the underlying Proposal is withdrawn
+    // by the same handshake (ADR-080: "without an assignment it records a
+    // cancellation tombstone and withdraws an open proposal"), so the same
+    // tick's own proposal poll must reflect that too -- mocking it as
+    // still `OPEN` would race the pre-existing `openItem` branch's own
+    // `setRideStatus('OPEN')` (RideRequest.tsx line ~935) against this
+    // handler's `setRideStatus('WITHDRAWN')`, and is not what production
+    // ever actually returns post-cancellation. The default findBy*
+    // timeout (1000ms) is shorter than the poll interval, so an explicit
+    // timeout is required here, matching the real interval with margin.
+    mockedRequest.mockResolvedValueOnce({ outcome: 'NO_COMMITMENT' }) // GET /v1/orders/order-1/cancellation
+    mockedRequest.mockResolvedValueOnce([{ status: 'WITHDRAWN', proposalId: 'proposal-1' }]) // the same tick's own proposal poll
+
+    expect(await screen.findByText('🚫 Вы отменили этот заказ.', {}, { timeout: 4000 })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Заказать ещё раз' })).toBeInTheDocument()
+  }, 8000) // waits out one real 3s poll tick (STATUS_POLL_INTERVAL_MS); vitest's 5000ms default is too tight
 
   it('does not offer to cancel once the driver has already accepted', async () => {
     saveCurrentOrderId('driver-1', 'order-1')

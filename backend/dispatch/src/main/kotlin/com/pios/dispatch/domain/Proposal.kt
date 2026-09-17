@@ -312,7 +312,7 @@ class Proposal private constructor(
      * (ADR-043).
      */
     fun withdraw(at: Instant = Instant.now()): ProposalWithdrawn {
-        check(status == ProposalStatus.OPEN) {
+        check(status == ProposalStatus.OPEN || status == ProposalStatus.PRICE_PROPOSED) {
             "Proposal ${id.value} cannot be withdrawn from status $status"
         }
         status = ProposalStatus.WITHDRAWN
