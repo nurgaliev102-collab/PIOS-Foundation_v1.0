@@ -89,11 +89,12 @@ class IdentityControllerTest {
     private val phoneOtpRequestRateLimiter = PhoneOtpRequestRateLimiter(maxPerWindow = 1000, windowMillis = 3_600_000)
     private val otpClientKeyRateLimiter = OtpClientKeyRateLimiter(maxPerWindow = 1000, windowMillis = 3_600_000)
     private val requestRecoveryService =
-        RequestRecoveryApplicationService(identityRepository, challengeIssuer, phoneOtpRequestRateLimiter)
+        RequestRecoveryApplicationService(identityRepository, challengeIssuer, phoneOtpRequestRateLimiter, otpClientKeyRateLimiter)
     private val confirmRecoveryService = ConfirmRecoveryApplicationService(
         identityRepository, credentialRepository, challengeRepository, passwordHasher, sessionTokenIssuer
     )
-    private val requestPhoneVerificationService = RequestPhoneVerificationApplicationService(identityRepository, challengeIssuer)
+    private val requestPhoneVerificationService =
+        RequestPhoneVerificationApplicationService(identityRepository, challengeIssuer, phoneOtpRequestRateLimiter)
     private val confirmPhoneVerificationService =
         ConfirmPhoneVerificationApplicationService(identityRepository, challengeRepository, passwordHasher)
     private val controller = IdentityController(
@@ -440,8 +441,8 @@ class IdentityControllerTest {
     fun `recovery request returns the identical status for an unknown, unregistered, and eligible phone`() {
         register("+79992220001") // registered, but not phone-verified -- not eligible either
 
-        val unknown = controller.requestRecovery(RecoveryRequestRequest("+79992220099"))
-        val notVerified = controller.requestRecovery(RecoveryRequestRequest("+79992220001"))
+        val unknown = controller.requestRecoveryFromAddress("+79992220099", "127.0.0.1", null)
+        val notVerified = controller.requestRecoveryFromAddress("+79992220001", "127.0.0.1", null)
 
         assertEquals(unknown.statusCode, notVerified.statusCode)
         assertEquals(HttpStatus.ACCEPTED, unknown.statusCode)
@@ -452,7 +453,7 @@ class IdentityControllerTest {
         val registered = register("+79992220002")
         verifyPhoneViaLegacyEnrolment(registered)
 
-        val response = controller.requestRecovery(RecoveryRequestRequest("+79992220002"))
+        val response = controller.requestRecoveryFromAddress("+79992220002", "127.0.0.1", null)
 
         assertEquals(HttpStatus.ACCEPTED, response.statusCode)
         // The only observable difference is on the test double standing in
@@ -482,13 +483,13 @@ class IdentityControllerTest {
         val registered = register("+79992220003")
         // Freshly registered -- per ADR-082 Part 2, not yet phone-verified,
         // and therefore not yet recovery-eligible (proven first).
-        val premature = controller.requestRecovery(RecoveryRequestRequest("+79992220003"))
+        val premature = controller.requestRecoveryFromAddress("+79992220003", "127.0.0.1", null)
         assertEquals(HttpStatus.ACCEPTED, premature.statusCode) // generic response
         assertFalse(smsPort.sentCodes.containsKey("+79992220003"))
 
         verifyPhoneViaLegacyEnrolment(registered)
 
-        controller.requestRecovery(RecoveryRequestRequest("+79992220003"))
+        controller.requestRecoveryFromAddress("+79992220003", "127.0.0.1", null)
         assertTrue(smsPort.sentCodes.containsKey("+79992220003"))
     }
 
@@ -510,7 +511,7 @@ class IdentityControllerTest {
     fun `recovery confirm with a correct code replaces the password and the old password stops working`() {
         val registered = register("+79992220005")
         verifyPhoneViaLegacyEnrolment(registered)
-        controller.requestRecovery(RecoveryRequestRequest("+79992220005"))
+        controller.requestRecoveryFromAddress("+79992220005", "127.0.0.1", null)
         val code = smsPort.sentCodes.getValue("+79992220005")
 
         val confirmed = controller.confirmRecovery(RecoveryConfirmRequest("+79992220005", code, "brand-new-password-xyz"))
@@ -526,7 +527,7 @@ class IdentityControllerTest {
     fun `after recovery, the pre-recovery token is rejected by identity's own endpoints`() {
         val registered = register("+79992220006")
         verifyPhoneViaLegacyEnrolment(registered)
-        controller.requestRecovery(RecoveryRequestRequest("+79992220006"))
+        controller.requestRecoveryFromAddress("+79992220006", "127.0.0.1", null)
         val code = smsPort.sentCodes.getValue("+79992220006")
         controller.confirmRecovery(RecoveryConfirmRequest("+79992220006", code, "brand-new-password-abc"))
 
@@ -544,7 +545,7 @@ class IdentityControllerTest {
     fun `after recovery, the freshly minted token works normally`() {
         val registered = register("+79992220007")
         verifyPhoneViaLegacyEnrolment(registered)
-        controller.requestRecovery(RecoveryRequestRequest("+79992220007"))
+        controller.requestRecoveryFromAddress("+79992220007", "127.0.0.1", null)
         val code = smsPort.sentCodes.getValue("+79992220007")
         val recovered = assertNotNull(
             controller.confirmRecovery(RecoveryConfirmRequest("+79992220007", code, "brand-new-password-def")).body
@@ -561,7 +562,7 @@ class IdentityControllerTest {
         val reLoggedIn = assertNotNull(controller.login(LoginRequest("+79992220008", "correct-horse-battery-staple")).body)
         verifyPhoneViaAuthResponse(reLoggedIn)
 
-        controller.requestRecovery(RecoveryRequestRequest("+79992220008"))
+        controller.requestRecoveryFromAddress("+79992220008", "127.0.0.1", null)
         val code = smsPort.sentCodes.getValue("+79992220008")
         val recovered = assertNotNull(
             controller.confirmRecovery(RecoveryConfirmRequest("+79992220008", code, "brand-new-password-ghi")).body
@@ -575,7 +576,7 @@ class IdentityControllerTest {
     fun `recovery confirm with a wrong code returns 401, not 400`() {
         val registered = register("+79992220009")
         verifyPhoneViaLegacyEnrolment(registered)
-        controller.requestRecovery(RecoveryRequestRequest("+79992220009"))
+        controller.requestRecoveryFromAddress("+79992220009", "127.0.0.1", null)
 
         val response = controller.confirmRecovery(RecoveryConfirmRequest("+79992220009", "000000", "brand-new-password-jkl"))
         assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
@@ -591,7 +592,7 @@ class IdentityControllerTest {
     fun `recovery confirm with a too-short new password returns 400`() {
         val registered = register("+79992220010")
         verifyPhoneViaLegacyEnrolment(registered)
-        controller.requestRecovery(RecoveryRequestRequest("+79992220010"))
+        controller.requestRecoveryFromAddress("+79992220010", "127.0.0.1", null)
         val code = smsPort.sentCodes.getValue("+79992220010")
 
         val response = controller.confirmRecovery(RecoveryConfirmRequest("+79992220010", code, "short"))
@@ -619,7 +620,7 @@ class IdentityControllerTest {
     fun `the pre-recovery token's own signature and expiry remain genuinely valid to a verifier with no database access`() {
         val registered = register("+79992220011")
         verifyPhoneViaLegacyEnrolment(registered)
-        controller.requestRecovery(RecoveryRequestRequest("+79992220011"))
+        controller.requestRecoveryFromAddress("+79992220011", "127.0.0.1", null)
         val code = smsPort.sentCodes.getValue("+79992220011")
         controller.confirmRecovery(RecoveryConfirmRequest("+79992220011", code, "brand-new-password-pqr"))
 
@@ -635,6 +636,86 @@ class IdentityControllerTest {
         // live Identity and compares sgen, actually rejects it (see the
         // dedicated test above) -- proving the rejection is a controller-
         // level check, not something verify() itself provides.
+    }
+
+    // --- D-03.7 closure pass: both rate limiters apply to both OTP purposes ---
+
+    private fun controllerWithLimits(phoneMaxPerWindow: Int, clientKeyMaxPerWindow: Int): IdentityController {
+        val tightPhoneLimiter = PhoneOtpRequestRateLimiter(phoneMaxPerWindow, 3_600_000)
+        val tightClientKeyLimiter = OtpClientKeyRateLimiter(clientKeyMaxPerWindow, 3_600_000)
+        val tightRequestRecoveryService =
+            RequestRecoveryApplicationService(identityRepository, challengeIssuer, tightPhoneLimiter, tightClientKeyLimiter)
+        val tightRequestPhoneVerificationService =
+            RequestPhoneVerificationApplicationService(identityRepository, challengeIssuer, tightPhoneLimiter)
+        return IdentityController(
+            registerService, loginService, retrieveIdentityHandler, associateDriverService,
+            sessionTokenVerifier, createGuestService, guestRateLimiter, upgradeGuestService,
+            tightRequestRecoveryService, confirmRecoveryService, tightRequestPhoneVerificationService,
+            confirmPhoneVerificationService, tightClientKeyLimiter
+        )
+    }
+
+    @Test
+    fun `recovery request applies the client-key budget too, with the identical generic 202 response either way`() {
+        val limited = controllerWithLimits(phoneMaxPerWindow = 1000, clientKeyMaxPerWindow = 1)
+
+        val first = limited.requestRecoveryFromAddress("+79993330001", "198.51.100.30", null)
+        val second = limited.requestRecoveryFromAddress("+79993330002", "198.51.100.30", null) // same client key, different phone
+
+        assertEquals(HttpStatus.ACCEPTED, first.statusCode)
+        assertEquals(HttpStatus.ACCEPTED, second.statusCode)
+        assertEquals(first.statusCode, second.statusCode)
+    }
+
+    @Test
+    fun `recovery request applies the phone budget too, with the identical generic 202 response either way`() {
+        val limited = controllerWithLimits(phoneMaxPerWindow = 1, clientKeyMaxPerWindow = 1000)
+
+        val first = limited.requestRecoveryFromAddress("+79993330003", "198.51.100.31", null)
+        val second = limited.requestRecoveryFromAddress("+79993330003", "198.51.100.32", null) // same phone, different client key
+
+        assertEquals(HttpStatus.ACCEPTED, first.statusCode)
+        assertEquals(HttpStatus.ACCEPTED, second.statusCode)
+    }
+
+    @Test
+    fun `an exhausted client-key budget never actually sends a second recovery code`() {
+        val limited = controllerWithLimits(phoneMaxPerWindow = 1000, clientKeyMaxPerWindow = 1)
+        val registered = register("+79993330004")
+        // Reach eligibility through the *unlimited* controller, so only the
+        // rate limit under test is what's tight.
+        verifyPhoneViaLegacyEnrolment(registered)
+
+        limited.requestRecoveryFromAddress("+79993330004", "198.51.100.33", null)
+        smsPort.sentCodes.remove("+79993330004")
+        limited.requestRecoveryFromAddress("+79993330004", "198.51.100.33", null) // same client key again
+
+        assertFalse(smsPort.sentCodes.containsKey("+79993330004"))
+    }
+
+    @Test
+    fun `legacy enrolment request applies the phone budget too, returning 429`() {
+        val limited = controllerWithLimits(phoneMaxPerWindow = 1, clientKeyMaxPerWindow = 1000)
+        val registered = register("+79993330005")
+
+        val first = limited.requestPhoneVerificationFromAddress("198.51.100.34", null, bearer(registered.token))
+        assertEquals(HttpStatus.ACCEPTED, first.statusCode)
+
+        val second = limited.requestPhoneVerificationFromAddress("198.51.100.35", null, bearer(registered.token)) // different client key
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, second.statusCode)
+    }
+
+    @Test
+    fun `legacy enrolment request applies the client-key budget too, returning 429`() {
+        val limited = controllerWithLimits(phoneMaxPerWindow = 1000, clientKeyMaxPerWindow = 1)
+        val first = register("+79993330006")
+        val second = register("+79993330007")
+
+        val firstResponse = limited.requestPhoneVerificationFromAddress("198.51.100.36", null, bearer(first.token))
+        assertEquals(HttpStatus.ACCEPTED, firstResponse.statusCode)
+
+        val secondResponse = limited.requestPhoneVerificationFromAddress("198.51.100.36", null, bearer(second.token)) // same client key
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, secondResponse.statusCode)
     }
 
     // --- helpers ---

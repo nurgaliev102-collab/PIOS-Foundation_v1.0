@@ -26,6 +26,7 @@ import com.pios.identity.application.RequestPhoneVerificationApplicationService
 import com.pios.identity.application.RequestRecoveryApplicationService
 import com.pios.identity.application.RetrieveIdentityHandler
 import com.pios.identity.application.StaleSessionException
+import com.pios.identity.application.TooManyOtpRequestsException
 import com.pios.identity.application.UpgradeGuestIdentityApplicationService
 import com.pios.identity.application.UpgradeGuestIdentityCommand
 import com.pios.identity.domain.Identity
@@ -267,15 +268,25 @@ class IdentityController(
     /**
      * ADR-082 (D-03) — `POST /v1/identities/recovery/request`. Always the
      * same generic response (D-03.7): whether the phone is unknown, a
-     * guest's, unregistered, unverified-legacy, or genuinely
-     * recovery-eligible is never observable from this endpoint's own
-     * response. Rate limiting happens inside
-     * [requestRecoveryApplicationService] itself (per-phone) precisely so
-     * its own outcome never leaks into this response either.
+     * guest's, unregistered, unverified-legacy, rate-limited (by phone
+     * *or* by client/IP key), or genuinely recovery-eligible is never
+     * observable from this endpoint's own response — every one of those
+     * outcomes is decided inside [requestRecoveryApplicationService]
+     * itself, which never throws and never returns anything this method
+     * could branch on, precisely so a rate-limit decision can never become
+     * a second enumeration oracle alongside the phone-existence one.
      */
     @PostMapping("/recovery/request")
-    fun requestRecovery(@RequestBody request: RecoveryRequestRequest): ResponseEntity<Map<String, Nothing>> {
-        requestRecoveryApplicationService.handle(request.phone)
+    fun requestRecovery(
+        request: HttpServletRequest,
+        @RequestHeader("X-PIOS-Client-IP", required = false) proxiedClientIp: String?,
+        @RequestBody body: RecoveryRequestRequest
+    ): ResponseEntity<Map<String, Nothing>> = requestRecoveryFromAddress(body.phone, request.remoteAddr, proxiedClientIp)
+
+    /** Transport-independent seam for the socket/proxy trust decision, mirroring [createGuestFromAddress]'s own shape. */
+    internal fun requestRecoveryFromAddress(phone: String, remoteAddress: String, proxiedClientIp: String?): ResponseEntity<Map<String, Nothing>> {
+        val clientKey = clientKeyFrom(remoteAddress, proxiedClientIp)
+        requestRecoveryApplicationService.handle(phone, clientKey)
         // A real, empty JSON object, not a bodiless 202: apiClient.ts's
         // shared `request()` helper only special-cases 204 for a body-less
         // response and otherwise always attempts `response.json()` -- a
@@ -352,6 +363,13 @@ class IdentityController(
             ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
         } catch (ex: PhoneAlreadyVerifiedException) {
             ResponseEntity.status(HttpStatus.CONFLICT).build()
+        } catch (ex: TooManyOtpRequestsException) {
+            // D-03.7 closure pass: the per-phone budget, checked inside
+            // requestPhoneVerificationApplicationService itself (keyed by
+            // this identity's own on-file phone) -- same status the
+            // client-key check just above already produces, for the
+            // caller's own already-authenticated account.
+            ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build()
         }
     }
 

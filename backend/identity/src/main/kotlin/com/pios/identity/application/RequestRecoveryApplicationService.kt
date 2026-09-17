@@ -20,18 +20,32 @@ import org.springframework.stereotype.Service
  * itself never matching one — no special-case branch is needed or added.
  * An unverified-legacy identity is excluded explicitly (D-03.2: knowing a
  * phone number is never sufficient by itself).
+ *
+ * D-03.7 closure pass: rate-limited by **both** phone and client/IP key,
+ * the same two limiter classes [RequestPhoneVerificationApplicationService]
+ * also uses for the other OTP purpose — never a third system. Both checks
+ * fail the exact same way (a silent `return`, no exception, no status
+ * distinguishable from any other outcome): this endpoint is anonymous, so
+ * a rate-limit failure must never become an enumeration oracle any more
+ * than "unknown phone" or "unverified legacy" already are.
  */
 @Service
 class RequestRecoveryApplicationService(
     private val identityRepository: IdentityRepository,
     private val challengeIssuer: PhoneVerificationChallengeIssuer,
-    private val phoneOtpRequestRateLimiter: PhoneOtpRequestRateLimiter
+    private val phoneOtpRequestRateLimiter: PhoneOtpRequestRateLimiter,
+    private val otpClientKeyRateLimiter: OtpClientKeyRateLimiter
 ) {
-    fun handle(rawPhone: String) {
+    fun handle(rawPhone: String, clientKey: String) {
         // Rate-limited by phone regardless of whether it resolves to
         // anything -- an attacker probing many phone numbers is bounded the
-        // same way a real recovering user would be.
+        // same way a real recovering user would be. Checked before the
+        // client-key budget so a single-phone-targeted burst never spends
+        // the client's own general budget it needs for other phones.
         if (!phoneOtpRequestRateLimiter.tryAcquire(rawPhone)) {
+            return
+        }
+        if (!otpClientKeyRateLimiter.tryAcquire(clientKey)) {
             return
         }
         val phone = phoneOrNull(rawPhone) ?: return

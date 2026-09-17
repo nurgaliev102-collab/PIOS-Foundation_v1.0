@@ -6,10 +6,15 @@ import com.pios.identity.application.ConfirmPhoneVerificationOutcome
 import com.pios.identity.application.ConfirmRecoveryApplicationService
 import com.pios.identity.application.ConfirmRecoveryCommand
 import com.pios.identity.application.ConfirmRecoveryOutcome
+import com.pios.identity.application.LoginApplicationService
+import com.pios.identity.application.LoginCommand
+import com.pios.identity.application.LoginOutcome
+import com.pios.identity.application.LoginRateLimiter
 import com.pios.identity.application.OutboundSmsPort
 import com.pios.identity.application.PasswordHasher
 import com.pios.identity.application.PhoneVerificationChallengeIssuer
 import com.pios.identity.application.SessionTokenIssuer
+import com.pios.identity.application.StaleSessionException
 import com.pios.identity.domain.Identity
 import com.pios.identity.domain.IdentityId
 import com.pios.identity.domain.PasswordCredential
@@ -173,6 +178,122 @@ class PhoneVerificationChallengePostgreSQLTest {
         val outcomes = listOf(wrong.getOrThrow(), right.getOrThrow())
         assertEquals(1, outcomes.count { it is ConfirmRecoveryOutcome.Success })
         assertEquals(1, identities.findById(identity.id)!!.sessionGeneration)
+    }
+
+    // --- D-03 closure pass: cross-purpose concurrency (recovery confirm vs legacy-enrolment confirm) ---
+
+    /**
+     * The adversarial pair the closure pass asked to be proven, not
+     * assumed: `ConfirmRecoveryApplicationService` and
+     * `ConfirmPhoneVerificationApplicationService` each do a single,
+     * early, unlocked read of the `Identity` row, then an unconditional
+     * full-row `save()` -- the exact shape a lost update needs. Two
+     * independent things turn out to prevent it here, both found by
+     * actually running this race, not only by reasoning about it:
+     *
+     * 1. Mutually exclusive read-time preconditions: recovery requires
+     *    `phoneVerifiedAt != null` to proceed at all; legacy-enrolment-confirm
+     *    requires `phoneVerifiedAt == null`. On the same row at the same
+     *    instant those cannot both hold, so at most one of the two can ever
+     *    pass its own precondition and reach a write.
+     * 2. `ConfirmPhoneVerificationApplicationService`'s own pre-existing
+     *    `sessionGeneration` staleness check (added for the unrelated
+     *    stolen-token scenario, ADR-082 §8) also fires here: if recovery's
+     *    generation bump commits before legacy's read, legacy's own
+     *    `presentedGeneration` (0, the only value reachable in this test --
+     *    no prior recovery had happened yet to mint a caller a `sgen: 1`
+     *    token) no longer matches, and it throws `StaleSessionException`
+     *    instead of returning `Failure`. This was the first, genuinely
+     *    reproducible outcome of this exact race in this closure pass (2 of
+     *    3 initial runs returned `Failure`; the third threw) -- both are
+     *    safe: the exception aborts legacy's transaction before any write,
+     *    identical in effect to `Failure`. Asserted below as "either safe
+     *    outcome", not silently narrowed to just one.
+     *
+     * This test races them for real, on the same identity, from both of
+     * the only two reachable starting states, repeated, to confirm that
+     * structural exclusion actually holds under real PostgreSQL
+     * concurrency rather than only in single-threaded reasoning.
+     */
+    @Test
+    fun `racing a recovery confirm against a legacy-enrolment confirm on an already-verified identity never loses the recovery effect, repeated`() {
+        repeat(5) {
+            val (identity, phone) = registerVerifiedIdentity() // phoneVerifiedAt already set -- legacy-confirm's own precondition must block it
+            val recoveryCode = issueAndCapture(identity.id, phone, PhoneVerificationPurpose.RECOVERY)
+            // A live LEGACY_ENROLLMENT challenge too, so the race is a real
+            // contest -- not a foregone conclusion because no second
+            // challenge even exists to attempt.
+            val legacyCode = issueAndCapture(identity.id, phone, PhoneVerificationPurpose.LEGACY_ENROLLMENT)
+            val recoveryService = ConfirmRecoveryApplicationService(identities, credentials, challenges, passwordHasher, sessionTokenIssuer, transactions)
+            val legacyService = ConfirmPhoneVerificationApplicationService(identities, challenges, passwordHasher, transactions)
+
+            val (recoveryResult, legacyResult) = race(
+                { recoveryService.handle(ConfirmRecoveryCommand(phone.value, recoveryCode, "cross-purpose-new-password")) },
+                { legacyService.handle(ConfirmPhoneVerificationCommand(identity.id.value, legacyCode)) }
+            )
+
+            assertIs<ConfirmRecoveryOutcome.Success>(
+                recoveryResult.getOrThrow(), "recovery must succeed -- the identity was already phone-verified, and recovery has no generation precondition of its own"
+            )
+            // Legacy's own outcome may be a plain Failure (its
+            // phoneVerifiedAt precondition already false) or a thrown
+            // StaleSessionException (its generation precondition stale
+            // because recovery's bump committed first) -- both are safe,
+            // non-writing outcomes; neither is a lost update.
+            val legacyOutcome = legacyResult.fold(
+                onSuccess = { it },
+                onFailure = { ex -> assertIs<StaleSessionException>(ex, "the only exception legacy-enrolment-confirm may throw here"); null }
+            )
+            if (legacyOutcome != null) {
+                assertEquals(ConfirmPhoneVerificationOutcome.Failure, legacyOutcome)
+            }
+
+            val persisted = identities.findById(identity.id)!!
+            assertEquals(1, persisted.sessionGeneration, "recovery's own bump must survive intact -- never reverted to the pre-recovery generation")
+            assertTrue(persisted.phoneVerifiedAt != null, "phoneVerifiedAt must remain set -- never lost")
+            assertEquals(identity.driverId, persisted.driverId, "driverId must be unchanged by either operation")
+            assertEquals(identity.id, persisted.id, "Identity.id must be unchanged")
+
+            // Credential recovery actually took effect, not rolled back.
+            val loginService = LoginApplicationService(
+                identities, credentials, passwordHasher, sessionTokenIssuer,
+                LoginRateLimiter(failureDelayMillis = 0, maxFailuresPerWindow = 1000, windowMillis = 900_000)
+            )
+            assertIs<LoginOutcome.Success>(loginService.handle(LoginCommand(phone.value, "cross-purpose-new-password")))
+        }
+    }
+
+    @Test
+    fun `racing a recovery confirm against a legacy-enrolment confirm on a not-yet-verified identity never corrupts state, repeated`() {
+        repeat(5) {
+            val phone = uniqueTestPhone()
+            val identity = Identity(IdentityId(UUID.randomUUID().toString()), phone, null, Instant.now()) // phoneVerifiedAt == null -- recovery's own precondition must block it
+            identities.save(identity)
+            val hashed = passwordHasher.hash("original-password-postgres-unverified")
+            credentials.save(PasswordCredential(identity.id, hashed.hash, hashed.salt, hashed.iterations, Instant.now()))
+            val legacyCode = issueAndCapture(identity.id, phone, PhoneVerificationPurpose.LEGACY_ENROLLMENT)
+            // No RECOVERY challenge is even issuable here -- RequestRecoveryApplicationService
+            // itself refuses to issue one for an unverified identity (already
+            // proven by RequestRecoveryApplicationServiceTest) -- so the most
+            // adversarial reachable input for the recovery side is simply an
+            // arbitrary code against a nonexistent challenge, which must fail
+            // the same generic way regardless of the race.
+            val recoveryService = ConfirmRecoveryApplicationService(identities, credentials, challenges, passwordHasher, sessionTokenIssuer, transactions)
+            val legacyService = ConfirmPhoneVerificationApplicationService(identities, challenges, passwordHasher, transactions)
+
+            val (recoveryResult, legacyResult) = race(
+                { recoveryService.handle(ConfirmRecoveryCommand(phone.value, "000000", "cross-purpose-new-password-2")) },
+                { legacyService.handle(ConfirmPhoneVerificationCommand(identity.id.value, legacyCode)) }
+            )
+
+            assertEquals(ConfirmRecoveryOutcome.Failure, recoveryResult.getOrThrow(), "recovery must fail -- the identity is not yet phone-verified")
+            assertIs<ConfirmPhoneVerificationOutcome.Success>(legacyResult.getOrThrow(), "legacy-enrolment must succeed -- nothing else can have written first")
+
+            val persisted = identities.findById(identity.id)!!
+            assertEquals(0, persisted.sessionGeneration, "recovery never ran -- generation stays at its initial value")
+            assertTrue(persisted.phoneVerifiedAt != null, "legacy enrolment's own effect must not be lost")
+            assertEquals(identity.driverId, persisted.driverId)
+        }
     }
 
     @Test
