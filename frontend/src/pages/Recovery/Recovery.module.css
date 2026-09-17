@@ -1,0 +1,79 @@
+.screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
+  background: var(--pios-color-background);
+}
+
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pios-space-4);
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: var(--pios-space-6) var(--pios-space-4) var(--pios-space-8);
+  box-sizing: border-box;
+}
+
+.actionRow {
+  display: flex;
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.error {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--pios-color-error);
+  text-align: center;
+}
+
+.linkAction {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--pios-touch-target-min);
+  margin-top: 0.25rem;
+  padding: 0;
+  font-size: 0.8125rem;
+  font-family: var(--pios-font-family);
+  color: var(--pios-color-accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* Mirrors Input.module.css's own .control exactly -- PasswordInput has no
+   styling of its own by design (see that component's own KDoc) and expects
+   the caller to supply one. */
+.passwordControl {
+  width: 100%;
+  min-height: var(--pios-touch-target-min);
+  padding: 0.625rem 0.875rem;
+  font-family: var(--pios-font-family);
+  font-size: 1rem;
+  color: var(--pios-color-text-primary);
+  background: var(--pios-color-surface);
+  border: 1px solid var(--pios-color-border-strong);
+  border-radius: var(--pios-radius-sm);
+  box-sizing: border-box;
+  transition: border-color var(--pios-motion-fast) var(--pios-motion-ease-out);
+}
+
+.passwordControl:focus-visible {
+  outline: 2px solid var(--pios-color-focus-ring);
+  outline-offset: 1px;
+  border-color: var(--pios-color-accent);
+}
+
+.passwordControl:focus {
+  border-color: var(--pios-color-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .passwordControl {
+    transition: none;
+  }
+}

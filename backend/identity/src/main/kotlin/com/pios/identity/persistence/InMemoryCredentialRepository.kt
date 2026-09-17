@@ -18,4 +18,8 @@ class InMemoryCredentialRepository : CredentialRepository {
     }
 
     override fun findByIdentityId(identityId: IdentityId): PasswordCredential? = store[identityId]
+
+    override fun replace(credential: PasswordCredential) {
+        store[credential.identityId] = credential
+    }
 }

@@ -49,7 +49,7 @@ class UpgradeGuestIdentityApplicationService(
                 createdAt = Instant.now()
             )
         )
-        val issued = sessionTokenIssuer.issue(upgraded.id.value, upgraded.driverId)
+        val issued = sessionTokenIssuer.issue(upgraded.id.value, upgraded.driverId, upgraded.sessionGeneration)
         RegisterIdentityOutcome(upgraded, issued.token, issued.expiresAt)
     }
 }

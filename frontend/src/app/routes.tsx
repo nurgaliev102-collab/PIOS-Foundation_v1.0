@@ -3,6 +3,7 @@ import { DriverHome } from '../pages/DriverHome'
 import { PassengerLanding } from '../pages/PassengerLanding'
 import { RideRequest } from '../pages/RideRequest'
 import { MyDrivers } from '../pages/MyDrivers'
+import { Recovery } from '../pages/Recovery'
 import { Coordinator } from '../pages/Coordinator'
 import { NetworkTest } from '../pages/NetworkTest'
 import { OwnerControlCenter } from '../pages/OwnerControlCenter'
@@ -60,6 +61,15 @@ export const routes: RouteObject[] = [
     // page itself has nothing to show a device with no stored identity.
     path: '/me',
     element: <MyDrivers />,
+  },
+  {
+    // ADR-082 (D-03): phone-verified identity recovery for a registered,
+    // phone-verified account -- "Забыли пароль?" from DriverHome's own
+    // login screen. Public route (no session required to reach it, same
+    // as every unauthenticated entry point above) -- the page itself
+    // collects the phone number.
+    path: '/recovery',
+    element: <Recovery />,
   },
   {
     path: '/coordinator',

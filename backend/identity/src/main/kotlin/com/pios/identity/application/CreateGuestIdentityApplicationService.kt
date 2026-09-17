@@ -27,7 +27,7 @@ class CreateGuestIdentityApplicationService(
             createdAt = Instant.now()
         )
         identityRepository.save(identity)
-        val issued = sessionTokenIssuer.issueGuest(identity.id.value)
+        val issued = sessionTokenIssuer.issueGuest(identity.id.value, identity.sessionGeneration)
         GuestIdentityOutcome(identity, issued.token, issued.expiresAt)
     }
 }

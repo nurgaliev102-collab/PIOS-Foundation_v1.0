@@ -68,7 +68,7 @@ class RegisterIdentityApplicationService(
             )
         )
 
-        val issued = sessionTokenIssuer.issue(identity.id.value, identity.driverId)
+        val issued = sessionTokenIssuer.issue(identity.id.value, identity.driverId, identity.sessionGeneration)
         RegisterIdentityOutcome(identity, issued.token, issued.expiresAt)
     }
 

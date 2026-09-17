@@ -23,6 +23,14 @@ import javax.crypto.spec.SecretKeySpec
  * every verifying module's own `pios.session.secret` — ADR-055's own
  * disclosed Consequence ("a stolen token is valid until it expires... The
  * HMAC secret is shared between modules").
+ *
+ * `sessionGeneration` (ADR-082, D-03.3) is carried as the additive `sgen`
+ * claim, the same "absence reads as the conservative default" precedent
+ * `ADR-075`'s own `gst` claim already established. Every real caller
+ * passes the identity's own *current* `sessionGeneration` at mint time —
+ * see each call site's own KDoc for why. See `SessionTokenVerifier`'s own
+ * KDoc, and ADR-082 §8, for the disclosed scope of what this claim
+ * actually invalidates and where.
  */
 @Component
 class SessionTokenIssuer(
@@ -37,18 +45,18 @@ class SessionTokenIssuer(
     /**
      * Mints a token for [identityId], carrying [driverId] as the `drv`
      * claim (`null` for an Identity with no associated driver, per
-     * ADR-055 Decision 6). Throws [IllegalStateException] if
-     * `pios.session.secret` is unset — a deployment that can register or
-     * log in a caller must configure the secret; there is no
-     * "issue an unusable token" fallback.
+     * ADR-055 Decision 6) and [sessionGeneration] as the `sgen` claim
+     * (ADR-082). Throws [IllegalStateException] if `pios.session.secret`
+     * is unset — a deployment that can register or log in a caller must
+     * configure the secret; there is no "issue an unusable token" fallback.
      */
-    fun issue(identityId: String, driverId: String?): IssuedToken =
-        issue(identityId, driverId, guest = false, ttlSeconds = ttlSeconds)
+    fun issue(identityId: String, driverId: String?, sessionGeneration: Int = 0): IssuedToken =
+        issue(identityId, driverId, guest = false, ttlSeconds = ttlSeconds, sessionGeneration = sessionGeneration)
 
-    fun issueGuest(identityId: String): IssuedToken =
-        issue(identityId, driverId = null, guest = true, ttlSeconds = guestTtlSeconds)
+    fun issueGuest(identityId: String, sessionGeneration: Int = 0): IssuedToken =
+        issue(identityId, driverId = null, guest = true, ttlSeconds = guestTtlSeconds, sessionGeneration = sessionGeneration)
 
-    private fun issue(identityId: String, driverId: String?, guest: Boolean, ttlSeconds: Long): IssuedToken {
+    private fun issue(identityId: String, driverId: String?, guest: Boolean, ttlSeconds: Long, sessionGeneration: Int): IssuedToken {
         check(secretBase64.isNotBlank()) { "pios.session.secret must be configured to issue a session token" }
         val expiresAt = Instant.now().plusSeconds(ttlSeconds)
         val payloadNode = objectMapper.createObjectNode()
@@ -59,6 +67,7 @@ class SessionTokenIssuer(
             payloadNode.put("drv", driverId)
         }
         payloadNode.put("gst", guest)
+        payloadNode.put("sgen", sessionGeneration)
         payloadNode.put("exp", expiresAt.epochSecond)
         val encodedPayload = base64UrlEncode(objectMapper.writeValueAsBytes(payloadNode))
         val encodedSignature = base64UrlEncode(hmac(encodedPayload))

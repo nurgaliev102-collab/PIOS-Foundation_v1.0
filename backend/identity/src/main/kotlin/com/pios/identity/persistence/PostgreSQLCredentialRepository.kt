@@ -37,6 +37,26 @@ class PostgreSQLCredentialRepository(
         )
     }
 
+    /**
+     * ADR-082 (D-03) — a plain `UPDATE`, the one write [save] deliberately
+     * never performs. Used only by `ConfirmRecoveryApplicationService`
+     * inside its own transaction, after OTP proof of phone ownership.
+     */
+    override fun replace(credential: PasswordCredential) {
+        jdbcTemplate.update(
+            """
+            UPDATE identity_credentials
+            SET password_hash = ?, password_salt = ?, iterations = ?, created_at = ?
+            WHERE identity_id = ?
+            """.trimIndent(),
+            credential.passwordHash,
+            credential.passwordSalt,
+            credential.iterations,
+            java.sql.Timestamp.from(credential.createdAt),
+            credential.identityId.value
+        )
+    }
+
     override fun findByIdentityId(identityId: IdentityId): PasswordCredential? {
         val rows = jdbcTemplate.query(
             "SELECT identity_id, password_hash, password_salt, iterations, created_at FROM identity_credentials WHERE identity_id = ?",

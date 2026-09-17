@@ -41,7 +41,7 @@ class LoginApplicationService(
             return@run fail(command.phone)
         }
 
-        val issued = sessionTokenIssuer.issue(identity.id.value, identity.driverId)
+        val issued = sessionTokenIssuer.issue(identity.id.value, identity.driverId, identity.sessionGeneration)
         LoginOutcome.Success(identity, issued.token, issued.expiresAt)
     }
 

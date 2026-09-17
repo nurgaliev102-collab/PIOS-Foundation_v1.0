@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { DriverHome } from './DriverHome'
-import { request } from '../../api/apiClient'
+import { ApiError, request } from '../../api/apiClient'
 
 // ADR-057 (Driver Stated Time to Pickup) / ADR-058 (Scheduled Pickup Time):
 // this screen had no test file at all before these two features -- this
@@ -117,6 +117,75 @@ describe('DriverHome', () => {
     expect((availabilityCall?.[1] as RequestInit).headers as Record<string, string>).toMatchObject({
       Authorization: `Bearer ${TEST_IDENTITY.token}`,
     })
+  })
+
+  // --- Phone verification (ADR-082, D-03.2) ---
+
+  it('offers to verify the phone on Профиль when the account is not yet verified, and hides it once verified', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1', phoneVerified: false })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderDriverHome()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Профиль' }))
+
+    expect(await screen.findByText('Подтвердите номер телефона')).toBeInTheDocument()
+  })
+
+  it('does not offer to verify the phone once the account is already verified', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1', phoneVerified: true })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderDriverHome()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Профиль' }))
+    await screen.findByRole('heading', { name: 'Профиль' }) // wait for the real render, not the loading state
+
+    expect(screen.queryByText('Подтвердите номер телефона')).not.toBeInTheDocument()
+  })
+
+  it('a full request-then-confirm phone verification updates the stored identity and hides the card', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1', phoneVerified: false })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderDriverHome()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Профиль' }))
+    await screen.findByText('Подтвердите номер телефона')
+
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/identities/me/phone/verify/request
+    await userEvent.click(screen.getByRole('button', { name: 'Отправить код по SMS' }))
+    await screen.findByLabelText('Код из SMS')
+
+    const requestCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/identities/me/phone/verify/request')
+    expect(requestCall).toBeDefined()
+    expect((requestCall?.[1] as RequestInit).headers as Record<string, string>).toMatchObject({
+      Authorization: `Bearer ${TEST_IDENTITY.token}`,
+    })
+
+    await userEvent.type(screen.getByLabelText('Код из SMS'), '123456')
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1', phoneVerified: true })
+    await userEvent.click(screen.getByRole('button', { name: 'Подтвердить' }))
+
+    expect(await screen.findByText('Номер подтверждён.')).toBeInTheDocument()
+    const confirmCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/identities/me/phone/verify/confirm')
+    expect(JSON.parse((confirmCall?.[1] as RequestInit).body as string)).toEqual({ code: '123456' })
+    expect(localStorage.getItem('pios.identity')).toContain('"phoneVerified":true')
+  })
+
+  it('a wrong code on phone verification shows a generic error', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1', phoneVerified: false })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    renderDriverHome()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Профиль' }))
+    await screen.findByText('Подтвердите номер телефона')
+
+    mockedRequest.mockResolvedValueOnce({})
+    await userEvent.click(screen.getByRole('button', { name: 'Отправить код по SMS' }))
+    await userEvent.type(await screen.findByLabelText('Код из SMS'), '000000')
+
+    mockedRequest.mockRejectedValueOnce(new ApiError(401, '/v1/identities/me/phone/verify/confirm'))
+    await userEvent.click(screen.getByRole('button', { name: 'Подтвердить' }))
+
+    expect(await screen.findByText('Код неверен, устарел или уже использован. Запросите новый код.')).toBeInTheDocument()
   })
 
   // --- Vehicle (PIOS Group and Long-Distance Rides Roadmap, Stage 1) ---

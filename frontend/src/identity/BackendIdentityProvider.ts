@@ -32,6 +32,8 @@ interface IdentityApiResponse {
   id: string
   phone: string | null
   driverId: string | null
+  /** ADR-082 (D-03) — additive; absent on a backend predating this field reads as `undefined`, handled below. */
+  phoneVerified?: boolean
 }
 
 /**
@@ -141,7 +143,7 @@ export class BackendIdentityProvider implements IdentityProvider {
         headers: { Authorization: `Bearer ${cached.token}` },
         baseUrl: IDENTITY_BASE_URL,
       })
-      const identity: StoredIdentity = { ...cached, driverId: response.driverId }
+      const identity: StoredIdentity = { ...cached, driverId: response.driverId, phoneVerified: response.phoneVerified ?? false }
       this.persist(identity)
       return identity
     } catch (error) {
@@ -157,6 +159,64 @@ export class BackendIdentityProvider implements IdentityProvider {
       // person out over a momentary network problem.
       return cached
     }
+  }
+
+  /** ADR-082 (D-03) — see [IdentityProvider.requestRecovery]'s own KDoc. */
+  async requestRecovery(phone: string): Promise<void> {
+    await request<void>('/v1/identities/recovery/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone }),
+      baseUrl: IDENTITY_BASE_URL,
+    })
+  }
+
+  /** ADR-082 — see [IdentityProvider.confirmRecovery]'s own KDoc. */
+  async confirmRecovery(phone: string, code: string, newPassword: string): Promise<StoredIdentity> {
+    const response = await request<AuthResponse>('/v1/identities/recovery/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, code, newPassword }),
+      baseUrl: IDENTITY_BASE_URL,
+    })
+    return this.persistAuthResponse(response)
+  }
+
+  /** ADR-082 Part 2 — see [IdentityProvider.requestPhoneVerification]'s own KDoc. */
+  async requestPhoneVerification(): Promise<void> {
+    const current = this.getStoredIdentity()
+    if (!current) {
+      throw new Error('requestPhoneVerification called before a session exists')
+    }
+    await request<void>('/v1/identities/me/phone/verify/request', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${current.token}` },
+      baseUrl: IDENTITY_BASE_URL,
+    })
+  }
+
+  /**
+   * ADR-082 Part 2 — see [IdentityProvider.confirmPhoneVerification]'s own
+   * KDoc. Updates and persists this device's own [StoredIdentity] with
+   * the new `phoneVerified` value directly from this call's own response
+   * -- no separate `GET /v1/identities/me` round trip, deliberately (see
+   * [StoredIdentity.phoneVerified]'s own KDoc for why a second fetch here
+   * would be redundant).
+   */
+  async confirmPhoneVerification(code: string): Promise<StoredIdentity> {
+    const current = this.getStoredIdentity()
+    if (!current) {
+      throw new Error('confirmPhoneVerification called before a session exists')
+    }
+    const response = await request<IdentityApiResponse>('/v1/identities/me/phone/verify/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${current.token}` },
+      body: JSON.stringify({ code }),
+      baseUrl: IDENTITY_BASE_URL,
+    })
+    const identity: StoredIdentity = { ...current, phoneVerified: response.phoneVerified ?? false }
+    this.persist(identity)
+    return identity
   }
 
   private persistAuthResponse(response: AuthResponse): StoredIdentity {

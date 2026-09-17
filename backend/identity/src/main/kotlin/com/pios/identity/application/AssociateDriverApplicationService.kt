@@ -35,6 +35,9 @@ class AssociateDriverApplicationService(
         require(command.driverId.isNotBlank()) { "driverId must not be blank" }
         val identityId = IdentityId(command.identityId)
         val identity = identityRepository.findById(identityId) ?: throw IdentityNotFoundException(identityId)
+        if (identity.sessionGeneration != command.presentedGeneration) {
+            throw StaleSessionException()
+        }
         require(identity.phone != null) { "a guest identity cannot own a driver profile" }
         require(command.driverId == identity.id.value) {
             "a driver profile must use its owning identity id"
@@ -44,7 +47,7 @@ class AssociateDriverApplicationService(
         }
         val updated = identity.withDriverId(command.driverId)
         identityRepository.save(updated)
-        val issued = sessionTokenIssuer.issue(updated.id.value, updated.driverId)
+        val issued = sessionTokenIssuer.issue(updated.id.value, updated.driverId, updated.sessionGeneration)
         AssociateDriverOutcome(updated, issued.token, issued.expiresAt)
     }
 }

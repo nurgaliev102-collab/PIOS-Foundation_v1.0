@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { Header } from '../../components/Header'
 import { BottomNav } from '../../components/BottomNav'
 import { DriverCard } from '../../components/DriverCard'
@@ -657,6 +657,13 @@ export function DriverHome() {
   const [password, setPassword] = useState('')
   const [authError, setAuthError] = useState<string | null>(null)
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
+  // ADR-082 (D-03): the "verify your phone" card reads `identity.phoneVerified`
+  // directly -- populated by `restoreIdentity()`'s own existing `/me` round
+  // trip (no separate fetch; see `StoredIdentity.phoneVerified`'s own KDoc).
+  const [phoneVerifyStep, setPhoneVerifyStep] = useState<'idle' | 'requested' | 'done'>('idle')
+  const [phoneVerifyCode, setPhoneVerifyCode] = useState('')
+  const [phoneVerifyError, setPhoneVerifyError] = useState<string | null>(null)
+  const [isSubmittingPhoneVerify, setIsSubmittingPhoneVerify] = useState(false)
 
   const [nameInput, setNameInput] = useState('')
   const [nameError, setNameError] = useState<string | null>(null)
@@ -814,6 +821,7 @@ export function DriverHome() {
       active = false
     }
   }, [driverId])
+
 
   // PIOS Group and Long-Distance Rides Roadmap, Stage 1: seed the vehicle
   // form inputs from `driver` exactly once, the moment it first loads --
@@ -1260,6 +1268,41 @@ export function DriverHome() {
       )
     } finally {
       setIsSubmittingAuth(false)
+    }
+  }
+
+  // ADR-082 Part 2 (D-03.2): legacy-enrolment request step -- sends an OTP
+  // to this driver's own already-on-file phone. Never collects a phone
+  // number here; there is nothing to type at this step.
+  async function handleRequestPhoneVerification() {
+    setPhoneVerifyError(null)
+    setIsSubmittingPhoneVerify(true)
+    try {
+      await identityProvider.requestPhoneVerification()
+      setPhoneVerifyStep('requested')
+    } catch {
+      setPhoneVerifyError('Не удалось отправить код. Проверьте связь с интернетом и попробуйте ещё раз.')
+    } finally {
+      setIsSubmittingPhoneVerify(false)
+    }
+  }
+
+  async function handleConfirmPhoneVerification() {
+    if (!phoneVerifyCode.trim()) {
+      setPhoneVerifyError('Введите код из SMS.')
+      return
+    }
+    setPhoneVerifyError(null)
+    setIsSubmittingPhoneVerify(true)
+    try {
+      const updated = await identityProvider.confirmPhoneVerification(phoneVerifyCode.trim())
+      setIdentity(updated)
+      setPhoneVerifyStep('done')
+    } catch {
+      // ADR-082 D-03.7: never distinguishes wrong code / expired / exhausted attempts.
+      setPhoneVerifyError('Код неверен, устарел или уже использован. Запросите новый код.')
+    } finally {
+      setIsSubmittingPhoneVerify(false)
     }
   }
 
@@ -1727,6 +1770,13 @@ export function DriverHome() {
               <button type="button" className={styles.linkAction} onClick={toggleAuthMode}>
                 {authMode === 'register' ? 'Уже есть аккаунт? Войти' : 'Ещё нет аккаунта? Создать'}
               </button>
+              {authMode === 'login' && (
+                // ADR-082 (D-03): only shown for login, not registration --
+                // recovery presupposes an account already exists.
+                <Link to="/recovery" className={styles.linkAction}>
+                  Забыли пароль?
+                </Link>
+              )}
             </>
           )}
         </main>
@@ -2453,6 +2503,64 @@ export function DriverHome() {
               availability={driver.availability}
               hideCode
             />
+            {/* ADR-082 (D-03.2): a registered driver's phone starts
+                unverified (every account, legacy or freshly registered
+                after D-03) and stays that way until this flow runs once --
+                verifying is also the precondition for [Recovery] ever
+                working for this account later. `identity.phoneVerified` is
+                `undefined` until the mount-time `restoreIdentity()` round
+                trip resolves -- treated the same as `false` is not shown
+                (only a strict `=== false` renders this card), so the card
+                never flashes on before that value is actually known. */}
+            {/* Stays mounted through phoneVerifyStep === 'done' even after
+                identity.phoneVerified flips to true -- otherwise the
+                success message this same card shows would unmount itself
+                the instant verification succeeds, and a driver would never
+                actually see "Номер подтверждён." (found by a real test,
+                not by inspection alone). */}
+            {(identity?.phoneVerified === false || phoneVerifyStep === 'done') && (
+              <section className={styles.growthCard}>
+                <p className={styles.growthTitle}>Подтвердите номер телефона</p>
+                <p className={styles.hint}>
+                  Это нужно для восстановления доступа к аккаунту, если вы забудете пароль или потеряете устройство.
+                </p>
+                {phoneVerifyStep === 'idle' && (
+                  <div className={styles.actionRow}>
+                    <Button
+                      label="Отправить код по SMS"
+                      loading={isSubmittingPhoneVerify}
+                      onClick={() => void handleRequestPhoneVerification()}
+                    />
+                  </div>
+                )}
+                {phoneVerifyStep === 'requested' && (
+                  <>
+                    <FormField label="Код из SMS" htmlFor="phone-verify-code">
+                      <input
+                        id="phone-verify-code"
+                        className={styles.driverCodeInput}
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        value={phoneVerifyCode}
+                        onChange={(event) => setPhoneVerifyCode(event.target.value)}
+                      />
+                    </FormField>
+                    <div className={styles.actionRow}>
+                      <Button
+                        label="Подтвердить"
+                        loading={isSubmittingPhoneVerify}
+                        onClick={() => void handleConfirmPhoneVerification()}
+                      />
+                    </div>
+                  </>
+                )}
+                {phoneVerifyStep === 'done' && (
+                  <p className={styles.hint}>Номер подтверждён.</p>
+                )}
+                {phoneVerifyError && <p className={styles.error}>{phoneVerifyError}</p>}
+              </section>
+            )}
             {/* PIOS Group and Long-Distance Rides Roadmap, Stage 1: a
                 minimal, owned-by-driver vehicle record -- same card shape
                 as the install card just below, so this reads as one more

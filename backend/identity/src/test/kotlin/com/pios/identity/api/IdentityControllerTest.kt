@@ -1,24 +1,51 @@
 package com.pios.identity.api
 
 import com.pios.identity.application.AssociateDriverApplicationService
+import com.pios.identity.application.ConfirmPhoneVerificationApplicationService
+import com.pios.identity.application.ConfirmRecoveryApplicationService
 import com.pios.identity.application.CredentialRepository
 import com.pios.identity.application.CreateGuestIdentityApplicationService
 import com.pios.identity.application.GuestIdentityRateLimiter
 import com.pios.identity.application.LoginApplicationService
 import com.pios.identity.application.LoginRateLimiter
+import com.pios.identity.application.OtpClientKeyRateLimiter
+import com.pios.identity.application.OutboundSmsPort
 import com.pios.identity.application.PasswordHasher
+import com.pios.identity.application.PhoneOtpRequestRateLimiter
+import com.pios.identity.application.PhoneVerificationChallengeIssuer
+import com.pios.identity.application.PhoneVerificationChallengeRepository
 import com.pios.identity.application.RegisterIdentityApplicationService
+import com.pios.identity.application.RequestPhoneVerificationApplicationService
+import com.pios.identity.application.RequestRecoveryApplicationService
 import com.pios.identity.application.RetrieveIdentityHandler
 import com.pios.identity.application.SessionTokenIssuer
 import com.pios.identity.application.UpgradeGuestIdentityApplicationService
+import com.pios.identity.domain.Phone
 import com.pios.identity.persistence.InMemoryCredentialRepository
 import com.pios.identity.persistence.InMemoryIdentityRepository
+import com.pios.identity.persistence.InMemoryPhoneVerificationChallengeRepository
 import org.springframework.http.HttpStatus
 import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+/**
+ * A test-only [OutboundSmsPort] that records the last code sent per phone,
+ * so a test can "read the SMS" without any real provider -- never a
+ * production adapter, mirrors this file's own existing in-memory-repository
+ * convention.
+ */
+internal class RecordingOutboundSmsPort : OutboundSmsPort {
+    val sentCodes = ConcurrentHashMap<String, String>()
+    override fun sendVerificationCode(phone: Phone, code: String) {
+        sentCodes[phone.value] = code
+    }
+}
 
 /**
  * Constructs [IdentityController] directly, with real, in-memory-backed
@@ -54,6 +81,21 @@ class IdentityControllerTest {
         passwordHasher,
         sessionTokenIssuer
     )
+    private val challengeRepository: PhoneVerificationChallengeRepository = InMemoryPhoneVerificationChallengeRepository()
+    internal val smsPort = RecordingOutboundSmsPort()
+    private val challengeIssuer = PhoneVerificationChallengeIssuer(
+        challengeRepository, passwordHasher, smsPort, maxAttempts = 5, ttlSeconds = 600, codeDigits = 6
+    )
+    private val phoneOtpRequestRateLimiter = PhoneOtpRequestRateLimiter(maxPerWindow = 1000, windowMillis = 3_600_000)
+    private val otpClientKeyRateLimiter = OtpClientKeyRateLimiter(maxPerWindow = 1000, windowMillis = 3_600_000)
+    private val requestRecoveryService =
+        RequestRecoveryApplicationService(identityRepository, challengeIssuer, phoneOtpRequestRateLimiter)
+    private val confirmRecoveryService = ConfirmRecoveryApplicationService(
+        identityRepository, credentialRepository, challengeRepository, passwordHasher, sessionTokenIssuer
+    )
+    private val requestPhoneVerificationService = RequestPhoneVerificationApplicationService(identityRepository, challengeIssuer)
+    private val confirmPhoneVerificationService =
+        ConfirmPhoneVerificationApplicationService(identityRepository, challengeRepository, passwordHasher)
     private val controller = IdentityController(
         registerService,
         loginService,
@@ -62,7 +104,12 @@ class IdentityControllerTest {
         sessionTokenVerifier,
         createGuestService,
         guestRateLimiter,
-        upgradeGuestService
+        upgradeGuestService,
+        requestRecoveryService,
+        confirmRecoveryService,
+        requestPhoneVerificationService,
+        confirmPhoneVerificationService,
+        otpClientKeyRateLimiter
     )
 
     private fun bearer(token: String): String = "Bearer $token"
@@ -120,7 +167,9 @@ class IdentityControllerTest {
         val limitedController = IdentityController(
             registerService, loginService, retrieveIdentityHandler, associateDriverService,
             sessionTokenVerifier, createGuestService,
-            GuestIdentityRateLimiter(maxPerWindow = 1, windowMillis = 3_600_000), upgradeGuestService
+            GuestIdentityRateLimiter(maxPerWindow = 1, windowMillis = 3_600_000), upgradeGuestService,
+            requestRecoveryService, confirmRecoveryService, requestPhoneVerificationService,
+            confirmPhoneVerificationService, otpClientKeyRateLimiter
         )
 
         assertEquals(HttpStatus.CREATED, limitedController.createGuestFromAddress("198.51.100.7", "203.0.113.1").statusCode)
@@ -383,5 +432,229 @@ class IdentityControllerTest {
         )
 
         assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
+    // --- D-03 (ADR-082): recovery request enumeration safety ---
+
+    @Test
+    fun `recovery request returns the identical status for an unknown, unregistered, and eligible phone`() {
+        register("+79992220001") // registered, but not phone-verified -- not eligible either
+
+        val unknown = controller.requestRecovery(RecoveryRequestRequest("+79992220099"))
+        val notVerified = controller.requestRecovery(RecoveryRequestRequest("+79992220001"))
+
+        assertEquals(unknown.statusCode, notVerified.statusCode)
+        assertEquals(HttpStatus.ACCEPTED, unknown.statusCode)
+    }
+
+    @Test
+    fun `recovery request for an eligible phone sends no observable difference in the HTTP response either`() {
+        val registered = register("+79992220002")
+        verifyPhoneViaLegacyEnrolment(registered)
+
+        val response = controller.requestRecovery(RecoveryRequestRequest("+79992220002"))
+
+        assertEquals(HttpStatus.ACCEPTED, response.statusCode)
+        // The only observable difference is on the test double standing in
+        // for the SMS provider -- never in anything the caller receives.
+        assertTrue(smsPort.sentCodes.containsKey("+79992220002"))
+    }
+
+    // --- D-03: legacy enrolment (phone/verify/request, phone/verify/confirm) ---
+
+    @Test
+    fun `phone verify request is rejected for a guest token`() {
+        val guest = assertNotNull(controller.createGuestFromAddress("127.0.0.1", "203.0.113.20").body)
+
+        val response = controller.requestPhoneVerificationFromAddress("127.0.0.1", null, bearer(guest.token))
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+    }
+
+    @Test
+    fun `phone verify request is rejected with no token`() {
+        val response = controller.requestPhoneVerificationFromAddress("127.0.0.1", null, null)
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
+    fun `a full legacy enrolment makes the identity recovery-eligible`() {
+        val registered = register("+79992220003")
+        // Freshly registered -- per ADR-082 Part 2, not yet phone-verified,
+        // and therefore not yet recovery-eligible (proven first).
+        val premature = controller.requestRecovery(RecoveryRequestRequest("+79992220003"))
+        assertEquals(HttpStatus.ACCEPTED, premature.statusCode) // generic response
+        assertFalse(smsPort.sentCodes.containsKey("+79992220003"))
+
+        verifyPhoneViaLegacyEnrolment(registered)
+
+        controller.requestRecovery(RecoveryRequestRequest("+79992220003"))
+        assertTrue(smsPort.sentCodes.containsKey("+79992220003"))
+    }
+
+    @Test
+    fun `legacy enrolment never creates a driver association or changes sessionGeneration`() {
+        val registered = register("+79992220004")
+        val verifiedResponse = verifyPhoneViaLegacyEnrolment(registered)
+
+        assertNull(verifiedResponse.driverId)
+        assertEquals(true, verifiedResponse.phoneVerified)
+
+        val me = assertNotNull(controller.getOwnIdentity(bearer(registered.token)).body)
+        assertNull(me.driverId)
+    }
+
+    // --- D-03: recovery confirm, and the sessionGeneration invalidation it produces ---
+
+    @Test
+    fun `recovery confirm with a correct code replaces the password and the old password stops working`() {
+        val registered = register("+79992220005")
+        verifyPhoneViaLegacyEnrolment(registered)
+        controller.requestRecovery(RecoveryRequestRequest("+79992220005"))
+        val code = smsPort.sentCodes.getValue("+79992220005")
+
+        val confirmed = controller.confirmRecovery(RecoveryConfirmRequest("+79992220005", code, "brand-new-password-xyz"))
+        assertEquals(HttpStatus.OK, confirmed.statusCode)
+
+        val oldLogin = controller.login(LoginRequest("+79992220005", "correct-horse-battery-staple"))
+        assertEquals(HttpStatus.UNAUTHORIZED, oldLogin.statusCode)
+        val newLogin = controller.login(LoginRequest("+79992220005", "brand-new-password-xyz"))
+        assertEquals(HttpStatus.OK, newLogin.statusCode)
+    }
+
+    @Test
+    fun `after recovery, the pre-recovery token is rejected by identity's own endpoints`() {
+        val registered = register("+79992220006")
+        verifyPhoneViaLegacyEnrolment(registered)
+        controller.requestRecovery(RecoveryRequestRequest("+79992220006"))
+        val code = smsPort.sentCodes.getValue("+79992220006")
+        controller.confirmRecovery(RecoveryConfirmRequest("+79992220006", code, "brand-new-password-abc"))
+
+        // The token issued at registration -- before recovery -- is now stale.
+        val staleMe = controller.getOwnIdentity(bearer(registered.token))
+        assertEquals(HttpStatus.UNAUTHORIZED, staleMe.statusCode)
+
+        val staleAssociate = controller.associateDriver(
+            registered.identityId, AssociateDriverRequest(registered.identityId), bearer(registered.token)
+        )
+        assertEquals(HttpStatus.UNAUTHORIZED, staleAssociate.statusCode)
+    }
+
+    @Test
+    fun `after recovery, the freshly minted token works normally`() {
+        val registered = register("+79992220007")
+        verifyPhoneViaLegacyEnrolment(registered)
+        controller.requestRecovery(RecoveryRequestRequest("+79992220007"))
+        val code = smsPort.sentCodes.getValue("+79992220007")
+        val recovered = assertNotNull(
+            controller.confirmRecovery(RecoveryConfirmRequest("+79992220007", code, "brand-new-password-def")).body
+        )
+
+        val me = controller.getOwnIdentity(bearer(recovered.token))
+        assertEquals(HttpStatus.OK, me.statusCode)
+    }
+
+    @Test
+    fun `recovery never changes identityId or an existing driverId`() {
+        val registered = register("+79992220008")
+        controller.associateDriver(registered.identityId, AssociateDriverRequest(registered.identityId), bearer(registered.token))
+        val reLoggedIn = assertNotNull(controller.login(LoginRequest("+79992220008", "correct-horse-battery-staple")).body)
+        verifyPhoneViaAuthResponse(reLoggedIn)
+
+        controller.requestRecovery(RecoveryRequestRequest("+79992220008"))
+        val code = smsPort.sentCodes.getValue("+79992220008")
+        val recovered = assertNotNull(
+            controller.confirmRecovery(RecoveryConfirmRequest("+79992220008", code, "brand-new-password-ghi")).body
+        )
+
+        assertEquals(registered.identityId, recovered.identityId)
+        assertEquals(registered.identityId, recovered.driverId) // driverId == identityId in this test's own convention
+    }
+
+    @Test
+    fun `recovery confirm with a wrong code returns 401, not 400`() {
+        val registered = register("+79992220009")
+        verifyPhoneViaLegacyEnrolment(registered)
+        controller.requestRecovery(RecoveryRequestRequest("+79992220009"))
+
+        val response = controller.confirmRecovery(RecoveryConfirmRequest("+79992220009", "000000", "brand-new-password-jkl"))
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
+    fun `recovery confirm for an unknown phone returns 401, the same as a wrong code`() {
+        val response = controller.confirmRecovery(RecoveryConfirmRequest("+79992229999", "123456", "brand-new-password-mno"))
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
+    fun `recovery confirm with a too-short new password returns 400`() {
+        val registered = register("+79992220010")
+        verifyPhoneViaLegacyEnrolment(registered)
+        controller.requestRecovery(RecoveryRequestRequest("+79992220010"))
+        val code = smsPort.sentCodes.getValue("+79992220010")
+
+        val response = controller.confirmRecovery(RecoveryConfirmRequest("+79992220010", code, "short"))
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+    }
+
+    // --- D-03 §8: the disclosed cross-module session-invalidation trade-off ---
+
+    /**
+     * ADR-082 §8 (D-03.3): a token minted before a successful recovery is
+     * rejected by `identity`'s own endpoints (proven above by "after
+     * recovery, the pre-recovery token is rejected..."), but this proves
+     * the other half explicitly -- `sessionTokenVerifier.verify()` in
+     * isolation, exactly the call the five other modules' own replicated
+     * copies make, has no way to know a recovery happened at all: it has
+     * no database, only the token's own claims. The pre-recovery token's
+     * *signature and expiry* remain genuinely valid -- only a caller that
+     * additionally compares `sgen` against a live `Identity` row (which
+     * only `identity`'s own controller does) can tell the difference. This
+     * is the honest scope of what `sessionGeneration` invalidates: real
+     * within `identity`, absent everywhere else until natural `exp`. Never
+     * to be described as a global, instant logout.
+     */
+    @Test
+    fun `the pre-recovery token's own signature and expiry remain genuinely valid to a verifier with no database access`() {
+        val registered = register("+79992220011")
+        verifyPhoneViaLegacyEnrolment(registered)
+        controller.requestRecovery(RecoveryRequestRequest("+79992220011"))
+        val code = smsPort.sentCodes.getValue("+79992220011")
+        controller.confirmRecovery(RecoveryConfirmRequest("+79992220011", code, "brand-new-password-pqr"))
+
+        // identity's own generation is now 1 -- but a bare verify(), the
+        // only call the five other modules' own replicated verifiers ever
+        // make, still succeeds: it has no live Identity row to compare
+        // sgen against, so it cannot and does not reject this token.
+        val stillVerifiesElsewhere = sessionTokenVerifier.verify(bearer(registered.token))
+        assertNotNull(stillVerifiesElsewhere, "a bare verify() -- what the other five modules do -- must still accept the pre-recovery token")
+        assertEquals(0, stillVerifiesElsewhere.sgen, "the token's own claim is frozen at mint time, exactly as issued")
+
+        // Only identity's own controller, which additionally loads the
+        // live Identity and compares sgen, actually rejects it (see the
+        // dedicated test above) -- proving the rejection is a controller-
+        // level check, not something verify() itself provides.
+    }
+
+    // --- helpers ---
+
+    /** Registers, then verifies that same identity's on-file phone via the D-03.2 legacy-enrolment flow. */
+    private fun verifyPhoneViaLegacyEnrolment(registered: AuthResponse): IdentityResponse {
+        controller.requestPhoneVerificationFromAddress("127.0.0.1", null, bearer(registered.token))
+        val phone = identityRepository.findById(com.pios.identity.domain.IdentityId(registered.identityId))!!.phone!!.value
+        val code = smsPort.sentCodes.getValue(phone)
+        return assertNotNull(
+            controller.confirmPhoneVerification(PhoneVerifyConfirmRequest(code), bearer(registered.token)).body
+        )
+    }
+
+    private fun verifyPhoneViaAuthResponse(auth: AuthResponse): IdentityResponse {
+        controller.requestPhoneVerificationFromAddress("127.0.0.1", null, bearer(auth.token))
+        val phone = identityRepository.findById(com.pios.identity.domain.IdentityId(auth.identityId))!!.phone!!.value
+        val code = smsPort.sentCodes.getValue(phone)
+        return assertNotNull(
+            controller.confirmPhoneVerification(PhoneVerifyConfirmRequest(code), bearer(auth.token)).body
+        )
     }
 }

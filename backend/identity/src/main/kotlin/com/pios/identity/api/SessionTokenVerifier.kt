@@ -32,7 +32,18 @@ class SessionTokenVerifier(
 ) {
     private val objectMapper = ObjectMapper()
 
-    data class VerifiedToken(val sub: String, val drv: String?, val guest: Boolean = false)
+    /**
+     * [sgen] (ADR-082, D-03.3) is the session generation this token was
+     * minted at — additive, absent/non-number reads as `0`, the same
+     * conservative-default precedent [guest]'s own `gst` claim already
+     * established (`ADR-075`). Parsed here, in `identity`'s own copy of
+     * this class only: the other five modules' replicated verifiers do
+     * **not** parse or check this claim, and are not modified by ADR-082 —
+     * see that ADR's §8 for the disclosed reason (no local access to the
+     * live `Identity.sessionGeneration` value without reintroducing the
+     * per-request cross-module coupling ADR-055 Decision 1 rejected).
+     */
+    data class VerifiedToken(val sub: String, val drv: String?, val guest: Boolean = false, val sgen: Int = 0)
 
     /**
      * Verifies [authorizationHeader] (the raw `Authorization` header
@@ -80,7 +91,8 @@ class SessionTokenVerifier(
             return null
         }
         val guest = payloadNode.get("gst")?.takeIf { it.isBoolean }?.asBoolean() ?: false
-        return VerifiedToken(sub, drv, guest)
+        val sgen = payloadNode.get("sgen")?.takeIf { it.isNumber }?.asInt() ?: 0
+        return VerifiedToken(sub, drv, guest, sgen)
     }
 
     private fun extractBearerToken(header: String?): String? {
