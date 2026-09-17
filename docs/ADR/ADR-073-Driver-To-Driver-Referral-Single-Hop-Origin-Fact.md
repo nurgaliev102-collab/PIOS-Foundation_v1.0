@@ -115,6 +115,8 @@ An additive field on the **existing** `GET /v1/drivers/{id}/milestones`. That en
 
 ### Part 6 — The security fact, recorded rather than glossed
 
+> **Amendment pointer (2026-09-17, per `ADR-015`).** The sentence below — *"`POST /v1/drivers` is deliberately unauthenticated"* — was made false by `8206ff3` (2026-09-16, the ADR-076 hardening pass), which gated this endpoint behind an owner `Basic` credential or a self-naming `Bearer` session token, and is now further extended by `ADR-079` (Test-Data Credential for Synthetic (`isTest`) Driver Creation), which adds a third, narrowly-scoped `PiosTest` credential. Original text preserved below, per `CLAUDE.md` "Never Delete Documentation"; do not read it as describing current behavior.
+
 `POST /v1/drivers` is deliberately unauthenticated. `DriverController`'s own KDoc (lines 60–74) explains why and records that Task 24's audit classified it *"LOW/informational, not a remediation target: it is a pre-authentication 'first contact' action creating a brand-new resource named by a caller-generated, unguessable UUID."*
 
 Consequence, undisguised: **the referral claim is self-asserted by the registering client and is unverifiable today.** Anyone can post any `invitedByDriverId`. PIOS still has no authorization layer (`ADR-054` Part 6, carried forward unresolved through `ADR-068`, `ADR-069`, `ADR-070`), and this ADR does not change that and must not be described as doing so.

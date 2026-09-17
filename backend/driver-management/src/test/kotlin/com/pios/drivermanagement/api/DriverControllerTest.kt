@@ -15,6 +15,7 @@ import com.pios.drivermanagement.persistence.InMemoryDriverClientsRepository
 import com.pios.drivermanagement.persistence.InMemoryDriverMilestonesRepository
 import com.pios.drivermanagement.persistence.InMemoryDriverRepository
 import org.springframework.http.HttpStatus
+import java.security.MessageDigest
 import java.time.Instant
 import java.util.Base64
 import javax.crypto.Mac
@@ -58,6 +59,15 @@ class DriverControllerTest {
     private val updateLongDistancePreferenceService = UpdateLongDistancePreferenceApplicationService(repository)
     private val secret = Base64.getEncoder().encodeToString("driver-controller-test-secret".toByteArray())
     private val sessionTokenVerifier = SessionTokenVerifier(secretBase64 = secret)
+    private val testDataToken = "driver-controller-test-data-token"
+    private val testDataCredentialGate = TestDataCredentialGate(
+        configuredCredentialHash = Base64.getEncoder().encodeToString(
+            MessageDigest.getInstance("SHA-256").digest(testDataToken.toByteArray())
+        ),
+        failureDelayMillis = 0,
+        maxFailuresPerWindow = 1_000,
+        windowMillis = 900_000
+    )
     private val controller = DriverController(
         handler,
         availabilityService,
@@ -68,7 +78,8 @@ class DriverControllerTest {
         updateLongDistancePreferenceService,
         sessionTokenVerifier,
         OwnerCredentialGate("", "", "", 1_000, 0, 1_000, 900_000),
-        repository
+        repository,
+        testDataCredentialGate
     )
 
     // --- Token minting test helper (mirrors ProposalControllerTest's own) ---
@@ -95,6 +106,9 @@ class DriverControllerTest {
     private fun driverToken(driverId: String): String = "Bearer " + issueToken(sub = "$driverId-identity", drv = driverId)
 
     private fun onboardingToken(identityId: String): String = "Bearer " + issueToken(sub = identityId)
+
+    /** A valid `PiosTest` header for this test class's own configured [testDataCredentialGate]. */
+    private val testDataHeader = "PiosTest $testDataToken"
 
     @Test
     fun `HTTP driver creation requires an authenticated identity`() {
@@ -711,5 +725,116 @@ class DriverControllerTest {
         val bodyB = assertNotNull(responseB.body)
         assertEquals(2, bodyB.single().rideCount)
         assertTrue(bodyB.single().isRepeat)
+    }
+
+    // --- ADR-079: Test-Data Credential for Synthetic (isTest) Driver Creation ---
+
+    @Test
+    fun `a valid PiosTest credential with isTest true creates the driver -- 201`() {
+        val response = controller.createDriver(
+            CreateDriverRequest("adr079-valid-test-driver", isTest = true),
+            authorization = testDataHeader
+        )
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        assertEquals(true, assertNotNull(response.body).isTest)
+        assertEquals(true, repository.findById(DriverId("adr079-valid-test-driver"))?.isTest)
+    }
+
+    @Test
+    fun `a valid PiosTest credential with isTest false is rejected -- 403, it can never create a real driver`() {
+        val response = controller.createDriver(
+            CreateDriverRequest("adr079-real-via-test-cred", isTest = false),
+            authorization = testDataHeader
+        )
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+        assertNull(repository.findById(DriverId("adr079-real-via-test-cred")))
+    }
+
+    @Test
+    fun `an invalid PiosTest token is rejected -- 401`() {
+        val response = controller.createDriver(
+            CreateDriverRequest("adr079-wrong-token", isTest = true),
+            authorization = "PiosTest wrong-token"
+        )
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+        assertNull(repository.findById(DriverId("adr079-wrong-token")))
+    }
+
+    @Test
+    fun `an absent Authorization header does not accidentally satisfy the PiosTest branch -- still 401`() {
+        val response = controller.createDriver(
+            CreateDriverRequest("adr079-no-header", isTest = true),
+            authorization = null
+        )
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+        assertNull(repository.findById(DriverId("adr079-no-header")))
+    }
+
+    @Test
+    fun `an unconfigured TestDataCredentialGate rejects every PiosTest credential -- 401`() {
+        val unconfiguredGate = TestDataCredentialGate(
+            configuredCredentialHash = "",
+            failureDelayMillis = 0,
+            maxFailuresPerWindow = 1_000,
+            windowMillis = 900_000
+        )
+        val controllerWithUnconfiguredTestGate = DriverController(
+            handler,
+            availabilityService,
+            createDriverService,
+            milestonesHandler,
+            clientsHandler,
+            updateVehicleService,
+            updateLongDistancePreferenceService,
+            sessionTokenVerifier,
+            OwnerCredentialGate("", "", "", 1_000, 0, 1_000, 900_000),
+            repository,
+            unconfiguredGate
+        )
+
+        val response = controllerWithUnconfiguredTestGate.createDriver(
+            CreateDriverRequest("adr079-unconfigured", isTest = true),
+            authorization = testDataHeader
+        )
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+        assertNull(repository.findById(DriverId("adr079-unconfigured")))
+    }
+
+    @Test
+    fun `a PiosTest credential is rejected on listDrivers -- it grants no read access of any kind`() {
+        val response = controller.listDrivers(authorization = testDataHeader)
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
+    fun `a PiosTest-created driver naming a real, non-isTest inviter stores null for invitedByDriverId`() {
+        controller.createDriver(CreateDriverRequest("adr079-real-inviter"))
+
+        val response = controller.createDriver(
+            CreateDriverRequest("adr079-test-invitee-real-inviter", isTest = true, invitedByDriverId = "adr079-real-inviter"),
+            authorization = testDataHeader
+        )
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        assertNull(repository.findById(DriverId("adr079-test-invitee-real-inviter"))?.invitedByDriverId)
+    }
+
+    @Test
+    fun `a PiosTest-created driver naming a test inviter keeps invitedByDriverId, unaffected`() {
+        controller.createDriver(CreateDriverRequest("adr079-test-inviter", isTest = true), authorization = testDataHeader)
+
+        val response = controller.createDriver(
+            CreateDriverRequest("adr079-test-invitee-test-inviter", isTest = true, invitedByDriverId = "adr079-test-inviter"),
+            authorization = testDataHeader
+        )
+
+        assertEquals(HttpStatus.CREATED, response.statusCode)
+        assertEquals("adr079-test-inviter", repository.findById(DriverId("adr079-test-invitee-test-inviter"))?.invitedByDriverId)
     }
 }

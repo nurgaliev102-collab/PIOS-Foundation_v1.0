@@ -71,19 +71,35 @@ import org.springframework.web.bind.annotation.RestController
  *
  * As of `8206ff3` (2026-09-16, the ADR-076 hardening pass), this endpoint
  * is **no longer unauthenticated** -- the paragraph that used to say so is
- * corrected here rather than left to contradict the code below it. Two
- * paths are accepted: an owner `Basic` credential (checked first, via
- * [ownerCredentialGate]), or a `Bearer` session token whose own `sub`
- * names this exact [driverId] and whose `drv`, if present, also matches --
- * i.e. an already-authenticated identity self-registering as this driver,
- * the same self-only shape `declareAvailability` below already requires. A
- * guest token (`verified.guest`) is rejected with 403. **Creating an
- * `isTest` driver requires the owner credential regardless of which
- * `Bearer` token is presented** -- a self-registering, non-owner caller is
- * forbidden from setting [CreateDriverRequest.isTest] at all, closing the
- * gap Task 24's LOW/informational classification of this endpoint had left
- * open once `isTest` existed as a caller-controlled flag. No unauthenticated
- * path remains.
+ * corrected here rather than left to contradict the code below it. Three
+ * credential schemes are accepted, checked in this order:
+ *
+ * 1. A `PiosTest <token>` credential (ADR-079: Test-Data Credential for
+ *    Synthetic (`isTest`) Driver Creation), checked via
+ *    [testDataCredentialGate] and **never** routed through
+ *    [ownerCredentialGate] (its own independent failure window matters --
+ *    see that gate's own KDoc). Authorizes exactly one thing: creating a
+ *    driver with [CreateDriverRequest.isTest] `true`; `isTest == false`
+ *    under this credential is rejected with 403, and an unconfigured or
+ *    invalid credential is rejected with 401. An
+ *    [CreateDriverRequest.invitedByDriverId] naming a driver that is not
+ *    itself `isTest` is confined to the test lane -- see
+ *    [confineInvitedByToTestLane]'s own KDoc (ADR-079 Decision 5).
+ * 2. An owner `Basic` credential (checked via [ownerCredentialGate]) --
+ *    unchanged from before this ADR, and may create an `isTest` driver.
+ * 3. Otherwise, a `Bearer` session token whose own `sub` names this exact
+ *    [driverId] and whose `drv`, if present, also matches -- i.e. an
+ *    already-authenticated identity self-registering as this driver, the
+ *    same self-only shape `declareAvailability` below already requires. A
+ *    guest token (`verified.guest`) is rejected with 403. **Creating an
+ *    `isTest` driver through this path is forbidden regardless of which
+ *    `Bearer` token is presented** -- a self-registering, non-owner,
+ *    non-test-credential caller cannot set [CreateDriverRequest.isTest] at
+ *    all, closing the gap Task 24's LOW/informational classification of
+ *    this endpoint had left open once `isTest` existed as a
+ *    caller-controlled flag.
+ *
+ * No unauthenticated path remains.
  *
  * ## Task 25 (Orders Cancellation & Driver Availability Security Remediation)
  *
@@ -161,7 +177,8 @@ class DriverController(
     private val updateLongDistancePreferenceApplicationService: UpdateLongDistancePreferenceApplicationService,
     private val sessionTokenVerifier: SessionTokenVerifier,
     private val ownerCredentialGate: OwnerCredentialGate,
-    private val driverRepository: DriverRepository
+    private val driverRepository: DriverRepository,
+    private val testDataCredentialGate: TestDataCredentialGate
 ) {
 
     /** Direct application seam retained for focused unit tests; it is not an HTTP endpoint. */
@@ -173,8 +190,17 @@ class DriverController(
         @RequestHeader("Authorization", required = false) authorization: String?
     ): ResponseEntity<DriverResponse> {
         return try {
+            val testDataRequest = authorization?.startsWith("PiosTest ") == true
             val ownerRequest = authorization?.startsWith("Basic ") == true
-            if (ownerRequest) {
+            if (testDataRequest) {
+                if (!testDataCredentialGate.verify(authorization)) {
+                    return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+                }
+                if (!request.isTest) {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+                }
+                return persistDriver(request.copy(invitedByDriverId = confineInvitedByToTestLane(request.invitedByDriverId)))
+            } else if (ownerRequest) {
                 if (!ownerCredentialGate.verify(authorization)) {
                     return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
                 }
@@ -195,6 +221,28 @@ class DriverController(
         } catch (ex: IllegalArgumentException) {
             ResponseEntity.badRequest().build()
         }
+    }
+
+    /**
+     * ADR-079 Decision 5: under the `PiosTest` credential, an
+     * [CreateDriverRequest.invitedByDriverId] naming a driver that is not
+     * itself `isTest` degrades to `null` rather than failing the
+     * registration -- `countInvitedBy` (`PostgreSQLDriverRepository`) has no
+     * `is_test` filter, so a test-lane row must never inflate a real
+     * driver's own private count. A blank or self-referencing value is left
+     * unchanged here; [CreateDriverApplicationService] already degrades
+     * both to `null` on every credential path (ADR-073 Part 2).
+     */
+    private fun confineInvitedByToTestLane(invitedByDriverId: String?): String? {
+        if (invitedByDriverId.isNullOrBlank()) {
+            return invitedByDriverId
+        }
+        val inviterIsTest = try {
+            driverRepository.findById(DriverId(invitedByDriverId))?.isTest == true
+        } catch (ex: IllegalArgumentException) {
+            false
+        }
+        return if (inviterIsTest) invitedByDriverId else null
     }
 
     @GetMapping("/{driverId}")

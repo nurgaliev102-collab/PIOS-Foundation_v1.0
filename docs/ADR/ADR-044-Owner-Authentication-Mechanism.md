@@ -298,6 +298,8 @@ of this entire MVP is five `GET /v1/health` endpoints and nothing else.**
 - the Owner Control Center frontend route, which renders the login screen
   instead of the console until a credential is held.
 
+> **Amendment pointer (2026-09-17, per `ADR-015`).** The list below still names `GET/POST /v1/drivers` as "not gated, not changed, not touched," which `8206ff3` (2026-09-16, the ADR-076 hardening pass) made false: `POST /v1/drivers` gained an owner `Basic` credential / self-naming `Bearer` session gate (`GET /v1/drivers` gained an owner-only gate as well). `ADR-079` (Test-Data Credential for Synthetic (`isTest`) Driver Creation) further adds a third, narrowly-scoped `PiosTest` credential to `POST /v1/drivers` only. Original text preserved below, per `CLAUDE.md` "Never Delete Documentation"; do not read it as describing current behavior.
+
 **Not gated, not changed, not touched:**
 
 - `GET/POST /v1/orders`, `GET/POST /v1/drivers`,

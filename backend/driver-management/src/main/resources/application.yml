@@ -71,3 +71,21 @@ pios:
   # never calls it; verification is entirely local (ADR-055 Decision 1).
   # session:
   #   secret: ""
+  # ADR-079 (Test-Data Credential for Synthetic (isTest) Driver Creation):
+  # the one credential a scriptable, non-owner caller may present, via the
+  # `PiosTest <token>` Authorization scheme, to create a synthetic
+  # (isTest = true) driver row on POST /v1/drivers. Deliberately left unset
+  # here -- an unset pios.test-data.credential-hash makes
+  # TestDataCredentialGate.isConfigured() false, which denies every request
+  # (401) rather than defaulting open, the same fail-closed posture
+  # pios.owner.* already establishes above. credential-hash is
+  # base64(SHA-256(token)); token is a >=256-bit value from a CSPRNG, never
+  # the plain token itself (ADR-079 Decision 3 -- SHA-256, not PBKDF2: this
+  # credential is machine-generated, not human-chosen, so PBKDF2's
+  # iteration cost buys nothing here).
+  # test-data:
+  #   credential-hash: ""
+  #   auth:
+  #     failure-delay-ms: 500
+  #     max-failures-per-window: 20
+  #     window-ms: 900000

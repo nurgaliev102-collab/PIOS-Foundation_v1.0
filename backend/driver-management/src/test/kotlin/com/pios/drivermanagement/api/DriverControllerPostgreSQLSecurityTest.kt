@@ -62,7 +62,8 @@ class DriverControllerPostgreSQLSecurityTest {
         updateLongDistancePreferenceService,
         SessionTokenVerifier(secretBase64 = secret),
         OwnerCredentialGate("", "", "", 1_000, 0, 1_000, 900_000),
-        repository
+        repository,
+        TestDataCredentialGate("", 0, 1_000, 900_000)
     )
 
     private val objectMapper = ObjectMapper()
