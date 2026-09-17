@@ -224,6 +224,52 @@ class AssignmentCompletedConsumerIntegrationTest {
         assertEquals(emptyList(), driverClientsRepository.findAllForDriver(DriverId(driverId)))
     }
 
+    // --- OrderSubmittedListener eventVersion (fixed 2026-09-17, live production defect) ---
+    //
+    // Every test above that publishes OrderSubmitted relies on
+    // `OrderSubmittedMessagePublisher`'s own `eventVersion = 1` default,
+    // which is exactly why this suite never caught the real defect: Order
+    // Management has published OrderSubmitted v3 in production since
+    // `8206ff3` (2026-09-16), and this module's listener rejected every v2
+    // and v3 message until this fix -- 8 real messages dead-lettered,
+    // found live 2026-09-17. These three tests exercise the versions that
+    // actually matter, not just the harness default.
+
+    @Test
+    fun `OrderSubmitted v3 (the version Order Management actually publishes since 8206ff3) is consumed, not dead-lettered`() {
+        val driverId = "assignment-completed-it-v3-${UUID.randomUUID()}"
+        seedDriver(driverId)
+        val orderId = "order-v3-${UUID.randomUUID()}"
+        val passengerReference = "passenger-${UUID.randomUUID()}"
+
+        orderSubmittedPublisher.publishOrderSubmitted(orderId = orderId, passengerReference = passengerReference, eventVersion = 3)
+
+        assertEquals(passengerReference, awaitUntilNotNull { orderPassengerRepository.findPassengerReference(orderId) })
+    }
+
+    @Test
+    fun `OrderSubmitted v2 is also consumed`() {
+        val driverId = "assignment-completed-it-v2-${UUID.randomUUID()}"
+        seedDriver(driverId)
+        val orderId = "order-v2-${UUID.randomUUID()}"
+        val passengerReference = "passenger-${UUID.randomUUID()}"
+
+        orderSubmittedPublisher.publishOrderSubmitted(orderId = orderId, passengerReference = passengerReference, eventVersion = 2)
+
+        assertEquals(passengerReference, awaitUntilNotNull { orderPassengerRepository.findPassengerReference(orderId) })
+    }
+
+    @Test
+    fun `an OrderSubmitted eventVersion outside 1-3 still fails closed, per ADR-030`() {
+        val orderId = "order-unsupported-version-${UUID.randomUUID()}"
+        val passengerReference = "passenger-${UUID.randomUUID()}"
+
+        orderSubmittedPublisher.publishOrderSubmitted(orderId = orderId, passengerReference = passengerReference, eventVersion = 99)
+
+        Thread.sleep(500)
+        assertEquals(null, orderPassengerRepository.findPassengerReference(orderId))
+    }
+
     // --- ADR-065: Driver Earnings from Self-Stated Prices, end to end ---
 
     @Test

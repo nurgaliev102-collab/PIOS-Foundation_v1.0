@@ -18,7 +18,24 @@ import org.springframework.stereotype.Component
  *
  * Extracts only `payload.orderId` and `payload.passengerReference` --
  * nothing else this event's own payload carries (`explicitDriverIntent`,
- * `isTest`) is relevant to this module's own, unrelated purpose.
+ * `isTest`, and -- as of `OrderSubmitted` v2/v3 -- `requestedPickupAt`/
+ * `requestedDriverId`) is relevant to this module's own, unrelated
+ * purpose.
+ *
+ * **`SUPPORTED_EVENT_VERSIONS` (fixed 2026-09-17, live production defect):**
+ * this listener required `eventVersion == 1` from Sprint 3A until this fix,
+ * while Order Management has published `OrderSubmitted` v3 since `8206ff3`
+ * (2026-09-16, ADR-076's `requestedDriverId` widening). Both widenings were
+ * purely additive per `ADR-030` and needed no consumer change on their own
+ * merits -- but this listener's rigid `==` check rejected every v2/v3
+ * event regardless, and every one was dead-lettered
+ * (`driver-management.from-order-management.order-submitted.dlq`, 8
+ * messages found 2026-09-17, none replayed by this fix -- see the fix's own
+ * commit for the live evidence). The correct, already-precedented pattern
+ * is [com.pios.dispatch.persistence.OrderSubmittedFirstRefusalListener]'s
+ * own `eventVersion in SUPPORTED_EVENT_VERSIONS` (`setOf(1, 2, 3)`), copied
+ * here rather than a range check, so a future non-additive version bump
+ * still fails closed exactly as `ADR-030` requires.
  */
 @Component
 class OrderSubmittedListener(
@@ -39,8 +56,8 @@ class OrderSubmittedListener(
         }
 
         val eventVersion = envelope.get("eventVersion")?.asInt()
-        require(eventVersion == SUPPORTED_EVENT_VERSION) {
-            "Unsupported $SUPPORTED_EVENT_TYPE eventVersion: $eventVersion (supported: $SUPPORTED_EVENT_VERSION)"
+        require(eventVersion in SUPPORTED_EVENT_VERSIONS) {
+            "Unsupported $SUPPORTED_EVENT_TYPE eventVersion: $eventVersion (supported: $SUPPORTED_EVENT_VERSIONS)"
         }
 
         val eventId = envelope.get("eventId")?.asText()
@@ -66,6 +83,6 @@ class OrderSubmittedListener(
 
     companion object {
         const val SUPPORTED_EVENT_TYPE = "OrderSubmitted"
-        const val SUPPORTED_EVENT_VERSION = 1
+        val SUPPORTED_EVENT_VERSIONS = setOf(1, 2, 3)
     }
 }
