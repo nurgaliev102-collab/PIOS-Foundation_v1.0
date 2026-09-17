@@ -191,6 +191,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1
 
     renderDriverHome()
@@ -235,6 +236,7 @@ describe('DriverHome', () => {
     ]) // GET /v1/proposals?driverId=driver-1
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections?driverId=driver-1 (fired right after proposals, before it resolves)
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1 (chained after proposals resolves -- ADR-060)
 
     renderDriverHome()
@@ -290,6 +292,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1
 
     renderDriverHome()
@@ -311,6 +314,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o2
 
     renderDriverHome()
@@ -344,6 +348,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([
       { assignmentId: 'a1', orderId: 'o3', driverId: 'driver-1', status: 'CREATED', statusChangedAt: null },
     ]) // GET /v1/assignments?orderIds=o3
@@ -379,6 +384,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([
       { assignmentId: 'a4', orderId: 'o4', driverId: 'driver-1', status: 'IN_PROGRESS', statusChangedAt: null },
     ]) // GET /v1/assignments?orderIds=o4
@@ -409,6 +415,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections (fired right after proposals, before it resolves)
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/assignments?orderIds=o1 (loadAssignments, chained after proposals resolves)
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1 (chained after proposals resolves -- ADR-060)
 
@@ -428,6 +435,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections (fired right after proposals, before it resolves)
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1 (chained after proposals resolves -- ADR-060)
 
     renderDriverHome()
@@ -448,6 +456,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections (fired right after proposals, before it resolves)
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([
       {
         id: 'o1',
@@ -474,6 +483,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections (fired right after proposals, before it resolves)
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([
       {
         id: 'o1',
@@ -503,6 +513,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections (fired right after proposals, before it resolves)
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([
       {
         id: 'o1',
@@ -537,6 +548,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections (fired right after proposals, before it resolves)
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([
       {
         id: 'o1',
@@ -567,6 +579,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections (fired right after proposals, before it resolves)
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1 (chained after proposals resolves -- ADR-060)
     mockedRequest.mockResolvedValueOnce([
       { id: 'm1', senderRole: 'PASSENGER', body: 'Встречайте у второго подъезда', sentAt: '2026-09-14T10:00:00Z' },
@@ -591,6 +604,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([])
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 })
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals/p1/messages -- nothing yet
 
@@ -625,6 +639,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([])
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 })
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1
     mockedRequest.mockResolvedValueOnce([
       { id: 'm1', senderRole: 'PASSENGER', body: 'Ещё здесь?', sentAt: '2026-09-14T10:00:00Z' },
@@ -649,6 +664,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([])
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 })
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1,o2
     // loadMessages fires one GET per proposal, in the same order as [proposals] --
     // p1's own thread, then p2's own thread.
@@ -677,6 +693,7 @@ describe('DriverHome', () => {
     ])
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 1, currentStreakWeeks: 1 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([
       { assignmentId: 'a1', orderId: 'o1', driverId: 'driver-1', status: 'COMPLETED', statusChangedAt: '2026-09-14T12:30:00Z' },
     ]) // GET /v1/assignments?orderIds=o1 -- loadAssignments fires before loadOrderDetails/loadMessages
@@ -806,8 +823,9 @@ describe('DriverHome', () => {
   })
 
   // --- Client CRM depth ("Мой бизнес -> Клиенты"): ride count, last-ride
-  // date, repeat flag -- built entirely from already-loaded proposals/
-  // assignments/orderDetails/connections state, no new request.
+  // date, repeat flag -- server-side read model
+  // (docs/PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md Part 5), read from
+  // `GET /v1/drivers/:id/clients` rather than derived in the browser.
 
   it('shows ride count, last-ride date, and a repeat-client flag on the "Клиенты" tab, and a real zero for a client with no completed ride yet', async () => {
     mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
@@ -821,6 +839,9 @@ describe('DriverHome', () => {
       { passengerReference: 'passenger-2', createdAt: '2026-07-02T10:00:00Z' },
     ]) // GET /v1/connections -- passenger-2 connected but never ordered
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 2, currentStreakWeeks: 1, repeatClientsCount: 1 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([
+      { passengerReference: 'passenger-1', rideCount: 2, lastRideAt: '2026-09-14T12:30:00Z', isRepeat: true },
+    ]) // GET /v1/drivers/driver-1/clients -- server-side read model: passenger-1 is a repeat client, passenger-2 has no entry (zero rides)
     mockedRequest.mockResolvedValueOnce([
       { assignmentId: 'a1', orderId: 'o1', driverId: 'driver-1', status: 'COMPLETED', statusChangedAt: '2026-09-10T09:00:00Z' },
       { assignmentId: 'a2', orderId: 'o2', driverId: 'driver-1', status: 'COMPLETED', statusChangedAt: '2026-09-14T12:30:00Z' },

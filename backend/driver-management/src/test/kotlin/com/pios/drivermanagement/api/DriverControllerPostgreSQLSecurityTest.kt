@@ -4,12 +4,14 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.drivermanagement.application.CreateDriverApplicationService
 import com.pios.drivermanagement.application.DriverAvailabilityApplicationService
 import com.pios.drivermanagement.application.RetrieveDriverAvailabilityHandler
+import com.pios.drivermanagement.application.RetrieveDriverClientsHandler
 import com.pios.drivermanagement.application.RetrieveDriverMilestonesHandler
 import com.pios.drivermanagement.application.UpdateLongDistancePreferenceApplicationService
 import com.pios.drivermanagement.application.UpdateVehicleApplicationService
 import com.pios.drivermanagement.domain.Availability
 import com.pios.drivermanagement.domain.Driver
 import com.pios.drivermanagement.domain.DriverId
+import com.pios.drivermanagement.persistence.PostgreSQLDriverClientsRepository
 import com.pios.drivermanagement.persistence.PostgreSQLDriverMilestonesRepository
 import com.pios.drivermanagement.persistence.PostgreSQLDriverRepository
 import com.pios.drivermanagement.persistence.PostgreSQLTestDatabase
@@ -45,6 +47,8 @@ class DriverControllerPostgreSQLSecurityTest {
     private val createDriverService = CreateDriverApplicationService(repository)
     private val milestonesRepository = PostgreSQLDriverMilestonesRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
     private val milestonesHandler = RetrieveDriverMilestonesHandler(milestonesRepository)
+    private val clientsRepository = PostgreSQLDriverClientsRepository(JdbcTemplate(PostgreSQLTestDatabase.dataSource))
+    private val clientsHandler = RetrieveDriverClientsHandler(clientsRepository)
     private val updateVehicleService = UpdateVehicleApplicationService(repository)
     private val updateLongDistancePreferenceService = UpdateLongDistancePreferenceApplicationService(repository)
     private val secret = Base64.getEncoder().encodeToString("driver-postgres-security-test-secret".toByteArray())
@@ -53,6 +57,7 @@ class DriverControllerPostgreSQLSecurityTest {
         availabilityService,
         createDriverService,
         milestonesHandler,
+        clientsHandler,
         updateVehicleService,
         updateLongDistancePreferenceService,
         SessionTokenVerifier(secretBase64 = secret),

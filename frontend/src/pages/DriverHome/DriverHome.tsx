@@ -271,6 +271,23 @@ interface DriverMilestonesInfo {
 }
 
 /**
+ * Server-side "Мой бизнес" read model (`docs/PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md`
+ * Part 5): `GET /v1/drivers/:id/clients`'s own response shape (Driver
+ * Management) -- one entry per passenger this driver has completed at
+ * least one ride with. Replaces this screen's own former browser-side
+ * derivation (`clientRideStatsByReference`, removed) with the backend's
+ * own durable read model, built from the same `AssignmentCompleted`/
+ * `OrderSubmitted` events Driver Management already consumes -- see that
+ * endpoint's own KDoc (`DriverController.getClients`).
+ */
+interface DriverClientListItem {
+  passengerReference: string
+  rideCount: number
+  lastRideAt: string | null
+  isRepeat: boolean
+}
+
+/**
  * Pilot readiness fix: a driver should never have to read a raw UUID
  * (`ARCHITECTURE_VERIFICATION_REPORT.md`-adjacent finding: this screen
  * showed `proposal.orderId` verbatim) — it only turns the id itself into a
@@ -514,74 +531,28 @@ function passengerNamesByReference(orders: Record<string, OrderListItem>): Recor
   return names
 }
 
-/** Per-passenger ride stats [clientRideStatsByReference] below produces -- see that function's own KDoc. */
+/**
+ * Per-passenger ride stats shown on "Мой бизнес -> Клиенты". As of the
+ * server-side "Мой бизнес" read model
+ * (`docs/PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 5), these three
+ * fields are read directly off [DriverClientListItem] (`GET
+ * /v1/drivers/:id/clients`, Driver Management) rather than derived in the
+ * browser -- this screen previously computed the same shape itself
+ * (`clientRideStatsByReference`, removed) from already-loaded proposals/
+ * assignments/orderDetails, which broke the moment that list was ever
+ * paginated or trimmed. `isRepeat` still mirrors the backend's own
+ * `driver_client_rides.ride_count >= 2` threshold -- see
+ * [DriverClientListItem]'s own KDoc.
+ */
 interface ClientRideStats {
   rideCount: number
-  /** The most recent completed ride's own `Assignment.statusChangedAt` (ISO-8601), or `null` if this passenger has none yet -- format with [formatHistoryDateTime], same as [completedRides] already does. */
+  /** The most recent completed ride's own timestamp (ISO-8601), or `null` if this passenger has none yet -- format with [formatHistoryDateTime], same as [completedRides] already does. */
   lastRideAt: string | null
-  /** Mirrors the backend's own `driver_client_rides.ride_count >= 2` threshold verbatim (see this function's own KDoc) -- not a new business rule invented here. */
   isRepeat: boolean
 }
 
-/** The honest zero [ClientRideStats] a connection with no completed ride yet renders -- see [clientRideStatsByReference]'s own KDoc on why this is a real zero, not a hidden/skipped row. */
+/** The honest zero [ClientRideStats] a connection with no completed ride yet renders -- a passenger who connected but has no entry in the server's own clients list (`clientsByReference`, below) gets this default rather than a fabricated or hidden row. */
 const ZERO_CLIENT_RIDE_STATS: ClientRideStats = { rideCount: 0, lastRideAt: null, isRepeat: false }
-
-/**
- * Client CRM depth ("Мой бизнес -> Клиенты"): per-passenger ride count,
- * last-ride date, and repeat flag, built entirely from this screen's own
- * already-loaded state -- [completedRides] (itself derived from
- * [proposals]/[assignments], this file's own existing derivation, below),
- * plus [orderDetails] to resolve each order's own passengerReference
- * (`OrderListItem.origin`, exactly like [passengerNamesByReference]
- * immediately above). No new request, no new backend endpoint.
- *
- * [completedRides] is already sorted newest-first (its own definition,
- * below), so the first entry seen for a given passengerReference is
- * already that passenger's most recent ride -- no separate max/sort step
- * is needed here.
- *
- * `isRepeat` reaching `true` at `rideCount >= 2` mirrors driver-management's
- * own `driver_client_rides.ride_count` threshold verbatim
- * (`V7__driver_milestones_repeat_clients.sql`: "ride_count reaching 2 is
- * the moment this pair becomes a 'repeat client'") -- the same rule
- * already used server-side to increment `driver_milestones.repeat_clients_count`,
- * not a new one invented on this screen.
- *
- * A passenger with a connection but no completed ride yet has no entry in
- * the returned record -- callers default to `{ rideCount: 0, lastRideAt:
- * null, isRepeat: false }` rather than this function inventing a
- * placeholder, so that default renders as a real, honest zero (this
- * file's own "Сегодня" tiles' no-hiding-a-zero convention) rather than
- * being hidden.
- */
-function clientRideStatsByReference(
-  completedRides: ProposalListItem[],
-  orderDetails: Record<string, OrderListItem>,
-  assignments: Record<string, AssignmentInfo>
-): Record<string, ClientRideStats> {
-  const stats: Record<string, ClientRideStats> = {}
-  for (const proposal of completedRides) {
-    const order = orderDetails[proposal.orderId]
-    if (!order) {
-      continue
-    }
-    const passengerReference = order.origin
-    const existing = stats[passengerReference]
-    if (existing) {
-      existing.rideCount += 1
-    } else {
-      stats[passengerReference] = {
-        rideCount: 1,
-        lastRideAt: assignments[proposal.orderId]?.statusChangedAt ?? null,
-        isRepeat: false,
-      }
-    }
-  }
-  for (const passengerReference of Object.keys(stats)) {
-    stats[passengerReference].isRepeat = stats[passengerReference].rideCount >= 2
-  }
-  return stats
-}
 
 /**
  * H6 ("Driver Growth Snapshot"): how many passengers connected through this
@@ -742,6 +713,10 @@ export function DriverHome() {
   const [messageActions, setMessageActions] = useState<Record<string, ProposalActionStatus>>({})
   const [connections, setConnections] = useState<ConnectionListItem[]>([])
   const [milestones, setMilestones] = useState<DriverMilestonesInfo | null>(null)
+  // Server-side "Мой бизнес" read model (docs/PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md
+  // Part 5): loaded alongside [connections]/[milestones] below, same
+  // best-effort tolerance -- see [loadClients]'s own KDoc.
+  const [clients, setClients] = useState<DriverClientListItem[]>([])
   // Product owner request, 2026-09-07: "Мой бизнес" as three separate
   // screens (Обзор/Клиенты/Маршруты), not one long scroll -- see the
   // BUSINESS_TABS section below for what deliberately stayed outside the
@@ -872,10 +847,12 @@ export function DriverHome() {
     loadProposals(active, driverId, identity.token, { silent: false })
     loadConnections(active, driverId, identity.token)
     loadMilestones(active, driverId, identity.token)
+    loadClients(active, driverId, identity.token)
     const interval = setInterval(() => {
       loadProposals(active, driverId, identity.token, { silent: true })
       loadConnections(active, driverId, identity.token)
       loadMilestones(active, driverId, identity.token)
+      loadClients(active, driverId, identity.token)
     }, PROPOSALS_POLL_INTERVAL_MS)
     return () => {
       active = false
@@ -982,6 +959,32 @@ export function DriverHome() {
           return
         }
         setMilestones(result)
+      })
+      .catch(() => {
+        // Best-effort: see this function's own KDoc.
+      })
+  }
+
+  /**
+   * Server-side "Мой бизнес" read model
+   * (`docs/PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 5): per-client
+   * ride count/last-ride/repeat-flag, now read from Driver Management's own
+   * durable read model (`GET /v1/drivers/:id/clients`) instead of derived
+   * in the browser from proposals/assignments/orders. Same best-effort
+   * tolerance as [loadMilestones] -- a failure here only leaves the
+   * "Клиенты" tab showing a real zero for every connection (via
+   * [ZERO_CLIENT_RIDE_STATS]) rather than blocking anything actionable on
+   * this screen.
+   */
+  function loadClients(active: boolean, forDriverId: string, token: string) {
+    request<DriverClientListItem[]>(`/v1/drivers/${forDriverId}/clients`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((result) => {
+        if (!active) {
+          return
+        }
+        setClients(result)
       })
       .catch(() => {
         // Best-effort: see this function's own KDoc.
@@ -1762,9 +1765,15 @@ export function DriverHome() {
         (assignments[b.orderId]?.statusChangedAt ?? '').localeCompare(assignments[a.orderId]?.statusChangedAt ?? '')
     )
   // Client CRM depth ("Мой бизнес -> Клиенты"): per-passenger ride
-  // count/last-ride/repeat-flag, built from [completedRides] immediately
-  // above -- see [clientRideStatsByReference]'s own KDoc.
-  const clientRideStats = clientRideStatsByReference(completedRides, orderDetails, assignments)
+  // count/last-ride/repeat-flag, now read directly from [clients] (server
+  // read model, [loadClients]'s own KDoc) rather than derived from
+  // [completedRides] in the browser.
+  const clientRideStats: Record<string, ClientRideStats> = Object.fromEntries(
+    clients.map((client) => [
+      client.passengerReference,
+      { rideCount: client.rideCount, lastRideAt: client.lastRideAt, isRepeat: client.isRepeat },
+    ])
+  )
   // Product owner request, 2026-09-07 (business tabs): a badge on the
   // "Маршруты" tab so a driver on "Обзор"/"Клиенты" still notices a ride
   // waiting on them -- OPEN (needs Accept/Decline) or ACCEPTED (needs

@@ -69,7 +69,8 @@ class AssignmentCompletedApplicationService(
 
             val passengerReference = orderPassengerRepository.findPassengerReference(command.orderId)
             if (passengerReference != null) {
-                val becameRepeatClient = driverClientsRepository.recordRideForClient(driverId, passengerReference)
+                val becameRepeatClient =
+                    driverClientsRepository.recordRideForClient(driverId, passengerReference, command.occurredAt)
                 if (becameRepeatClient) {
                     driverMilestonesRepository.incrementRepeatClientsCount(driverId)
                 }

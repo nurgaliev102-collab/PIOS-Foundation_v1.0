@@ -143,6 +143,56 @@ class AssignmentCompletedApplicationServiceTest {
         assertEquals(1, driverMilestonesRepository.findByDriverId(DriverId("driver-11b"))?.repeatClientsCount)
     }
 
+    // --- Server-side "Мой бизнес" read model (docs/PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md Part 5) ---
+
+    @Test
+    fun `a passenger's first completed ride records one ride with a last-ride timestamp, not yet a repeat`() {
+        orderPassengerRepository.recordOrderPassenger("order-18", "passenger-g")
+
+        service.handle(command("event-18", "driver-18", "order-18", "2026-08-03T09:00:00Z"))
+
+        val client = driverClientsRepository.findAllForDriver(DriverId("driver-18")).single()
+        assertEquals("passenger-g", client.passengerReference)
+        assertEquals(1, client.rideCount)
+        assertEquals(Instant.parse("2026-08-03T09:00:00Z"), client.lastRideAt)
+        assertEquals(false, client.isRepeat)
+    }
+
+    @Test
+    fun `a passenger's second completed ride grows the ride count and moves the last-ride timestamp forward`() {
+        orderPassengerRepository.recordOrderPassenger("order-19a", "passenger-h")
+        orderPassengerRepository.recordOrderPassenger("order-19b", "passenger-h")
+
+        service.handle(command("event-19a", "driver-19", "order-19a", "2026-08-03T09:00:00Z"))
+        service.handle(command("event-19b", "driver-19", "order-19b", "2026-08-10T09:00:00Z"))
+
+        val client = driverClientsRepository.findAllForDriver(DriverId("driver-19")).single()
+        assertEquals(2, client.rideCount)
+        assertEquals(Instant.parse("2026-08-10T09:00:00Z"), client.lastRideAt)
+        assertEquals(true, client.isRepeat)
+    }
+
+    @Test
+    fun `a driver with zero completed rides has an empty clients read model`() {
+        assertEquals(emptyList(), driverClientsRepository.findAllForDriver(DriverId("driver-with-no-rides")))
+    }
+
+    @Test
+    fun `the same passenger riding with two different drivers stays scoped per driver in the clients read model`() {
+        orderPassengerRepository.recordOrderPassenger("order-20a", "passenger-shared")
+        orderPassengerRepository.recordOrderPassenger("order-20b", "passenger-shared")
+
+        service.handle(command("event-20a", "driver-20a", "order-20a", "2026-08-03T09:00:00Z"))
+        service.handle(command("event-20b", "driver-20b", "order-20b", "2026-08-10T09:00:00Z"))
+
+        val clientA = driverClientsRepository.findAllForDriver(DriverId("driver-20a")).single()
+        val clientB = driverClientsRepository.findAllForDriver(DriverId("driver-20b")).single()
+        assertEquals(1, clientA.rideCount)
+        assertEquals(1, clientB.rideCount)
+        assertEquals(false, clientA.isRepeat)
+        assertEquals(false, clientB.isRepeat)
+    }
+
     // --- ADR-065: Driver Earnings from Self-Stated Prices ---
 
     @Test

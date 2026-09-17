@@ -8,6 +8,7 @@ import java.util.UUID
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -162,6 +163,65 @@ class AssignmentCompletedConsumerIntegrationTest {
 
         awaitUntilNotNull { driverMilestonesRepository.findByDriverId(DriverId(driverId))?.takeIf { it.completedRidesCount == 1L } }
         assertEquals(0, driverMilestonesRepository.findByDriverId(DriverId(driverId))?.repeatClientsCount)
+    }
+
+    // --- Server-side "Мой бизнес" read model, end to end (docs/PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md Part 5) ---
+
+    @Test
+    fun `a real completed ride grows the clients read model in PostgreSQL with a last-ride timestamp`() {
+        val driverId = "assignment-completed-it-clients-${UUID.randomUUID()}"
+        seedDriver(driverId)
+        val passengerReference = "passenger-${UUID.randomUUID()}"
+        val orderId = "order-${UUID.randomUUID()}"
+
+        orderSubmittedPublisher.publishOrderSubmitted(orderId = orderId, passengerReference = passengerReference)
+        awaitUntilNotNull { orderPassengerRepository.findPassengerReference(orderId) }
+
+        publisher.publishAssignmentCompleted(driverId = driverId, orderReference = orderId)
+
+        val client = assertNotNull(
+            awaitUntilNotNull {
+                driverClientsRepository.findAllForDriver(DriverId(driverId)).firstOrNull { it.passengerReference == passengerReference }
+            }
+        )
+        assertEquals(1, client.rideCount)
+        assertEquals(false, client.isRepeat)
+        assertEquals(true, client.lastRideAt != null)
+    }
+
+    @Test
+    fun `a passenger's second real completed ride with one driver is reflected as a repeat in the real clients read model`() {
+        val driverId = "assignment-completed-it-clients-repeat-${UUID.randomUUID()}"
+        seedDriver(driverId)
+        val passengerReference = "passenger-${UUID.randomUUID()}"
+        val firstOrderId = "order-${UUID.randomUUID()}"
+        val secondOrderId = "order-${UUID.randomUUID()}"
+
+        orderSubmittedPublisher.publishOrderSubmitted(orderId = firstOrderId, passengerReference = passengerReference)
+        orderSubmittedPublisher.publishOrderSubmitted(orderId = secondOrderId, passengerReference = passengerReference)
+        awaitUntilNotNull { orderPassengerRepository.findPassengerReference(firstOrderId) }
+        awaitUntilNotNull { orderPassengerRepository.findPassengerReference(secondOrderId) }
+
+        publisher.publishAssignmentCompleted(driverId = driverId, orderReference = firstOrderId)
+        awaitUntilNotNull {
+            driverClientsRepository.findAllForDriver(DriverId(driverId)).firstOrNull { it.rideCount == 1 }
+        }
+
+        publisher.publishAssignmentCompleted(driverId = driverId, orderReference = secondOrderId)
+        val client = assertNotNull(
+            awaitUntilNotNull {
+                driverClientsRepository.findAllForDriver(DriverId(driverId)).firstOrNull { it.rideCount == 2 }
+            }
+        )
+        assertEquals(true, client.isRepeat)
+    }
+
+    @Test
+    fun `a driver with zero real completed rides has an empty clients read model in PostgreSQL`() {
+        val driverId = "assignment-completed-it-clients-empty-${UUID.randomUUID()}"
+        seedDriver(driverId)
+
+        assertEquals(emptyList(), driverClientsRepository.findAllForDriver(DriverId(driverId)))
     }
 
     // --- ADR-065: Driver Earnings from Self-Stated Prices, end to end ---

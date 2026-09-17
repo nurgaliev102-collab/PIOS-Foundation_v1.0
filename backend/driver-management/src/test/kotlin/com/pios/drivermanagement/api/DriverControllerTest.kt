@@ -4,12 +4,14 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.drivermanagement.application.CreateDriverApplicationService
 import com.pios.drivermanagement.application.DriverAvailabilityApplicationService
 import com.pios.drivermanagement.application.RetrieveDriverAvailabilityHandler
+import com.pios.drivermanagement.application.RetrieveDriverClientsHandler
 import com.pios.drivermanagement.application.RetrieveDriverMilestonesHandler
 import com.pios.drivermanagement.application.UpdateLongDistancePreferenceApplicationService
 import com.pios.drivermanagement.application.UpdateVehicleApplicationService
 import com.pios.drivermanagement.domain.Availability
 import com.pios.drivermanagement.domain.Driver
 import com.pios.drivermanagement.domain.DriverId
+import com.pios.drivermanagement.persistence.InMemoryDriverClientsRepository
 import com.pios.drivermanagement.persistence.InMemoryDriverMilestonesRepository
 import com.pios.drivermanagement.persistence.InMemoryDriverRepository
 import org.springframework.http.HttpStatus
@@ -50,6 +52,8 @@ class DriverControllerTest {
     private val createDriverService = CreateDriverApplicationService(repository)
     private val milestonesRepository = InMemoryDriverMilestonesRepository()
     private val milestonesHandler = RetrieveDriverMilestonesHandler(milestonesRepository)
+    private val clientsRepository = InMemoryDriverClientsRepository()
+    private val clientsHandler = RetrieveDriverClientsHandler(clientsRepository)
     private val updateVehicleService = UpdateVehicleApplicationService(repository)
     private val updateLongDistancePreferenceService = UpdateLongDistancePreferenceApplicationService(repository)
     private val secret = Base64.getEncoder().encodeToString("driver-controller-test-secret".toByteArray())
@@ -59,6 +63,7 @@ class DriverControllerTest {
         availabilityService,
         createDriverService,
         milestonesHandler,
+        clientsHandler,
         updateVehicleService,
         updateLongDistancePreferenceService,
         sessionTokenVerifier,
@@ -644,5 +649,67 @@ class DriverControllerTest {
 
         assertEquals(HttpStatus.OK, response.statusCode)
         assertEquals(0L, assertNotNull(response.body).invitedDriversCount)
+    }
+
+    // --- Server-side "Мой бизнес" read model (docs/PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md Part 5): getClients ---
+
+    @Test
+    fun `getting clients with no Authorization header is rejected`() {
+        val response = controller.getClients("clients-driver-1")
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+    }
+
+    @Test
+    fun `getting clients with a different driver's token is rejected -- IDOR`() {
+        val response = controller.getClients("clients-driver-victim", authorization = driverToken("clients-driver-attacker"))
+
+        assertEquals(HttpStatus.FORBIDDEN, response.statusCode)
+    }
+
+    @Test
+    fun `a driver with zero rides for any passenger gets an empty clients list, not an error`() {
+        val response = controller.getClients("clients-driver-empty", authorization = driverToken("clients-driver-empty"))
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals(emptyList(), response.body)
+    }
+
+    @Test
+    fun `getClients returns ride count, last-ride timestamp, and the repeat flag for each passenger`() {
+        clientsRepository.recordRideForClient(DriverId("clients-driver-a"), "passenger-x", Instant.parse("2026-08-03T09:00:00Z"))
+        clientsRepository.recordRideForClient(DriverId("clients-driver-a"), "passenger-x", Instant.parse("2026-08-10T09:00:00Z"))
+        clientsRepository.recordRideForClient(DriverId("clients-driver-a"), "passenger-y", Instant.parse("2026-08-05T09:00:00Z"))
+
+        val response = controller.getClients("clients-driver-a", authorization = driverToken("clients-driver-a"))
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        val body = assertNotNull(response.body)
+        assertEquals(2, body.size)
+        val repeatEntry = body.first { it.passengerReference == "passenger-x" }
+        assertEquals(2, repeatEntry.rideCount)
+        assertEquals("2026-08-10T09:00:00Z", repeatEntry.lastRideAt)
+        assertTrue(repeatEntry.isRepeat)
+        val singleRideEntry = body.first { it.passengerReference == "passenger-y" }
+        assertEquals(1, singleRideEntry.rideCount)
+        assertEquals("2026-08-05T09:00:00Z", singleRideEntry.lastRideAt)
+        assertEquals(false, singleRideEntry.isRepeat)
+    }
+
+    @Test
+    fun `a passenger who rides with two different drivers stays scoped per driver in getClients`() {
+        clientsRepository.recordRideForClient(DriverId("clients-driver-scope-a"), "passenger-shared", Instant.parse("2026-08-03T09:00:00Z"))
+        clientsRepository.recordRideForClient(DriverId("clients-driver-scope-b"), "passenger-shared", Instant.parse("2026-08-03T09:00:00Z"))
+        clientsRepository.recordRideForClient(DriverId("clients-driver-scope-b"), "passenger-shared", Instant.parse("2026-08-10T09:00:00Z"))
+
+        val responseA = controller.getClients("clients-driver-scope-a", authorization = driverToken("clients-driver-scope-a"))
+        val responseB = controller.getClients("clients-driver-scope-b", authorization = driverToken("clients-driver-scope-b"))
+
+        val bodyA = assertNotNull(responseA.body)
+        assertEquals(1, bodyA.single().rideCount)
+        assertEquals(false, bodyA.single().isRepeat)
+        val bodyB = assertNotNull(responseB.body)
+        assertEquals(2, bodyB.single().rideCount)
+        assertTrue(bodyB.single().isRepeat)
     }
 }

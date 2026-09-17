@@ -8,6 +8,7 @@ import com.pios.drivermanagement.application.DriverAvailabilityApplicationServic
 import com.pios.drivermanagement.application.DriverNotFoundException
 import com.pios.drivermanagement.application.DriverRepository
 import com.pios.drivermanagement.application.RetrieveDriverAvailabilityHandler
+import com.pios.drivermanagement.application.RetrieveDriverClientsHandler
 import com.pios.drivermanagement.application.RetrieveDriverMilestonesHandler
 import com.pios.drivermanagement.application.UpdateLongDistancePreferenceApplicationService
 import com.pios.drivermanagement.application.UpdateLongDistancePreferenceCommand
@@ -116,6 +117,18 @@ import org.springframework.web.bind.annotation.RestController
  * exposes this count -- ADR-073 Part 4's own "never passenger-facing"
  * constraint.
  *
+ * ## Server-side "Мой бизнес" read model (`docs/PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 5)
+ *
+ * `getClients` exposes, per passenger, this driver's own ride count,
+ * last-ride timestamp, and repeat-client flag — private business data about
+ * this driver's own passengers, not a public fact. Requires the identical
+ * `Bearer`/`drv == driverId` check `getMilestones` already uses (401 with no
+ * valid token, 403 for any token not naming this exact [driverId]) — this
+ * read model lives entirely in Driver Management, is derived only from
+ * `AssignmentCompleted`/`OrderSubmitted` (already consumed by this module),
+ * and adds no `Connection` lifecycle of any kind (that half of Relationship
+ * depth remains out of scope, per the evaluation doc's own Part 5).
+ *
  * ## Update Vehicle (PIOS Group and Long-Distance Rides Roadmap, Stage 1)
  *
  * `updateVehicle` is a driver's own declaration of their car's details --
@@ -143,6 +156,7 @@ class DriverController(
     private val driverAvailabilityApplicationService: DriverAvailabilityApplicationService,
     private val createDriverApplicationService: CreateDriverApplicationService,
     private val retrieveDriverMilestonesHandler: RetrieveDriverMilestonesHandler,
+    private val retrieveDriverClientsHandler: RetrieveDriverClientsHandler,
     private val updateVehicleApplicationService: UpdateVehicleApplicationService,
     private val updateLongDistancePreferenceApplicationService: UpdateLongDistancePreferenceApplicationService,
     private val sessionTokenVerifier: SessionTokenVerifier,
@@ -305,6 +319,34 @@ class DriverController(
                     milestones.unpricedRidesCount,
                     driverRepository.countInvitedBy(id)
                 )
+            )
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        }
+    }
+
+    @GetMapping("/{driverId}/clients")
+    fun getClients(
+        @PathVariable driverId: String,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<List<DriverClientResponse>> {
+        return try {
+            val id = DriverId(driverId)
+            val verified = sessionTokenVerifier.verify(authorization)
+                ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+            if (verified.drv != driverId) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+            }
+            val clients = retrieveDriverClientsHandler.handle(id)
+            ResponseEntity.ok(
+                clients.map {
+                    DriverClientResponse(
+                        it.passengerReference,
+                        it.rideCount,
+                        it.lastRideAt?.toString(),
+                        it.isRepeat
+                    )
+                }
             )
         } catch (ex: IllegalArgumentException) {
             ResponseEntity.badRequest().build()
