@@ -129,7 +129,12 @@ class ProposalAssignmentOrchestrationService(
         proposalApplicationService.acceptProposalWithinCallerTransaction(lockedProposal, command)
 
         val assignmentCreated = dispatchAssignmentApplicationService.handleWithinCallerTransaction(
-            AssignOrderCommand(lockedProposal.order, lockedProposal.driver, isTest = lockedProposal.isTest)
+            AssignOrderCommand(
+                lockedProposal.order,
+                lockedProposal.driver,
+                isTest = lockedProposal.isTest,
+                agreedAmount = lockedProposal.statedPrice
+            )
         )
 
         ProposalAcceptanceOutcome(lockedProposal, assignmentCreated)
@@ -156,7 +161,12 @@ class ProposalAssignmentOrchestrationService(
         proposalApplicationService.confirmPriceWithinCallerTransaction(lockedProposal, command)
 
         val assignmentCreated = dispatchAssignmentApplicationService.handleWithinCallerTransaction(
-            AssignOrderCommand(lockedProposal.order, lockedProposal.driver, isTest = lockedProposal.isTest)
+            AssignOrderCommand(
+                lockedProposal.order,
+                lockedProposal.driver,
+                isTest = lockedProposal.isTest,
+                agreedAmount = lockedProposal.statedPrice
+            )
         )
 
         ProposalAcceptanceOutcome(lockedProposal, assignmentCreated)

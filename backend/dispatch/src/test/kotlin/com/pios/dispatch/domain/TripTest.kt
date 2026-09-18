@@ -219,4 +219,60 @@ class TripTest {
         assertEquals(completedAt, trip.completedAt)
         assertEquals(completedAt, trip.statusChangedAt)
     }
+
+    // --- Agreed amount (D-06, Settlement as Evidence) ---
+
+    @Test
+    fun `a trip created with no agreedAmount argument has a null agreedAmount`() {
+        val trip = Trip.create(assignment()).trip
+
+        assertNull(trip.agreedAmount)
+    }
+
+    @Test
+    fun `creating a trip captures the agreedAmount supplied by the caller`() {
+        val created = Trip.create(assignment(), agreedAmount = "350")
+
+        assertEquals("350", created.trip.agreedAmount)
+    }
+
+    @Test
+    fun `agreedAmount is unaffected by the full ride lifecycle -- arrive, start, complete never touch it`() {
+        val trip = Trip.create(assignment(), agreedAmount = "500").trip
+
+        trip.arrive()
+        trip.start()
+        trip.complete()
+
+        assertEquals("500", trip.agreedAmount)
+    }
+
+    @Test
+    fun `agreedAmount is unaffected by termination`() {
+        val trip = Trip.create(assignment(), agreedAmount = "500").trip
+
+        trip.terminate(
+            Termination(
+                requestId = "req-1",
+                initiator = TerminationInitiator.PASSENGER,
+                reasonCode = TerminationReasonCode.PLANS_CHANGED,
+                terminatedAt = Instant.parse("2026-09-18T12:00:00Z"),
+                note = null
+            )
+        )
+
+        assertEquals("500", trip.agreedAmount)
+    }
+
+    @Test
+    fun `two trips for the same order at different times can carry different agreedAmounts -- each Trip's own amount is its own`() {
+        val a1 = assignment()
+        val trip1 = Trip.create(a1, agreedAmount = "300").trip
+        val a2 = Assignment.create(order, DriverReference("driver-2")).assignment
+
+        val trip2 = Trip.create(a2, agreedAmount = "450").trip
+
+        assertEquals("300", trip1.agreedAmount)
+        assertEquals("450", trip2.agreedAmount)
+    }
 }

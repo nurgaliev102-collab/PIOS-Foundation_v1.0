@@ -57,12 +57,30 @@ import java.util.UUID
  * the same same-module derivation [order]/[driver] already receive —
  * never independently supplied, mirroring [Assignment.isTest]'s own
  * convention exactly.
+ *
+ * ## Agreed amount (D-06, Settlement as Evidence)
+ *
+ * [agreedAmount] is the amount agreed for *this* Trip, captured exactly
+ * once — at [create] — and never again. It has no setter, is not
+ * recomputed by [arrive]/[start]/[complete]/[terminate], and this class
+ * never reads a [com.pios.dispatch.domain.Proposal] to determine or
+ * revise it. The caller of [create] supplies it already known (the
+ * application layer's own [com.pios.dispatch.domain.Proposal.statedPrice]
+ * at the moment the just-accepted Proposal produced this Trip, in the
+ * same transaction) — `null` when no Proposal precedes this Trip (the
+ * manual-assignment path) or for any Trip created before this field
+ * existed (no backfill, per D-06 Decision item 7).
+ * [com.pios.dispatch.domain.Proposal.statedPrice] itself remains a
+ * historical record of what was stated, on the Proposal aggregate; it is
+ * no longer the source of truth for what a specific Trip's own agreed
+ * amount is — this field is.
  */
 class Trip private constructor(
     val id: TripId,
     val assignmentId: AssignmentId,
     val order: OrderReference,
     val driver: DriverReference,
+    val agreedAmount: String?,
     val isTest: Boolean = false
 ) {
     var status: TripStatus = TripStatus.CREATED
@@ -143,9 +161,17 @@ class Trip private constructor(
          * this Assignment) — the caller is responsible for supplying it,
          * the same responsibility [Assignment.create]'s own caller has
          * for [Assignment.create]'s `existingAssignments`.
+         *
+         * [agreedAmount] (D-06) is captured here, once, as supplied by the
+         * caller — this factory does not look it up itself, does not read
+         * a Proposal, and does not compute it. `null` when the caller has
+         * none (manual assignment, or a self-heal Trip created with no
+         * Proposal in the picture at all — see
+         * [com.pios.dispatch.application.DispatchAssignmentApplicationService.tripFor]).
          */
         fun create(
             assignment: Assignment,
+            agreedAmount: String? = null,
             existingTrip: Trip? = null
         ): TripCreated {
             check(existingTrip == null) {
@@ -156,6 +182,7 @@ class Trip private constructor(
                 assignmentId = assignment.id,
                 order = assignment.order,
                 driver = assignment.driver,
+                agreedAmount = agreedAmount,
                 isTest = assignment.isTest
             )
             return TripCreated(trip)

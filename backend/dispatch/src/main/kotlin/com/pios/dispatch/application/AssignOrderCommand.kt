@@ -14,8 +14,19 @@ import com.pios.dispatch.domain.OrderReference
  * submitted and which driver is available belongs to Order Management and
  * Driver Management respectively, not to Dispatch (MODULE_STRUCTURE.md).
  */
+/**
+ * [agreedAmount] (D-06, Settlement as Evidence) is the amount already
+ * agreed on the Proposal this Assignment (and the Trip it produces)
+ * originates from -- supplied by the caller exactly as it already knows
+ * it (the just-accepted/-confirmed Proposal's own
+ * [com.pios.dispatch.domain.Proposal.statedPrice], read inside the same
+ * transaction), never looked up by this command or by
+ * [DispatchAssignmentApplicationService] itself. `null` for the manual
+ * assignment path, which has no Proposal at all.
+ */
 data class AssignOrderCommand(
     val order: OrderReference,
     val driver: DriverReference,
-    val isTest: Boolean = false
+    val isTest: Boolean = false,
+    val agreedAmount: String? = null
 )

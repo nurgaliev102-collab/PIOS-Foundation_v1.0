@@ -1,12 +1,16 @@
 package com.pios.dispatch.api
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.pios.dispatch.application.AssignOrderCommand
 import com.pios.dispatch.application.DispatchAssignmentApplicationService
 import com.pios.dispatch.domain.Assignment
 import com.pios.dispatch.domain.AssignmentId
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
+import com.pios.dispatch.domain.PassengerReference
+import com.pios.dispatch.domain.Proposal
 import com.pios.dispatch.persistence.InMemoryAssignmentRepository
+import com.pios.dispatch.persistence.InMemoryProposalRepository
 import com.pios.dispatch.persistence.InMemoryTripRepository
 import org.springframework.http.HttpStatus
 import java.time.Instant
@@ -106,6 +110,40 @@ class AssignmentControllerTest {
 
         assertEquals(1, own.body?.size)
         assertTrue(other.body?.isEmpty() == true)
+    }
+
+    // --- D-06 (Settlement as Evidence): agreedAmount on the same, already-authorized read ---
+
+    @Test
+    fun `HTTP assignment listing shows agreedAmount to the assignment's own driver`() {
+        service.handle(AssignOrderCommand(OrderReference("order-amount-driver"), DriverReference("driver-amount"), agreedAmount = "740"))
+
+        val response = controller.listAssignmentsHttp(authorization = driverToken("driver-amount"), orderId = "order-amount-driver")
+
+        assertEquals("740", response.body?.single()?.agreedAmount)
+    }
+
+    @Test
+    fun `HTTP assignment listing shows agreedAmount to the order's own passenger, and hides the row entirely from a stranger`() {
+        val proposalRepository = InMemoryProposalRepository()
+        val controllerWithProposals =
+            AssignmentController(service, repository, tripRepository, sessionTokenVerifier, proposalRepository = proposalRepository)
+        val order = OrderReference("order-amount-passenger")
+        val proposal = Proposal.propose(
+            order, DriverReference("driver-amount-2"), passengerReference = PassengerReference("passenger-1")
+        ).proposal
+        proposalRepository.save(proposal)
+        service.handle(AssignOrderCommand(order, DriverReference("driver-amount-2"), agreedAmount = "555"))
+
+        val passengerResponse = controllerWithProposals.listAssignmentsHttp(
+            authorization = bearer(issueToken(sub = "passenger-1")), orderId = "order-amount-passenger"
+        )
+        val strangerResponse = controllerWithProposals.listAssignmentsHttp(
+            authorization = bearer(issueToken(sub = "passenger-2")), orderId = "order-amount-passenger"
+        )
+
+        assertEquals("555", passengerResponse.body?.single()?.agreedAmount)
+        assertTrue(strangerResponse.body?.isEmpty() == true)
     }
 
     @Test

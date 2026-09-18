@@ -17,6 +17,17 @@ package com.pios.dispatch.api
  * `null` for every assignment created before `V8__assignment_transition_timestamps.sql`.
  * [statusChangedAt] is unaffected and keeps meaning exactly what it always
  * has (ADR-043's own binding constraint: kept, not replaced).
+ *
+ * [agreedAmount] (D-06, Settlement as Evidence) surfaces the connected
+ * [com.pios.dispatch.domain.Trip]'s own same-named property — the amount
+ * agreed for this specific Trip, captured once at Trip creation, never
+ * recomputed. `null` when the connected Trip has none (no Proposal
+ * preceded it, or it predates this field — no backfill). This is the
+ * minimal read-model change D-06 Phase 4 calls for: both the driver and
+ * the passenger already read this exact endpoint (`AssignmentController.listAssignmentsHttp`,
+ * gated so only the Assignment's own driver or the order's own passenger
+ * may see a given row), so no new endpoint or authorization rule was
+ * introduced for this field.
  */
 data class AssignmentResponse(
     val assignmentId: String,
@@ -31,5 +42,6 @@ data class AssignmentResponse(
     val terminationInitiator: String? = null,
     val terminationReasonCode: String? = null,
     val terminatedAt: String? = null,
-    val terminationNote: String? = null
+    val terminationNote: String? = null,
+    val agreedAmount: String? = null
 )

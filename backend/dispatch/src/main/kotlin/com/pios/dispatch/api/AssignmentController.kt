@@ -352,7 +352,8 @@ class AssignmentController(
             trip?.termination?.initiator?.name,
             trip?.termination?.reasonCode?.name,
             trip?.termination?.terminatedAt?.toString(),
-            trip?.termination?.note
+            trip?.termination?.note,
+            trip?.agreedAmount
         )
     }
 

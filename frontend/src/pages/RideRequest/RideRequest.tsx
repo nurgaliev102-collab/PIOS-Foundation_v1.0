@@ -144,6 +144,11 @@ interface ProposalStatusItem {
 
 interface AssignmentStatusItem {
   status: 'CREATED' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED' | 'TERMINATED'
+  // D-06 (Settlement as Evidence): the connected Trip's own captured
+  // agreedAmount -- authoritative once an Assignment exists, superseding
+  // the Proposal's own statedPrice. `null`/absent for a Trip with none
+  // (no Proposal preceded it, or it predates this field).
+  agreedAmount?: string | null
 }
 
 interface CancellationStatusItem {
@@ -997,6 +1002,14 @@ export function RideRequest() {
               // ADR-071: same read, kept for `deriveNotificationFacts` --
               // see [assignmentStatusForNotifications]'s own KDoc above.
               setAssignmentStatusForNotifications(status ?? 'CREATED')
+              // D-06: once the Trip's own agreedAmount is on record,
+              // it supersedes the acceptedItem.statedPrice this poll set
+              // just above -- falls back to that value only for a Trip
+              // that predates this field (no backfill).
+              const agreedAmount = assignments[0]?.agreedAmount
+              if (agreedAmount != null) {
+                setStatedPrice(agreedAmount)
+              }
             })
             .catch(() => {
               if (active) {

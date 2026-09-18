@@ -31,6 +31,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class CommitmentTerminationPostgreSQLTest {
@@ -49,7 +50,7 @@ class CommitmentTerminationPostgreSQLTest {
         proposals, transactions, dispatchRequestRepository = dispatchRequests, orderGuard = guard
     )
     private val assignmentService = DispatchAssignmentApplicationService(
-        assignments, outbox, transactions, mapper, trips, proposals, guard, dispatchRequests
+        assignments, outbox, transactions, mapper, trips, guard, dispatchRequests
     )
     private val orchestration = ProposalAssignmentOrchestrationService(
         proposals, proposalService, assignmentService, transactions, guard
@@ -237,5 +238,127 @@ class CommitmentTerminationPostgreSQLTest {
             Long::class.java, order.orderId
         )
         assertEquals(1L, eventCount)
+    }
+
+    // --- D-06 (Settlement as Evidence): agreed amount is captured on Trip, never re-derived from Proposal at completion ---
+
+    @Test
+    fun `agreed amount is captured on the Trip at acceptance and forwarded on completion -- not re-read from Proposal`() {
+        val order = order()
+        val proposal = proposalService.handle(ProposeDriverCommand(order, driver())).proposal
+        proposalService.proposePrice(ProposePriceCommand(proposal.id, "620"))
+
+        val outcome = orchestration.confirmPrice(ConfirmPriceCommand(proposal.id))
+
+        val assignmentId = outcome.assignmentCreated.assignment.id
+        assertEquals("620", trips.findByAssignmentId(assignmentId)?.agreedAmount)
+        assignmentService.arriveAssignment(ArriveAssignmentCommand(assignmentId))
+        assignmentService.startAssignment(com.pios.dispatch.application.StartAssignmentCommand(assignmentId))
+
+        assignmentService.completeAssignment(CompleteAssignmentCommand(assignmentId))
+
+        val record = jdbc.queryForMap(
+            "SELECT payload FROM dispatch_outbox WHERE aggregate_id = ? AND event_type = 'AssignmentCompleted' ORDER BY id DESC LIMIT 1",
+            assignmentId.value
+        )
+        val payload = mapper.readTree(record["payload"] as String).get("payload")
+        assertEquals("620", payload.get("statedPrice").asText())
+    }
+
+    @Test
+    fun `two ACCEPTED proposals for the same order do not affect a completing Trip's own forwarded amount`() {
+        // Manufactured directly against the repository: Proposal.propose /
+        // Assignment.create's own invariants mean the ordinary application
+        // flow cannot itself put an order into this state today (at most
+        // one Assignment -- and therefore, in practice, at most one
+        // meaningfully "current" ACCEPTED Proposal -- ever exists per
+        // order). This test exists to prove the fix is robust to the exact
+        // data shape the pre-D-06 code (`proposalRepository.findByOrder(...)
+        // .firstOrNull { it.status == ACCEPTED }`, no ORDER BY, unscoped by
+        // Trip) was vulnerable to, regardless of how that shape might ever
+        // arise -- not to claim this application currently produces it.
+        val order = order()
+        val proposal = proposalService.handle(ProposeDriverCommand(order, driver())).proposal
+        proposalService.proposePrice(ProposePriceCommand(proposal.id, "111"))
+        val outcome = orchestration.confirmPrice(ConfirmPriceCommand(proposal.id))
+        val assignmentId = outcome.assignmentCreated.assignment.id
+
+        val secondProposal = com.pios.dispatch.domain.Proposal.propose(order, driver()).proposal
+        secondProposal.proposePrice("999")
+        secondProposal.confirmPrice()
+        proposals.save(secondProposal)
+        assertEquals(2, proposals.findByOrder(order).count { it.status == ProposalStatus.ACCEPTED })
+
+        assignmentService.arriveAssignment(ArriveAssignmentCommand(assignmentId))
+        assignmentService.startAssignment(com.pios.dispatch.application.StartAssignmentCommand(assignmentId))
+        assignmentService.completeAssignment(CompleteAssignmentCommand(assignmentId))
+
+        val record = jdbc.queryForMap(
+            "SELECT payload FROM dispatch_outbox WHERE aggregate_id = ? AND event_type = 'AssignmentCompleted' ORDER BY id DESC LIMIT 1",
+            assignmentId.value
+        )
+        val payload = mapper.readTree(record["payload"] as String).get("payload")
+        assertEquals("111", payload.get("statedPrice").asText(), "must forward this Trip's own captured amount, never the other proposal's")
+    }
+
+    @Test
+    fun `terminating one Trip and completing a second Trip for the same order keeps each Trip's own agreedAmount separate`() {
+        // Manufactured at the domain/repository layer for the same reason
+        // as the test above: Assignment.create's own invariant (checked
+        // against *every* existing assignment for an order, regardless of
+        // status) means no current production path can create a second
+        // Assignment for an order that already has one, terminated or not
+        // -- so a real termination-then-redispatch-to-a-new-driver
+        // sequence for the *same* order is not reachable today. This test
+        // proves the invariant D-06 actually requires -- each Trip's own
+        // agreedAmount is its own, never another Trip's -- holds even if
+        // that sequence becomes reachable later.
+        val order = order()
+        val firstProposal = proposalService.handle(ProposeDriverCommand(order, driver())).proposal
+        proposalService.proposePrice(ProposePriceCommand(firstProposal.id, "300"))
+        val firstOutcome = orchestration.confirmPrice(ConfirmPriceCommand(firstProposal.id))
+        val firstAssignmentId = firstOutcome.assignmentCreated.assignment.id
+        assertEquals("300", trips.findByAssignmentId(firstAssignmentId)?.agreedAmount)
+
+        termination.terminate(passengerCommand(order))
+        assertEquals(TripStatus.TERMINATED, trips.findByAssignmentId(firstAssignmentId)?.status)
+
+        val secondAssignmentCreated = com.pios.dispatch.domain.Assignment.create(order, driver())
+        assignments.save(secondAssignmentCreated.assignment)
+        val secondTripCreated = com.pios.dispatch.domain.Trip.create(secondAssignmentCreated.assignment, agreedAmount = "450")
+        trips.save(secondTripCreated.trip)
+        val secondAssignmentId = secondAssignmentCreated.assignment.id
+
+        assignmentService.arriveAssignment(ArriveAssignmentCommand(secondAssignmentId))
+        assignmentService.startAssignment(com.pios.dispatch.application.StartAssignmentCommand(secondAssignmentId))
+        assignmentService.completeAssignment(CompleteAssignmentCommand(secondAssignmentId))
+
+        assertEquals("300", trips.findByAssignmentId(firstAssignmentId)?.agreedAmount, "the terminated Trip's own amount must not change")
+        assertEquals("450", trips.findByAssignmentId(secondAssignmentId)?.agreedAmount)
+        val record = jdbc.queryForMap(
+            "SELECT payload FROM dispatch_outbox WHERE aggregate_id = ? AND event_type = 'AssignmentCompleted' ORDER BY id DESC LIMIT 1",
+            secondAssignmentId.value
+        )
+        val payload = mapper.readTree(record["payload"] as String).get("payload")
+        assertEquals("450", payload.get("statedPrice").asText(), "completing the second Trip must publish only its own amount")
+    }
+
+    @Test
+    fun `manual assignment with no Proposal completes with a null agreedAmount and a null statedPrice on AssignmentCompleted`() {
+        val order = order()
+        val assignmentId = createManual(order)
+        val assignment = assignments.findByOrder(order).single()
+        assertNull(trips.findByAssignmentId(assignment.id)?.agreedAmount)
+        assignmentService.arriveAssignment(ArriveAssignmentCommand(assignment.id))
+        assignmentService.startAssignment(com.pios.dispatch.application.StartAssignmentCommand(assignment.id))
+
+        assignmentService.completeAssignment(CompleteAssignmentCommand(assignment.id))
+
+        val record = jdbc.queryForMap(
+            "SELECT payload FROM dispatch_outbox WHERE aggregate_id = ? AND event_type = 'AssignmentCompleted' ORDER BY id DESC LIMIT 1",
+            assignmentId
+        )
+        val payload = mapper.readTree(record["payload"] as String).get("payload")
+        assertTrue(payload.get("statedPrice").isNull)
     }
 }

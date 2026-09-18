@@ -8,9 +8,11 @@ import com.pios.dispatch.domain.ProposalId
 import com.pios.dispatch.domain.ProposalStatus
 import com.pios.dispatch.persistence.InMemoryAssignmentRepository
 import com.pios.dispatch.persistence.InMemoryProposalRepository
+import com.pios.dispatch.persistence.InMemoryTripRepository
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -24,7 +26,9 @@ class ProposalAssignmentOrchestrationServiceTest {
     private val proposalRepository = InMemoryProposalRepository()
     private val proposalApplicationService = ProposalApplicationService(proposalRepository)
     private val assignmentRepository = InMemoryAssignmentRepository()
-    private val dispatchAssignmentApplicationService = DispatchAssignmentApplicationService(assignmentRepository)
+    private val tripRepository = InMemoryTripRepository()
+    private val dispatchAssignmentApplicationService =
+        DispatchAssignmentApplicationService(assignmentRepository, tripRepository = tripRepository)
     private val orchestrationService = ProposalAssignmentOrchestrationService(
         proposalRepository,
         proposalApplicationService,
@@ -160,5 +164,38 @@ class ProposalAssignmentOrchestrationServiceTest {
         val outcome = orchestrationService.acceptProposal(AcceptProposalCommand(realProposal.id))
 
         assertEquals(false, outcome.assignmentCreated.assignment.isTest)
+    }
+
+    // --- D-06 (Settlement as Evidence): agreed amount captured at Trip creation ---
+
+    @Test
+    fun `accepting a proposal with a stated price captures it as the new Trip's agreedAmount`() {
+        val proposal = proposalApplicationService.handle(ProposeDriverCommand(order, driver)).proposal
+
+        val outcome = orchestrationService.acceptProposal(AcceptProposalCommand(proposal.id, statedPrice = "350"))
+
+        val trip = tripRepository.findByAssignmentId(outcome.assignmentCreated.assignment.id)
+        assertEquals("350", trip?.agreedAmount)
+    }
+
+    @Test
+    fun `accepting a proposal with no stated price leaves the new Trip's agreedAmount null`() {
+        val proposal = proposalApplicationService.handle(ProposeDriverCommand(order, driver)).proposal
+
+        val outcome = orchestrationService.acceptProposal(AcceptProposalCommand(proposal.id))
+
+        val trip = tripRepository.findByAssignmentId(outcome.assignmentCreated.assignment.id)
+        assertNull(trip?.agreedAmount)
+    }
+
+    @Test
+    fun `confirming a proposed price captures the driver's own stated price as the new Trip's agreedAmount`() {
+        val proposal = proposalApplicationService.handle(ProposeDriverCommand(order, driver)).proposal
+        proposalApplicationService.proposePrice(proposal, ProposePriceCommand(proposal.id, statedPrice = "620"))
+
+        val outcome = orchestrationService.confirmPrice(ConfirmPriceCommand(proposal.id))
+
+        val trip = tripRepository.findByAssignmentId(outcome.assignmentCreated.assignment.id)
+        assertEquals("620", trip?.agreedAmount)
     }
 }

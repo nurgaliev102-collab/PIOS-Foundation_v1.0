@@ -30,8 +30,11 @@ import java.time.Instant
  * [PostgreSQLAssignmentRepository.reconstruct] exactly:
  *
  * 1. Reflectively invoke the private constructor with the persisted id,
- *    assignment id, order reference, driver reference, and isTest flag
- *    (confirmed empirically against the compiled class to take unboxed
+ *    assignment id, order reference, driver reference, agreed amount
+ *    (D-06; nullable, but still a required positional constructor
+ *    parameter, so its declared type is looked up the same way as every
+ *    other `String`-erased parameter here), and isTest flag (confirmed
+ *    empirically against the compiled class to take unboxed
  *    `String`/`Boolean` parameters, the same value-class behavior already
  *    documented for [Assignment]). This always yields a trip in its
  *    initial [TripStatus.CREATED] state.
@@ -52,9 +55,10 @@ class PostgreSQLTripRepository(
             INSERT INTO trips (
                 id, assignment_id, order_reference, driver_reference, status, status_changed_at,
                 arrived_at, started_at, completed_at, is_test, termination_request_id,
-                termination_initiator, termination_reason_code, termination_note, terminated_at
+                termination_initiator, termination_reason_code, termination_note, terminated_at,
+                agreed_amount
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 status = EXCLUDED.status,
                 status_changed_at = EXCLUDED.status_changed_at,
@@ -81,7 +85,8 @@ class PostgreSQLTripRepository(
             trip.termination?.initiator?.name,
             trip.termination?.reasonCode?.name,
             trip.termination?.note,
-            trip.termination?.terminatedAt?.let { Timestamp.from(it) }
+            trip.termination?.terminatedAt?.let { Timestamp.from(it) },
+            trip.agreedAmount
         )
     }
 
@@ -90,7 +95,8 @@ class PostgreSQLTripRepository(
             """
             SELECT id, assignment_id, order_reference, driver_reference, status, status_changed_at,
                    arrived_at, started_at, completed_at, is_test, termination_request_id,
-                   termination_initiator, termination_reason_code, termination_note, terminated_at
+                   termination_initiator, termination_reason_code, termination_note, terminated_at,
+                   agreed_amount
             FROM trips WHERE id = ?
             """.trimIndent(),
             { rs, _ -> reconstruct(rs) },
@@ -104,7 +110,8 @@ class PostgreSQLTripRepository(
             """
             SELECT id, assignment_id, order_reference, driver_reference, status, status_changed_at,
                    arrived_at, started_at, completed_at, is_test, termination_request_id,
-                   termination_initiator, termination_reason_code, termination_note, terminated_at
+                   termination_initiator, termination_reason_code, termination_note, terminated_at,
+                   agreed_amount
             FROM trips WHERE assignment_id = ?
             """.trimIndent(),
             { rs, _ -> reconstruct(rs) },
@@ -119,6 +126,7 @@ class PostgreSQLTripRepository(
             String::class.java,
             String::class.java,
             String::class.java,
+            String::class.java,
             Boolean::class.java
         )
         constructor.isAccessible = true
@@ -127,6 +135,7 @@ class PostgreSQLTripRepository(
             rs.getString("assignment_id"),
             rs.getString("order_reference"),
             rs.getString("driver_reference"),
+            rs.getString("agreed_amount"),
             rs.getBoolean("is_test")
         )
         val status = TripStatus.valueOf(rs.getString("status"))

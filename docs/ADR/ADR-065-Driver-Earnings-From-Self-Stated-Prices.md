@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted — implemented.** Decision item 4 (the parsing rule, exactly as written) and Decision item 7 (no backfill) were both confirmed by the product owner on 2026-09-07. Implemented the same day: Dispatch forwards `statedPrice` on `AssignmentCompleted`; Driver Management parses via `PriceParser` and extends `GET /v1/drivers/{driverId}/milestones` with `totalStatedEarnings`/`unpricedRidesCount`; frontend renders the new tile once the field is a number. See References for the exact commits.
+**Accepted — implemented. Decision items 2 and 3 superseded by D-06 (Settlement as Evidence) — see "Amendment 2026-09-18" below.** Decision item 4 (the parsing rule, exactly as written) and Decision item 7 (no backfill) were both confirmed by the product owner on 2026-09-07. Implemented the same day: Dispatch forwards `statedPrice` on `AssignmentCompleted`; Driver Management parses via `PriceParser` and extends `GET /v1/drivers/{driverId}/milestones` with `totalStatedEarnings`/`unpricedRidesCount`; frontend renders the new tile once the field is a number. See References for the exact commits.
 
 **Decision Date:** 2026-09-07
 
@@ -166,7 +166,39 @@ Any comparison, ranking, ordering, or averaging of stated amounts across proposa
 - [ADR-064: Referral Visibility — No Network Management Activation](ADR-064-Referral-Visibility-No-Network-Management-Activation.md) — the immediate precedent for this ADR's shape: audit first, surface what the data cannot support, propose the minimal-footprint placement.
 - [ADR-015: Evolution Strategy](ADR-015-Evolution-Strategy.md) — supersession discipline for any future change to Decision item 1.
 
+## Amendment 2026-09-18 — D-06 (Settlement as Evidence) supersedes Decision items 2-3
+
+**Product Owner decision, ratified and implemented 2026-09-18.** This amendment does not delete or rewrite anything above; the original Decision, Context, and Consequences stand as the historical record of what was decided and why on 2026-09-07, per `CLAUDE.md`'s "Never Delete Documentation." What follows is what changed, and why.
+
+**SUPERSEDED:**
+
+- **Decision item 2's sourcing mechanism** — "The value is sourced by looking up the order's own `ACCEPTED` `Proposal` at completion time (`ProposalRepository.findByOrder(assignment.order)` ... inside the transaction `completeAssignment` already opens)." D-06 found this mechanism unreliable in a case this ADR's own audit did not consider: after `ADR-080`'s commitment termination and redispatch (ratified 2026-09-17, after this ADR shipped), an order can carry more than one `ACCEPTED` Proposal over its lifetime (`ADR-080`'s own "an accepted Proposal remains ACCEPTED as historical evidence"; `V14__proposals_one_open_per_order.sql`'s own partial-unique-index comment names redispatch as "the ordinary, expected fallback... flow"). `ProposalRepository.findByOrder`'s own query carries no `ORDER BY`, and the lookup itself is unscoped by driver or Trip — so a completing Trip could, deterministically, be attributed the wrong driver's stated price. D-06's own Decision item 6 — "при Trip completion запрещено повторно искать Proposal" — closes this by removing the late lookup entirely, not by adding an `ORDER BY` to it.
+- **Decision item 3's own "Dispatch's `proposals.stated_price` remains authoritative."** D-06 Decision item 1 makes the agreed amount a property of `Trip`, not `Proposal`. `Proposal.statedPrice` remains exactly what it always was — the driver's own stated utterance, immutable once set (`ADR-042` R4.1-R4.2, unchanged) — but it is no longer the source of truth for what a specific Trip's own agreed amount is. `Trip.agreedAmount` is.
+
+**RETAINED, unchanged:**
+
+- Decision item 1's narrow amendment to `ADR-042` R4.3/R4.6 (aggregation and propagation boundary) — still exactly as narrow: one driver, own completed history, own eyes, `AssignmentCompleted` only, Driver Management only.
+- Decision item 4's parsing rule (digits-only, product-owner-confirmed 2026-09-07) — unchanged; `PriceParser` reads the same kind of string it always did, now sourced from `Trip.agreedAmount` instead of a completion-time Proposal read, but the string itself, when present, is unaffected.
+- Decision item 5's read path (`GET /v1/drivers/{driverId}/milestones`) — unchanged; Driver Management's own derived read model is untouched by this amendment (D-06 Decision item 9: "Driver Management private metrics сохраняются по смыслу"; see also `ADR-081`, D-02).
+- Decision item 6's schema note and Decision item 7's no-backfill rule — unchanged in spirit, now extended to `trips.agreed_amount` itself: a Trip row that existed before `V21__trip_agreed_amount.sql` has `agreed_amount = NULL` and is never backfilled, for the same reason Driver Management's own historical rides were never backfilled.
+- `AssignmentCompleted`'s wire shape — unchanged. `payload.statedPrice` is still the field name (D-06 Decision item 12 explicitly declines a cosmetic rename); `eventVersion` is still 1; both existing consumers (Order Management, Driver Management) required no code change.
+- Everything `ADR-042` R4.1/R4.4/R4.5/R4.7/R4.8 still forbid Dispatch from doing to the amount (computing, assuming currency, influencing selection, etc.) — untouched; D-06 Decision item 8 restates the same boundary independently.
+
+**What actually changed, concretely:**
+
+- `Trip` (`backend/dispatch/src/main/kotlin/com/pios/dispatch/domain/Trip.kt`) gained `agreedAmount: String?`, set once at `Trip.create`, no setter.
+- `AssignOrderCommand` gained `agreedAmount: String? = null`; `ProposalAssignmentOrchestrationService.acceptProposal`/`confirmPrice` populate it from the just-accepted/-confirmed `Proposal.statedPrice`, inside the same shared transaction (ADR-036) that already creates the Trip — no new read, no new lock, no new cross-aggregate query beyond what that transaction already performs.
+- `DispatchAssignmentApplicationService.completeAssignment` no longer calls `proposalRepository.findByOrder(...)`; it forwards the completing Trip's own `agreedAmount`. The `ProposalRepository` dependency and its `NoOpProposalRepository` default were removed from this service entirely, since nothing in it reads a Proposal any more.
+- `trips.agreed_amount` (additive, `V21__trip_agreed_amount.sql`).
+- `AssignmentResponse` gained `agreedAmount: String?`, sourced from the connected Trip — surfaced on the same `GET /v1/assignments?orderId=`/`?orderIds=` endpoint the driver and the passenger already read and are already authorized against (`AssignmentController.listAssignmentsHttp`'s existing driver-or-passenger check, unmodified); no new endpoint, no new authorization rule.
+
+**What this amendment does not do**, per D-06's own explicit exclusions: no currency, payment method, paid status, refund, dispute, or settlement concept was introduced anywhere; no ride-outcome taxonomy was introduced (D-06 Decision item 11 leaves that an open, separate Product Owner decision); Driver Management's `totalStatedEarnings`/`unpricedRidesCount`/`DriverRideStatedPricesRepository` were not touched, renamed, or reinterpreted as anything beyond the private business metrics `ADR-081` already ratified them as.
+
 ## References
+
+- The D-06 reconciliation report produced 2026-09-18 (read-only, prior to this amendment) and the D-06 implementation this amendment records — both read, not modified, by this document.
+- `docs/ADR/ADR-080-Commitment-Termination-and-Order-Cancellation-Handshake.md` — the source of the multi-`ACCEPTED`-Proposal-per-order scenario this amendment's Decision item 2 supersession responds to.
+- `docs/ADR/ADR-081-Driver-Business-Metrics-Carry-No-Value.md` — the D-02 boundary this amendment's Driver Management section stays inside.
 
 Read, not modified:
 

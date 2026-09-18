@@ -5,10 +5,8 @@ import com.pios.dispatch.domain.Assignment
 import com.pios.dispatch.domain.AssignmentStatus
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
-import com.pios.dispatch.domain.Proposal
 import com.pios.dispatch.domain.TripStatus
 import com.pios.dispatch.persistence.InMemoryAssignmentRepository
-import com.pios.dispatch.persistence.InMemoryProposalRepository
 import com.pios.dispatch.persistence.InMemoryTripRepository
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -167,28 +165,25 @@ class DispatchAssignmentApplicationServiceTest {
         assertEquals(AssignmentStatus.CREATED, repository.findById(created.assignment.id)?.status)
     }
 
-    // --- ADR-065: Driver Earnings from Self-Stated Prices ---
+    // --- D-06 (Settlement as Evidence): completion forwards the completing Trip's own agreedAmount ---
 
     @Test
-    fun `completing an assignment forwards the order's own ACCEPTED proposal's statedPrice on AssignmentCompleted`() {
-        val proposalRepository = InMemoryProposalRepository()
+    fun `completing an assignment forwards the connected Trip's own agreedAmount on AssignmentCompleted`() {
         val recordingOutboxRepository = RecordingOutboxRepository()
         val priceOrder = OrderReference("order-price-1")
         val priceDriver = DriverReference("driver-price-1")
-        val proposalCreated = Proposal.propose(priceOrder, priceDriver)
-        proposalCreated.proposal.accept(statedPrice = "350")
-        proposalRepository.save(proposalCreated.proposal)
-        val serviceWithProposals = DispatchAssignmentApplicationService(
+        val serviceWithAgreedAmount = DispatchAssignmentApplicationService(
             assignmentRepository = InMemoryAssignmentRepository(),
             outboxRepository = recordingOutboxRepository,
-            tripRepository = InMemoryTripRepository(),
-            proposalRepository = proposalRepository
+            tripRepository = InMemoryTripRepository()
         )
-        val created = serviceWithProposals.handle(AssignOrderCommand(priceOrder, priceDriver))
-        serviceWithProposals.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
-        serviceWithProposals.startAssignment(StartAssignmentCommand(created.assignment.id))
+        val created = serviceWithAgreedAmount.handle(
+            AssignOrderCommand(priceOrder, priceDriver, agreedAmount = "350")
+        )
+        serviceWithAgreedAmount.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
+        serviceWithAgreedAmount.startAssignment(StartAssignmentCommand(created.assignment.id))
 
-        serviceWithProposals.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
+        serviceWithAgreedAmount.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
 
         val record = recordingOutboxRepository.records.single { it.eventType == "AssignmentCompleted" }
         val payload = ObjectMapper().readTree(record.payload).get("payload")
@@ -197,22 +192,52 @@ class DispatchAssignmentApplicationServiceTest {
     }
 
     @Test
-    fun `completing an assignment with no ACCEPTED proposal forwards a null statedPrice on AssignmentCompleted`() {
+    fun `completing an assignment with no agreedAmount on its Trip forwards a null statedPrice on AssignmentCompleted`() {
         val recordingOutboxRepository = RecordingOutboxRepository()
-        val serviceWithNoProposals = DispatchAssignmentApplicationService(
+        val serviceWithNoAgreedAmount = DispatchAssignmentApplicationService(
             assignmentRepository = InMemoryAssignmentRepository(),
             outboxRepository = recordingOutboxRepository,
             tripRepository = InMemoryTripRepository()
         )
-        val created = serviceWithNoProposals.handle(AssignOrderCommand(OrderReference("order-price-2"), DriverReference("driver-price-2")))
-        serviceWithNoProposals.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
-        serviceWithNoProposals.startAssignment(StartAssignmentCommand(created.assignment.id))
+        // No agreedAmount on the command -- mirrors the manual-assignment path
+        // (POST /v1/assignments), which has no Proposal at all.
+        val created = serviceWithNoAgreedAmount.handle(
+            AssignOrderCommand(OrderReference("order-price-2"), DriverReference("driver-price-2"))
+        )
+        serviceWithNoAgreedAmount.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
+        serviceWithNoAgreedAmount.startAssignment(StartAssignmentCommand(created.assignment.id))
 
-        serviceWithNoProposals.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
+        serviceWithNoAgreedAmount.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
 
         val record = recordingOutboxRepository.records.single { it.eventType == "AssignmentCompleted" }
         val payload = ObjectMapper().readTree(record.payload).get("payload")
         assertTrue(payload.get("statedPrice").isNull)
+    }
+
+    @Test
+    fun `completing an assignment never queries a Proposal repository -- two ACCEPTED proposals for the same order do not affect the amount forwarded`() {
+        // D-06: even if the order somehow has two ACCEPTED proposals on file
+        // (the ADR-080 termination + redispatch scenario), completion must
+        // forward only the completing Trip's own captured agreedAmount --
+        // never a lookup into any Proposal store. This service is not even
+        // given a ProposalRepository any more; there is nothing to query.
+        val recordingOutboxRepository = RecordingOutboxRepository()
+        val priceOrder = OrderReference("order-price-3")
+        val priceDriver = DriverReference("driver-price-3")
+        val service = DispatchAssignmentApplicationService(
+            assignmentRepository = InMemoryAssignmentRepository(),
+            outboxRepository = recordingOutboxRepository,
+            tripRepository = InMemoryTripRepository()
+        )
+        val created = service.handle(AssignOrderCommand(priceOrder, priceDriver, agreedAmount = "900"))
+        service.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
+        service.startAssignment(StartAssignmentCommand(created.assignment.id))
+
+        service.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
+
+        val record = recordingOutboxRepository.records.single { it.eventType == "AssignmentCompleted" }
+        val payload = ObjectMapper().readTree(record.payload).get("payload")
+        assertEquals("900", payload.get("statedPrice").asText())
     }
 
     /** Mirrors `DispatchAssignmentApplicationServiceRideProgressConvergenceTest`'s own identical fake. */

@@ -195,6 +195,13 @@ interface AssignmentInfo {
   terminationReasonCode?: string | null
   terminatedAt?: string | null
   terminationNote?: string | null
+  // D-06 (Settlement as Evidence): the amount agreed for this specific
+  // Trip, captured once and immutable -- the authoritative amount once an
+  // Assignment/Trip exists, superseding `proposal.statedPrice` (which
+  // remains the historical record of what the driver stated, on the
+  // Proposal itself). `null` for an Assignment with no connected Trip
+  // agreedAmount (no Proposal preceded it, or it predates this field).
+  agreedAmount?: string | null
 }
 
 interface OrderListItem {
@@ -386,6 +393,7 @@ function ProposalDetails({
   messageStatus,
   onMessageDraftChange,
   onSendMessage,
+  agreedAmount,
 }: {
   proposal: ProposalListItem
   order: OrderListItem | undefined
@@ -396,6 +404,10 @@ function ProposalDetails({
   messageStatus: ProposalActionStatus
   onMessageDraftChange: (value: string) => void
   onSendMessage: () => void
+  // D-06: the connected Assignment/Trip's own agreedAmount, when one
+  // exists -- `undefined`/`null` before agreement (OPEN/PRICE_PROPOSED),
+  // when `proposal.statedPrice` is still the only fact on record.
+  agreedAmount?: string | null
 }) {
   return (
     <>
@@ -442,8 +454,20 @@ function ProposalDetails({
           unchanged to ACCEPTED (and even a passenger's own price decline,
           which keeps it for the historical record) -- gating on ACCEPTED
           alone would hide it during the very state it most needs to be
-          visible in. */}
-      {proposal.statedPrice && <Text role="body">Стоимость: {proposal.statedPrice}</Text>}
+          visible in.
+
+          D-06 (Settlement as Evidence): once an Assignment/Trip exists
+          for this proposal's own order, [agreedAmount] -- the Trip's own
+          captured amount, not a re-read of Proposal -- is authoritative
+          and shown instead. Before that (OPEN/PRICE_PROPOSED), no Trip
+          exists yet and [proposal.statedPrice] remains the only fact on
+          record -- unchanged negotiation-time behavior. `agreedAmount`
+          falling back to `proposal.statedPrice` covers only a Trip
+          created before this field existed (no backfill, D-06 Decision
+          item 7), not an architectural fallback. */}
+      {(agreedAmount ?? proposal.statedPrice) && (
+        <Text role="body">Стоимость: {agreedAmount ?? proposal.statedPrice}</Text>
+      )}
       {/* ADR-057 (Driver Stated Time to Pickup): same read-back pattern
           as statedPrice immediately above. */}
       {typeof proposal.statedEtaMinutes === 'number' && (
@@ -1994,6 +2018,7 @@ export function DriverHome() {
                   setMessageDrafts((current) => ({ ...current, [proposal.proposalId]: value }))
                 }
                 onSendMessage={() => void handleSendMessage(proposal.proposalId)}
+                agreedAmount={assignment?.agreedAmount}
               />
             )
 
@@ -2474,7 +2499,11 @@ export function DriverHome() {
                         dateTime={formatHistoryDateTime(assignment?.statusChangedAt ?? null)}
                         route={formatHistoryRoute(order)}
                         counterpart={order?.passengerName?.trim() || 'Пассажир'}
-                        price={proposal.statedPrice}
+                        // D-06: the completed Trip's own agreedAmount is
+                        // authoritative; proposal.statedPrice is the
+                        // fallback only for a Trip that predates this
+                        // field (no backfill).
+                        price={assignment?.agreedAmount ?? proposal.statedPrice}
                       />
                     )
                   })}

@@ -10,7 +10,6 @@ import com.pios.dispatch.domain.AssignmentId
 import com.pios.dispatch.domain.AssignmentStarted
 import com.pios.dispatch.domain.OrderAssigned
 import com.pios.dispatch.domain.OrderReference
-import com.pios.dispatch.domain.ProposalStatus
 import com.pios.dispatch.domain.Trip
 import com.pios.dispatch.domain.TripArrived
 import com.pios.dispatch.domain.TripCompleted
@@ -112,24 +111,28 @@ import java.util.UUID
  * `assignment.completed`) keeps receiving exactly what it always has,
  * unmodified, per this task's own Order Management Rule.
  *
- * ## Stated price propagation (ADR-065, Decision items 1-2)
+ * ## Agreed amount capture and propagation (D-06, Settlement as Evidence;
+ * supersedes ADR-065 Decision items 2-3 -- see the dated amendment to
+ * that ADR)
  *
- * [completeAssignment] additionally looks up the completed order's own
- * `ACCEPTED` [com.pios.dispatch.domain.Proposal] via [proposalRepository]
- * — a read between two aggregates inside this same bounded context, not a
- * cross-module read (ADR-065's own reasoning) — and forwards its
- * [com.pios.dispatch.domain.Proposal.statedPrice] verbatim, unparsed, as
- * the new `payload.statedPrice` field on the legacy `AssignmentCompleted`
- * outbox record only (never on `TripCompleted`, which ADR-065 Decision
- * item 2 deliberately leaves unchanged). `null` when no such Proposal
- * exists — notably the direct `POST /v1/assignments` path, which creates
- * an Assignment with no Proposal at all. `eventVersion` stays 1: both
- * Order Management's and Driver Management's own consumers hard-require
- * it, and this field is additive and optional. [proposalRepository]
- * defaults to [NoOpProposalRepository] for the same reason
- * [outboxRepository]/[transactionRunner]/[tripRepository] do — existing
- * tests exercising Assignment/Trip lifecycle logic unrelated to a stated
- * price continue to work unmodified.
+ * [completeAssignment] no longer looks up any
+ * [com.pios.dispatch.domain.Proposal] at completion time. The amount an
+ * `AssignmentCompleted` event carries is read from the completing
+ * [Trip]'s own [com.pios.dispatch.domain.Trip.agreedAmount] -- captured
+ * once, at Trip creation ([createTripFor], from [AssignOrderCommand.agreedAmount],
+ * itself sourced by [ProposalAssignmentOrchestrationService] from the
+ * just-accepted/-confirmed Proposal inside the same shared transaction --
+ * never re-derived later. `null` when the originating Trip has none:
+ * the direct `POST /v1/assignments` manual path (no Proposal at all), a
+ * self-healed Trip ([tripFor]'s own fallback, which also supplies no
+ * Proposal), or a Trip created before this field existed (no backfill,
+ * D-06 Decision item 7). Still forwarded, verbatim and unparsed, as
+ * `payload.statedPrice` -- the field name is unchanged for backward
+ * compatibility (D-06 Decision item 12); only its source changed. Never
+ * published on `TripCompleted` (unchanged from ADR-065 Decision item 2).
+ * `eventVersion` stays 1: both Order Management's and Driver Management's
+ * own consumers hard-require it, and this field remains additive and
+ * optional.
  */
 @Service
 class DispatchAssignmentApplicationService(
@@ -138,7 +141,6 @@ class DispatchAssignmentApplicationService(
     private val transactionRunner: TransactionRunner = NoOpTransactionRunner,
     private val objectMapper: ObjectMapper = ObjectMapper(),
     private val tripRepository: TripRepository = NoOpTripRepository,
-    private val proposalRepository: ProposalRepository = NoOpProposalRepository,
     private val orderGuard: OrderGuard = NoOpOrderGuard,
     private val dispatchRequestRepository: DispatchRequestRepository? = null
 ) {
@@ -156,7 +158,7 @@ class DispatchAssignmentApplicationService(
         )
         assignmentRepository.save(created.assignment)
         outboxRepository.save(outboxRecordFor(created.assignment.id, created.event))
-        createTripFor(created.assignment)
+        createTripFor(created.assignment, command.agreedAmount)
         created
     }
 
@@ -197,7 +199,7 @@ class DispatchAssignmentApplicationService(
         )
         assignmentRepository.save(created.assignment)
         outboxRepository.save(outboxRecordFor(created.assignment.id, created.event))
-        createTripFor(created.assignment)
+        createTripFor(created.assignment, command.agreedAmount)
         return created
     }
 
@@ -211,10 +213,15 @@ class DispatchAssignmentApplicationService(
      * arise) never creates a second Trip; `trips.assignment_id`'s own
      * database-level `UNIQUE` constraint (V12 migration) is the
      * persistent backstop this in-memory check alone cannot be.
+     *
+     * [agreedAmount] (D-06) is captured onto the new Trip exactly as
+     * supplied by the caller — this method does not look it up, does not
+     * read a Proposal, and does not compute it. See this class's own
+     * "Agreed amount capture and propagation" KDoc.
      */
-    private fun createTripFor(assignment: Assignment) {
+    private fun createTripFor(assignment: Assignment, agreedAmount: String? = null) {
         val existingTrip = tripRepository.findByAssignmentId(assignment.id)
-        val tripCreated = Trip.create(assignment, existingTrip)
+        val tripCreated = Trip.create(assignment, agreedAmount, existingTrip)
         tripRepository.save(tripCreated.trip)
     }
 
@@ -309,10 +316,12 @@ class DispatchAssignmentApplicationService(
 
     /**
      * Records that the ride has finished. See [arriveAssignment]'s own KDoc
-     * for shape and rationale. Also looks up the order's own `ACCEPTED`
-     * Proposal (ADR-065, Decision item 2) so its [statedPrice][
-     * com.pios.dispatch.domain.Proposal.statedPrice] can be forwarded,
-     * verbatim, on the `AssignmentCompleted` outbox record below.
+     * for shape and rationale. The completing [Trip]'s own
+     * [com.pios.dispatch.domain.Trip.agreedAmount] — captured once, at
+     * Trip creation, never re-derived here — is what the
+     * `AssignmentCompleted` outbox record below forwards; see this
+     * class's own "Agreed amount capture and propagation" KDoc. This
+     * method performs no Proposal lookup of any kind.
      */
     fun completeAssignment(command: CompleteAssignmentCommand): AssignmentCompleted = transactionRunner.run {
         val assignment = assignmentRepository.findById(command.assignmentId)
@@ -323,10 +332,7 @@ class DispatchAssignmentApplicationService(
         tripRepository.save(trip)
         outboxRepository.save(outboxRecordFor(assignment.id, tripEvent))
         val compatEvent = AssignmentCompleted(orderId = tripEvent.orderId, driverId = tripEvent.driverId, occurredAt = tripEvent.occurredAt)
-        val statedPrice = proposalRepository.findByOrder(assignment.order)
-            .firstOrNull { it.status == ProposalStatus.ACCEPTED }
-            ?.statedPrice
-        outboxRepository.save(outboxRecordFor(assignment.id, compatEvent, statedPrice))
+        outboxRepository.save(outboxRecordFor(assignment.id, compatEvent, trip.agreedAmount))
         compatEvent
     }
 
@@ -416,11 +422,11 @@ class DispatchAssignmentApplicationService(
     )
 
     /**
-     * [statedPrice] (ADR-065, Decision items 1-2) is the order's own
-     * `ACCEPTED` Proposal's stated price, forwarded verbatim and nullable
-     * — `null` when no such Proposal exists. Not published on any other
-     * event ([TripCompleted] included) — see this class's own "Stated
-     * price propagation" KDoc.
+     * [statedPrice] (D-06; field name unchanged for backward compatibility
+     * — see this class's own "Agreed amount capture and propagation"
+     * KDoc) is the completing Trip's own `agreedAmount`, forwarded
+     * verbatim and nullable — `null` when the Trip has none. Not
+     * published on any other event ([TripCompleted] included).
      */
     private fun outboxRecordFor(assignmentId: AssignmentId, event: AssignmentCompleted, statedPrice: String?): OutboxRecord = OutboxRecord(
         aggregateId = assignmentId.value,
