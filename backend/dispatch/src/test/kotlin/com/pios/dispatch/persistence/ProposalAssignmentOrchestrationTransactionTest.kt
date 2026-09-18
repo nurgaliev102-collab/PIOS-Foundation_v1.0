@@ -92,6 +92,8 @@ class ProposalAssignmentOrchestrationTransactionTest {
             override fun findByOrder(order: OrderReference): List<Assignment> = assignmentRepository.findByOrder(order)
             override fun findByOrders(orders: List<OrderReference>): List<Assignment> =
                 assignmentRepository.findByOrders(orders)
+            override fun findByDriver(driver: DriverReference): List<Assignment> =
+                assignmentRepository.findByDriver(driver)
         }
         val failingAssignmentService =
             DispatchAssignmentApplicationService(failingAssignmentRepository, transactionRunner = transactionRunner)

@@ -108,6 +108,32 @@ abstract class AssignmentRepositoryContractTest {
 
         assertEquals(emptyList(), repository.findByOrders(emptyList()))
     }
+
+    /** D-08 (Handoff Observation Foundation) -- [AssignmentRepository.findByDriver]'s own denominator source. */
+    @Test
+    fun `findByDriver returns every assignment for that driver and none belonging to another`() {
+        val repository = createRepository()
+        val driver = DriverReference("contract-test-findbydriver-driver")
+        val matchingFirst = Assignment.create(OrderReference("contract-test-findbydriver-order-1"), driver)
+        val matchingSecond = Assignment.create(OrderReference("contract-test-findbydriver-order-2"), driver)
+        val other = Assignment.create(OrderReference("contract-test-findbydriver-other-order"), DriverReference("contract-test-findbydriver-other-driver"))
+        repository.save(matchingFirst.assignment)
+        repository.save(matchingSecond.assignment)
+        repository.save(other.assignment)
+
+        val found = repository.findByDriver(driver)
+
+        assertTrue(found.any { it.id == matchingFirst.assignment.id })
+        assertTrue(found.any { it.id == matchingSecond.assignment.id })
+        assertTrue(found.none { it.id == other.assignment.id })
+    }
+
+    @Test
+    fun `findByDriver returns an empty list when the driver has no assignment`() {
+        val repository = createRepository()
+
+        assertEquals(emptyList(), repository.findByDriver(DriverReference("contract-test-findbydriver-never-assigned")))
+    }
 }
 
 class InMemoryAssignmentRepositoryContractTest : AssignmentRepositoryContractTest() {
