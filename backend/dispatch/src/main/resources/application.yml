@@ -53,6 +53,15 @@ pios:
     lapse:
       fixed-delay-ms: 30000
       timeout-minutes: 5
+  # D-08 (Handoff Observation Foundation,
+  # docs/PIOS_D08_HANDOFF_OBSERVATION_IMPLEMENTATION_SPEC.md Section 4):
+  # the observation window's length, in whole ISO calendar weeks. Not a
+  # ratified business rule -- no evidence in the existing record justifies
+  # any specific figure (the same treatment pios.proposal.lapse.timeout-minutes
+  # already has above). 4 is a non-binding operational starting point.
+  handoff:
+    observation:
+      window-weeks: 4
   # ADR-044 (Owner Authentication): the one credential `GET /v1/health`
   # checks. Deliberately left unset here -- an unset username/password-hash/
   # password-salt makes OwnerCredentialGate.isConfigured() false, which

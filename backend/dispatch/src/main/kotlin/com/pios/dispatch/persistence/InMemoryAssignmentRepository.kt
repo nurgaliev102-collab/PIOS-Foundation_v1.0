@@ -3,6 +3,7 @@ package com.pios.dispatch.persistence
 import com.pios.dispatch.application.AssignmentRepository
 import com.pios.dispatch.domain.Assignment
 import com.pios.dispatch.domain.AssignmentId
+import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import java.util.concurrent.ConcurrentHashMap
 
@@ -35,4 +36,6 @@ class InMemoryAssignmentRepository : AssignmentRepository {
         val orderSet = orders.toSet()
         return store.values.filter { it.order in orderSet }
     }
+
+    override fun findByDriver(driver: DriverReference): List<Assignment> = store.values.filter { it.driver == driver }
 }

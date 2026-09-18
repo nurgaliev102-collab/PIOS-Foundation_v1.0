@@ -28,4 +28,7 @@ class InMemoryHandoffRepository : HandoffRepository {
             it.substituteDriver.driverId == driverId &&
                 (it.status == HandoffStatus.PROPOSED || it.status == HandoffStatus.SUBSTITUTE_ACCEPTED)
         }
+
+    override fun findByOriginalDriver(driverId: String): List<Handoff> =
+        store.values.filter { it.originalDriver.driverId == driverId }
 }

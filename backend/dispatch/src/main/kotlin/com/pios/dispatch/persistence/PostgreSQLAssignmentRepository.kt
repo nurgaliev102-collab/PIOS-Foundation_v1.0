@@ -161,6 +161,17 @@ class PostgreSQLAssignmentRepository(
         )
     }
 
+    override fun findByDriver(driver: DriverReference): List<Assignment> =
+        jdbcTemplate.query(
+            """
+            SELECT id, order_reference, driver_reference, status, status_changed_at,
+                   arrived_at, started_at, completed_at, is_test
+            FROM assignments WHERE driver_reference = ?
+            """.trimIndent(),
+            { rs, _ -> reconstruct(rs) },
+            driver.driverId
+        )
+
     private fun reconstruct(rs: ResultSet): Assignment {
         val constructor = Assignment::class.java.getDeclaredConstructor(
             String::class.java,

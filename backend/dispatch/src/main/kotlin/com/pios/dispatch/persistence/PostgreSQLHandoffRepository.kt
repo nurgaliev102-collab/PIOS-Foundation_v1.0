@@ -96,6 +96,13 @@ class PostgreSQLHandoffRepository(
             driverId
         )
 
+    override fun findByOriginalDriver(driverId: String): List<Handoff> =
+        jdbcTemplate.query(
+            "SELECT $selectColumns FROM handoffs WHERE original_driver_reference = ? ORDER BY proposed_at DESC",
+            { rs, _ -> reconstruct(rs) },
+            driverId
+        )
+
     private fun reconstruct(rs: ResultSet): Handoff {
         val constructor = Handoff::class.java.getDeclaredConstructor(
             String::class.java,

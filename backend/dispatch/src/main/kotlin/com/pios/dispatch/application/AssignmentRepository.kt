@@ -2,6 +2,7 @@ package com.pios.dispatch.application
 
 import com.pios.dispatch.domain.Assignment
 import com.pios.dispatch.domain.AssignmentId
+import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 
 /**
@@ -36,10 +37,20 @@ import com.pios.dispatch.domain.OrderReference
  * [orders] list returns an empty result (never "no filter means
  * everything"). Purely additive: [findByOrder] is unchanged and remains
  * correct for a genuine single-order lookup.
+ *
+ * [findByDriver] added by D-08 (Handoff Observation Foundation,
+ * `docs/PIOS_D08_HANDOFF_OBSERVATION_IMPLEMENTATION_SPEC.md` §3/§6):
+ * the observation metric's own denominator needs every Assignment a
+ * given committing driver has taken on, mirroring [findByOrder]'s own
+ * shape exactly (an unfiltered-by-status list — [Assignment]'s own KDoc
+ * already treats every Assignment as active regardless of status, and
+ * observation's own denominator counts a commitment "the moment it
+ * exists," §6). Purely additive: every other method is unchanged.
  */
 interface AssignmentRepository {
     fun save(assignment: Assignment)
     fun findById(id: AssignmentId): Assignment?
     fun findByOrder(order: OrderReference): List<Assignment>
     fun findByOrders(orders: List<OrderReference>): List<Assignment>
+    fun findByDriver(driver: DriverReference): List<Assignment>
 }

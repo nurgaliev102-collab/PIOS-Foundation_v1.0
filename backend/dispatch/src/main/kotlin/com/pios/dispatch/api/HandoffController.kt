@@ -5,12 +5,15 @@ import com.pios.dispatch.application.AssignmentRepository
 import com.pios.dispatch.application.ConsentHandoffCommand
 import com.pios.dispatch.application.HandoffApplicationService
 import com.pios.dispatch.application.HandoffNotFoundException
+import com.pios.dispatch.application.HandoffObservationQueryService
+import com.pios.dispatch.application.HandoffObservationResult
 import com.pios.dispatch.application.HandoffRepository
 import com.pios.dispatch.application.ProposalRepository
 import com.pios.dispatch.application.ProposeHandoffCommand
 import com.pios.dispatch.application.RefuseHandoffCommand
 import com.pios.dispatch.application.WithdrawHandoffCommand
 import com.pios.dispatch.domain.AssignmentId
+import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.Handoff
 import com.pios.dispatch.domain.HandoffId
 import com.pios.dispatch.domain.ProposalStatus
@@ -45,6 +48,13 @@ data class ProposeHandoffRequest(val assignmentId: String, val substituteDriverI
  * is always [SessionTokenVerifier.VerifiedToken.drv]/`.sub`, never a
  * request field, per D-07's own "server derives every actor identity"
  * invariant.
+ *
+ * [observation] (D-08, `docs/PIOS_D08_HANDOFF_OBSERVATION_IMPLEMENTATION_SPEC.md`
+ * §9) is the one endpoint here that does not follow the
+ * [sessionTokenVerifier]-first pattern above — it accepts only
+ * [ownerCredentialGate]'s own `Authorization: Basic` owner credential,
+ * never a `Bearer` session token of any kind, and never mutates or reads
+ * anything [handoffApplicationService] itself touches.
  */
 @RestController
 @RequestMapping("/v1/handoffs")
@@ -53,7 +63,9 @@ class HandoffController(
     private val handoffRepository: HandoffRepository,
     private val assignmentRepository: AssignmentRepository,
     private val proposalRepository: ProposalRepository,
-    private val sessionTokenVerifier: SessionTokenVerifier
+    private val sessionTokenVerifier: SessionTokenVerifier,
+    private val ownerCredentialGate: OwnerCredentialGate = OwnerCredentialGate("", "", "", 210000, 500, 20, 900000),
+    private val handoffObservationQueryService: HandoffObservationQueryService = HandoffObservationQueryService()
 ) {
 
     /**
@@ -296,6 +308,62 @@ class HandoffController(
             ResponseEntity.badRequest().build()
         }
     }
+
+    /**
+     * D-08 (Handoff Observation Foundation,
+     * `docs/PIOS_D08_HANDOFF_OBSERVATION_IMPLEMENTATION_SPEC.md` §9).
+     * Owner/platform-operator-only — deliberately narrower than [list]:
+     * no `Bearer` session token is ever accepted here, not even the
+     * committing driver's own (spec §9/§12 item 17 — this is not a
+     * self-service endpoint; a future driver-facing self-view, if ever
+     * authorized, would be a *separate* endpoint, per
+     * `docs/PIOS_D08_FINAL_DECISION_LOCK.md` §9 D8-PO-1). Reuses
+     * [ownerCredentialGate] exactly as [ProposalController]'s own
+     * `?driverId=` owner branch already does (`ADR-060`/`ADR-066`
+     * precedent) — no new authorization mechanism.
+     *
+     * Never enforces anything: this method never calls
+     * [handoffApplicationService] and has no effect on any Handoff,
+     * Assignment, or Trip. Returns `200 OK` regardless of how large the
+     * computed rate is (spec §12 item 14 — observation never denies).
+     */
+    @GetMapping("/observation")
+    fun observation(
+        @RequestParam driverId: String,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<HandoffObservationResponse> {
+        if (authorization == null || !authorization.startsWith("Basic ") || !ownerCredentialGate.verify(authorization)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+        }
+        return try {
+            val result = handoffObservationQueryService.observe(DriverReference(driverId))
+            ResponseEntity.ok(result.toResponse())
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        }
+    }
+
+    private fun HandoffObservationResult.toResponse(): HandoffObservationResponse = HandoffObservationResponse(
+        driverId = driverId,
+        windowStart = windowStart.toString(),
+        windowEnd = windowEnd.toString(),
+        windowWeeks = windowWeeks,
+        totalCommitments = facts.totalCommitments,
+        handoffsWithSubstituteAcceptance = facts.handoffsWithSubstituteAcceptance,
+        rate = rate,
+        insufficientData = insufficientData,
+        distinctSubstitutesUsed = facts.distinctSubstitutesUsed,
+        topSubstituteShare = facts.topSubstituteShare,
+        eventBreakdown = HandoffObservationEventBreakdown(
+            proposedOnly = facts.proposedOnly,
+            substituteAccepted = facts.substituteAcceptedOngoing,
+            committed = facts.committed,
+            refusedAfterAcceptance = facts.refusedAfterAcceptance,
+            withdrawnAfterAcceptance = facts.withdrawnAfterAcceptance,
+            declinedBySubstitute = facts.declinedBySubstitute,
+            withdrawnBeforeAcceptance = facts.withdrawnBeforeAcceptance
+        )
+    )
 
     private fun respondWithCurrent(id: HandoffId): ResponseEntity<HandoffResponse> =
         ResponseEntity.ok(handoffRepository.findById(id)!!.toResponse())
