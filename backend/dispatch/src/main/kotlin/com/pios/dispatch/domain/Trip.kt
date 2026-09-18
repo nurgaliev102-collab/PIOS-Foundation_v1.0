@@ -74,6 +74,29 @@ import java.util.UUID
  * historical record of what was stated, on the Proposal aggregate; it is
  * no longer the source of truth for what a specific Trip's own agreed
  * amount is — this field is.
+ *
+ * ## Executing driver (D-07, Handoff Protocol)
+ *
+ * [driver] is the original committing driver — set once at [create],
+ * exactly like [agreedAmount], and never rewritten by anything in this
+ * class, including [assignExecutingDriver]. It answers "who originally
+ * accepted this commitment," permanently (D-07 invariant: the original
+ * committer remains historically identifiable).
+ *
+ * [executingDriver] answers the separate question "who actually executes
+ * (or executed) this ride" — it defaults to [driver] and is changed,
+ * exactly once per Handoff, only by [assignExecutingDriver], called only
+ * by [com.pios.dispatch.application.HandoffApplicationService.consent]
+ * at the moment a Handoff's passenger consent is recorded (the one and
+ * only constitutive transition D-07 defines). Every ride-progress event
+ * ([arrive]/[start]/[complete]) reports [executingDriver], not [driver],
+ * as its own `driverId` — before any Handoff the two are identical, so
+ * this changes nothing for the overwhelming majority of Trips; after a
+ * consented Handoff, it is what makes `AssignmentCompleted`/`TripCompleted`
+ * correctly attribute execution (and, downstream, Driver Management's own
+ * `completedRidesCount`/`totalStatedEarnings`) to the driver who actually
+ * drove, per D-07/D-08(b)'s own locked attribution split — without
+ * changing either event's own field names, shape, or `eventVersion`.
  */
 class Trip private constructor(
     val id: TripId,
@@ -81,9 +104,13 @@ class Trip private constructor(
     val order: OrderReference,
     val driver: DriverReference,
     val agreedAmount: String?,
-    val isTest: Boolean = false
+    val isTest: Boolean = false,
+    executingDriver: DriverReference = driver
 ) {
     var status: TripStatus = TripStatus.CREATED
+        private set
+
+    var executingDriver: DriverReference = executingDriver
         private set
 
     /** The time of this trip's most recent status transition — `null` until the first one happens, mirroring [Assignment.statusChangedAt] exactly. */
@@ -120,7 +147,7 @@ class Trip private constructor(
         status = TripStatus.ARRIVED
         statusChangedAt = at
         arrivedAt = at
-        return TripArrived(orderId = order, driverId = driver)
+        return TripArrived(orderId = order, driverId = executingDriver)
     }
 
     /** Records that the ride itself has begun. Only an [TripStatus.ARRIVED] trip may start. */
@@ -131,7 +158,7 @@ class Trip private constructor(
         status = TripStatus.IN_PROGRESS
         statusChangedAt = at
         startedAt = at
-        return TripStarted(orderId = order, driverId = driver)
+        return TripStarted(orderId = order, driverId = executingDriver)
     }
 
     /** Records that the ride has finished. Only an [TripStatus.IN_PROGRESS] trip may complete. */
@@ -142,7 +169,7 @@ class Trip private constructor(
         status = TripStatus.COMPLETED
         statusChangedAt = at
         completedAt = at
-        return TripCompleted(orderId = order, driverId = driver)
+        return TripCompleted(orderId = order, driverId = executingDriver)
     }
 
     fun terminate(fact: Termination) {
@@ -152,6 +179,26 @@ class Trip private constructor(
         status = TripStatus.TERMINATED
         statusChangedAt = fact.terminatedAt
         termination = fact
+    }
+
+    /**
+     * Records that [driver] is now this Trip's own executing driver
+     * (D-07, Handoff Protocol) — called only at the moment a Handoff's
+     * passenger consent is recorded, inside the same transaction that
+     * commits the Handoff itself. Never touches [driver] the field
+     * above (the permanent, original committing driver) — see this
+     * class's own "Executing driver" KDoc. Only reachable while the Trip
+     * is still [TripStatus.CREATED] or [TripStatus.ARRIVED] — the same
+     * window D-07 restricts Handoff to; a Trip already [TripStatus.IN_PROGRESS],
+     * [TripStatus.COMPLETED], or [TripStatus.TERMINATED] rejects this,
+     * so this method is itself one of the structural guards against a
+     * Handoff resolving after the ride has moved on.
+     */
+    fun assignExecutingDriver(driver: DriverReference) {
+        check(status == TripStatus.CREATED || status == TripStatus.ARRIVED) {
+            "Trip ${id.value} cannot change its executing driver from status $status"
+        }
+        executingDriver = driver
     }
 
     companion object {

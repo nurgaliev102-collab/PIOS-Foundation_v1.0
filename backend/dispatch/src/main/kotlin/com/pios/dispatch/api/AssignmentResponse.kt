@@ -28,6 +28,14 @@ package com.pios.dispatch.api
  * gated so only the Assignment's own driver or the order's own passenger
  * may see a given row), so no new endpoint or authorization rule was
  * introduced for this field.
+ *
+ * [executingDriverId] (D-07, Handoff Protocol) surfaces the connected
+ * Trip's own [com.pios.dispatch.domain.Trip.executingDriver] — the
+ * driver currently expected to (or who did) actually drive, separate
+ * from [driverId] (the *original committing* driver, unchanged by a
+ * Handoff, D-07 invariant #5/#35). Equal to [driverId] for every ride
+ * with no Handoff, which is every ride today. `null` only when no Trip
+ * is connected yet (never happens on a live path).
  */
 data class AssignmentResponse(
     val assignmentId: String,
@@ -43,5 +51,6 @@ data class AssignmentResponse(
     val terminationReasonCode: String? = null,
     val terminatedAt: String? = null,
     val terminationNote: String? = null,
-    val agreedAmount: String? = null
+    val agreedAmount: String? = null,
+    val executingDriverId: String? = null
 )

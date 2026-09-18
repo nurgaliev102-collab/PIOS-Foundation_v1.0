@@ -202,7 +202,15 @@ class AssignmentController(
             return response
         }
         val authorized = response.body.orEmpty().filter { assignment ->
+            // D-07: the original committing driver (assignment.driverId,
+            // permanent) and the current executing driver
+            // (assignment.executingDriverId, D-07's own new fact, equal
+            // to driverId on every ride with no Handoff) are both
+            // authorized -- the original driver retains origination
+            // visibility (D-07 invariant #5/#35) even once execution has
+            // transferred to a substitute.
             assignment.driverId == verified.drv ||
+                assignment.executingDriverId == verified.drv ||
                 proposalRepository?.findByOrder(OrderReference(assignment.orderId))
                     ?.any { it.passengerReference?.passengerId == verified.sub } == true
         }
@@ -239,14 +247,25 @@ class AssignmentController(
 
     /**
      * Task 23: requires a `Bearer` session token verifying as the exact
-     * driver named on this Assignment -- mirrors
+     * driver currently authorized to act on this Assignment -- mirrors
      * [ProposalController.acceptProposal]'s own identical check (Task 21)
      * exactly, down to the ordering: the token is verified first (401,
      * before any lookup, so a fully anonymous caller never learns whether
      * a given id exists at all); the Assignment is then looked up (404 if
-     * it does not exist); only then is the verified driver compared
-     * against [Assignment.driver] (403 on mismatch, including a
-     * passenger-only token with `drv == null`).
+     * it does not exist); only then is the verified driver compared (403
+     * on mismatch, including a passenger-only token with `drv == null`).
+     *
+     * D-07 (Handoff Protocol): compared against the connected Trip's own
+     * [Trip.executingDriver][com.pios.dispatch.domain.Trip.executingDriver],
+     * not [Assignment.driver] -- before any Handoff the two are the same
+     * driver, so this changes nothing for the overwhelming majority of
+     * rides; after a consented Handoff, it is what lets the substitute
+     * mark arrival/start/completion themselves, per D-07's own explicit
+     * design (the original driver's own authorization to progress the
+     * ride is what a Handoff actually transfers). Falls back to
+     * [Assignment.driver] only if no Trip is connected yet, which does
+     * not happen on any live path (a Trip is always created alongside its
+     * Assignment) but keeps this defensive rather than null-unsafe.
      */
     @PostMapping("/{assignmentId}/arrive")
     fun arrive(
@@ -259,7 +278,8 @@ class AssignmentController(
                 ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
             val assignment = assignmentRepository.findById(id)
                 ?: return ResponseEntity.notFound().build()
-            if (verified.drv != assignment.driver.driverId) {
+            val trip = tripRepository.findByAssignmentId(id)
+            if (verified.drv != (trip?.executingDriver?.driverId ?: assignment.driver.driverId)) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
             }
             dispatchAssignmentApplicationService.arriveAssignment(ArriveAssignmentCommand(id))
@@ -275,7 +295,7 @@ class AssignmentController(
         }
     }
 
-    /** Task 23: identical identity check to [arrive]'s own — see that method's own KDoc. */
+    /** Task 23 / D-07: identical identity check to [arrive]'s own — see that method's own KDoc. */
     @PostMapping("/{assignmentId}/start")
     fun start(
         @PathVariable assignmentId: String,
@@ -287,7 +307,8 @@ class AssignmentController(
                 ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
             val assignment = assignmentRepository.findById(id)
                 ?: return ResponseEntity.notFound().build()
-            if (verified.drv != assignment.driver.driverId) {
+            val trip = tripRepository.findByAssignmentId(id)
+            if (verified.drv != (trip?.executingDriver?.driverId ?: assignment.driver.driverId)) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
             }
             dispatchAssignmentApplicationService.startAssignment(StartAssignmentCommand(id))
@@ -303,7 +324,7 @@ class AssignmentController(
         }
     }
 
-    /** Task 23: identical identity check to [arrive]'s own — see that method's own KDoc. */
+    /** Task 23 / D-07: identical identity check to [arrive]'s own — see that method's own KDoc. */
     @PostMapping("/{assignmentId}/complete")
     fun complete(
         @PathVariable assignmentId: String,
@@ -315,7 +336,8 @@ class AssignmentController(
                 ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
             val assignment = assignmentRepository.findById(id)
                 ?: return ResponseEntity.notFound().build()
-            if (verified.drv != assignment.driver.driverId) {
+            val trip = tripRepository.findByAssignmentId(id)
+            if (verified.drv != (trip?.executingDriver?.driverId ?: assignment.driver.driverId)) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
             }
             dispatchAssignmentApplicationService.completeAssignment(CompleteAssignmentCommand(id))
@@ -353,7 +375,8 @@ class AssignmentController(
             trip?.termination?.reasonCode?.name,
             trip?.termination?.terminatedAt?.toString(),
             trip?.termination?.note,
-            trip?.agreedAmount
+            trip?.agreedAmount,
+            trip?.executingDriver?.driverId
         )
     }
 

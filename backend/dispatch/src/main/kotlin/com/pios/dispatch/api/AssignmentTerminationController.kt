@@ -2,8 +2,10 @@ package com.pios.dispatch.api
 
 import com.pios.dispatch.application.AssignmentRepository
 import com.pios.dispatch.application.CommitmentTerminationApplicationService
+import com.pios.dispatch.application.NoOpTripRepository
 import com.pios.dispatch.application.TerminateCommitmentCommand
 import com.pios.dispatch.application.TerminationOutcome
+import com.pios.dispatch.application.TripRepository
 import com.pios.dispatch.domain.AssignmentId
 import com.pios.dispatch.domain.TerminationInitiator
 import com.pios.dispatch.domain.TerminationReasonCode
@@ -26,13 +28,32 @@ data class TerminateAssignmentRequest(
 
 data class TerminateAssignmentResponse(val requestId: String, val outcome: String)
 
+/**
+ * D-07 (Handoff Protocol): [tripRepository] defaults to [NoOpTripRepository]
+ * for the same reason every other optional collaborator in this module
+ * does — existing tests exercising this controller with no interest in
+ * Handoff continue to compile and behave exactly as before this field's
+ * addition; Spring's real wiring always supplies the real
+ * [com.pios.dispatch.persistence.PostgreSQLTripRepository] bean regardless.
+ */
 @RestController
 @RequestMapping("/v1/assignments")
 class AssignmentTerminationController(
     private val assignments: AssignmentRepository,
     private val sessions: SessionTokenVerifier,
-    private val termination: CommitmentTerminationApplicationService
+    private val termination: CommitmentTerminationApplicationService,
+    private val tripRepository: TripRepository = NoOpTripRepository
 ) {
+    /**
+     * Authorization compared against the connected Trip's own
+     * [Trip.executingDriver][com.pios.dispatch.domain.Trip.executingDriver],
+     * not [Assignment.driver] — D-07: once a Handoff has been consented,
+     * the substitute is the one actually driving, and is the one who
+     * needs to be able to terminate the commitment if they themselves
+     * cannot fulfil it (mirrors `AssignmentController.arrive/start/complete`'s
+     * own identical D-07 change). Falls back to `assignment.driver` only
+     * if no Trip is connected yet, which does not happen on any live path.
+     */
     @PostMapping("/{assignmentId}/terminate")
     fun terminate(
         @PathVariable assignmentId: String,
@@ -47,7 +68,8 @@ class AssignmentTerminationController(
             val reason = TerminationReasonCode.valueOf(request.reasonCode)
             val assignment = assignments.findById(AssignmentId(assignmentId))
                 ?: return ResponseEntity.notFound().build()
-            if (verified.drv != assignment.driver.driverId) {
+            val trip = tripRepository.findByAssignmentId(assignment.id)
+            if (verified.drv != (trip?.executingDriver?.driverId ?: assignment.driver.driverId)) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
             }
             val result = termination.terminate(
