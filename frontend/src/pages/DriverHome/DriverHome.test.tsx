@@ -1200,4 +1200,161 @@ describe('DriverHome', () => {
     expect(body.displayName).toBe('Другой водитель')
     expect(body.invitedByDriverId).toBeUndefined()
   })
+
+  // --- D-07 (Handoff Protocol) ---
+  //
+  // These four tests use a path-routed `mockImplementation` instead of
+  // this file's own more common sequential `mockResolvedValueOnce` chain:
+  // `loadHandoffs` is called from inside `loadAssignments`'s own async
+  // `.then()`, one tier deeper than `loadOrderDetails`/`loadMessages`
+  // (already-issued, synchronously, moments earlier in the same poll
+  // tick) -- their exact interleaving is not worth hand-computing when a
+  // router keyed on the request path is both more robust and more
+  // readable. `mockResolvedValueOnce` and `mockImplementation` coexist
+  // safely (the former is always drained first, in call order); every
+  // test below still queues identity/driver positionally, matching every
+  // other test in this file, then switches to the router for the rest.
+
+  describe('D-07 Handoff Protocol', () => {
+    function routeRequests(handlers: Record<string, unknown>) {
+      mockedRequest.mockImplementation((path: unknown) => {
+        const p = path as string
+        for (const [prefix, value] of Object.entries(handlers)) {
+          if (p.startsWith(prefix)) {
+            return Promise.resolve(typeof value === 'function' ? (value as () => unknown)() : value)
+          }
+        }
+        return Promise.resolve([])
+      })
+    }
+
+    it('shows a "Передать поездку" action on an active ride, and proposes a handoff naming the typed substitute', async () => {
+      mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+      mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+      routeRequests({
+        '/v1/proposals?driverId=': [
+          { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'ACCEPTED', statedPrice: '350', statedEtaMinutes: null },
+        ],
+        '/v1/assignments?orderIds=': [
+          { assignmentId: 'a1', orderId: 'o1', driverId: 'driver-1', status: 'CREATED', statusChangedAt: null },
+        ],
+        '/v1/handoffs?assignmentId=': [],
+        '/v1/handoffs?substituteDriverId=': [],
+        '/v1/orders?ids=': [],
+      })
+
+      renderDriverHome()
+      await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
+
+      const input = await screen.findByLabelText('Передать поездку другому водителю')
+      await userEvent.type(input, 'driver-substitute')
+      await userEvent.click(screen.getByRole('button', { name: 'Передать поездку' }))
+
+      const proposeCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/handoffs')
+      expect(proposeCall).toBeDefined()
+      const body = JSON.parse((proposeCall?.[1] as RequestInit).body as string)
+      expect(body).toEqual({ assignmentId: 'a1', substituteDriverId: 'driver-substitute' })
+      expect((proposeCall?.[1] as RequestInit).headers as Record<string, string>).toMatchObject({
+        Authorization: `Bearer ${TEST_IDENTITY.token}`,
+      })
+    })
+
+    it('shows the pending handoff status and a withdraw action once one has been proposed', async () => {
+      mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+      mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+      routeRequests({
+        '/v1/proposals?driverId=': [
+          { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: null },
+        ],
+        '/v1/assignments?orderIds=': [
+          { assignmentId: 'a1', orderId: 'o1', driverId: 'driver-1', status: 'CREATED', statusChangedAt: null },
+        ],
+        '/v1/handoffs?assignmentId=': [
+          {
+            handoffId: 'h1',
+            assignmentId: 'a1',
+            orderId: 'o1',
+            originalDriverId: 'driver-1',
+            substituteDriverId: 'driver-substitute',
+            status: 'PROPOSED',
+            proposedAt: '2026-09-18T12:00:00Z',
+            substituteAcceptedAt: null,
+            resolvedAt: null,
+          },
+        ],
+        '/v1/handoffs?substituteDriverId=': [],
+        '/v1/orders?ids=': [],
+      })
+
+      renderDriverHome()
+      await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
+
+      expect(await screen.findByText('Передача поездке водителю driver-substitute')).toBeInTheDocument()
+      expect(await screen.findByRole('button', { name: 'Отменить передачу' })).toBeInTheDocument()
+    })
+
+    it('shows an incoming handoff naming this driver as substitute, with accept and decline actions', async () => {
+      mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+      mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+      routeRequests({
+        '/v1/proposals?driverId=': [],
+        '/v1/handoffs?substituteDriverId=': [
+          {
+            handoffId: 'h1',
+            assignmentId: 'a1',
+            orderId: 'o1',
+            originalDriverId: 'driver-original',
+            substituteDriverId: 'driver-1',
+            status: 'PROPOSED',
+            proposedAt: '2026-09-18T12:00:00Z',
+            substituteAcceptedAt: null,
+            resolvedAt: null,
+          },
+        ],
+      })
+
+      renderDriverHome()
+      await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
+
+      expect(await screen.findByText('Передача от водителя driver-original')).toBeInTheDocument()
+      const acceptButton = screen.getByRole('button', { name: 'Принять' })
+      await userEvent.click(acceptButton)
+
+      const acceptCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/handoffs/h1/accept-substitute')
+      expect(acceptCall).toBeDefined()
+      expect((acceptCall?.[1] as RequestInit).method).toBe('POST')
+    })
+
+    it('declining an incoming handoff sends this driver\'s own Bearer token to POST /v1/handoffs/:id/decline-substitute', async () => {
+      mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+      mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+      routeRequests({
+        '/v1/proposals?driverId=': [],
+        '/v1/handoffs?substituteDriverId=': [
+          {
+            handoffId: 'h1',
+            assignmentId: 'a1',
+            orderId: 'o1',
+            originalDriverId: 'driver-original',
+            substituteDriverId: 'driver-1',
+            status: 'PROPOSED',
+            proposedAt: '2026-09-18T12:00:00Z',
+            substituteAcceptedAt: null,
+            resolvedAt: null,
+          },
+        ],
+        '/v1/handoffs/h1/decline-substitute': {},
+      })
+
+      renderDriverHome()
+      await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
+      await screen.findByText('Передача от водителя driver-original')
+
+      await userEvent.click(screen.getByRole('button', { name: 'Отклонить' }))
+
+      const declineCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/handoffs/h1/decline-substitute')
+      expect(declineCall).toBeDefined()
+      expect((declineCall?.[1] as RequestInit).method).toBe('POST')
+    })
+  })
 })

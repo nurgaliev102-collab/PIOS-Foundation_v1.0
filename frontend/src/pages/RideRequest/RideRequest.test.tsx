@@ -584,6 +584,138 @@ describe('RideRequest', () => {
     expect(screen.queryByText(/Будет примерно через/)).not.toBeInTheDocument()
   })
 
+  // --- D-07 (Handoff Protocol) ---
+
+  it('shows no handoff UI while a proposed handoff has not yet been accepted by its own substitute', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: null }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', assignmentId: 'a1' }]) // GET /v1/assignments?orderId=order-1
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?passengerReference= (ADR-058 requestedPickupAt, fired synchronously right after the assignments call above, before it resolves)
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals/:id/messages (also fired synchronously, before the assignments call resolves)
+    mockedRequest.mockResolvedValueOnce([
+      {
+        handoffId: 'h1',
+        assignmentId: 'a1',
+        orderId: 'order-1',
+        originalDriverId: 'driver-1',
+        substituteDriverId: 'driver-substitute',
+        status: 'PROPOSED',
+        proposedAt: '2026-09-18T12:00:00Z',
+        substituteAcceptedAt: null,
+        resolvedAt: null,
+      },
+    ]) // GET /v1/handoffs?assignmentId=a1
+
+    renderAt('driver-1')
+
+    await screen.findByText(/принял ваш заказ/)
+    expect(screen.queryByText(/Вашу поездку выполнит другой водитель/)).not.toBeInTheDocument()
+  })
+
+  it('shows the exact substitute and consent/refuse actions once the substitute has accepted', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: null }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', assignmentId: 'a1' }])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?passengerReference= (ADR-058 requestedPickupAt)
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals/:id/messages
+    mockedRequest.mockResolvedValueOnce([
+      {
+        handoffId: 'h1',
+        assignmentId: 'a1',
+        orderId: 'order-1',
+        originalDriverId: 'driver-1',
+        substituteDriverId: 'driver-substitute',
+        status: 'SUBSTITUTE_ACCEPTED',
+        proposedAt: '2026-09-18T12:00:00Z',
+        substituteAcceptedAt: '2026-09-18T12:01:00Z',
+        resolvedAt: null,
+      },
+    ])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('Вашу поездку выполнит другой водитель — driver-substitute.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Согласен' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Не согласен' })).toBeInTheDocument()
+  })
+
+  it('consenting sends this passenger\'s own Bearer token to POST /v1/handoffs/:id/consent', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: null }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', assignmentId: 'a1' }])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?passengerReference= (ADR-058 requestedPickupAt)
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals/:id/messages
+    mockedRequest.mockResolvedValueOnce([
+      {
+        handoffId: 'h1',
+        assignmentId: 'a1',
+        orderId: 'order-1',
+        originalDriverId: 'driver-1',
+        substituteDriverId: 'driver-substitute',
+        status: 'SUBSTITUTE_ACCEPTED',
+        proposedAt: '2026-09-18T12:00:00Z',
+        substituteAcceptedAt: '2026-09-18T12:01:00Z',
+        resolvedAt: null,
+      },
+    ])
+
+    renderAt('driver-1')
+    await screen.findByRole('button', { name: 'Согласен' })
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/handoffs/h1/consent
+
+    await userEvent.click(screen.getByRole('button', { name: 'Согласен' }))
+
+    const consentCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/handoffs/h1/consent')
+    expect(consentCall).toBeDefined()
+    expect((consentCall?.[1] as RequestInit).method).toBe('POST')
+    expect((consentCall?.[1] as RequestInit).headers as Record<string, string>).toMatchObject({
+      Authorization: `Bearer ${TEST_IDENTITY.token}`,
+    })
+  })
+
+  it('refusing sends this passenger\'s own Bearer token to POST /v1/handoffs/:id/refuse, and leaves the ride otherwise unaffected', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: null }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', assignmentId: 'a1' }])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?passengerReference= (ADR-058 requestedPickupAt)
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals/:id/messages
+    mockedRequest.mockResolvedValueOnce([
+      {
+        handoffId: 'h1',
+        assignmentId: 'a1',
+        orderId: 'order-1',
+        originalDriverId: 'driver-1',
+        substituteDriverId: 'driver-substitute',
+        status: 'SUBSTITUTE_ACCEPTED',
+        proposedAt: '2026-09-18T12:00:00Z',
+        substituteAcceptedAt: '2026-09-18T12:01:00Z',
+        resolvedAt: null,
+      },
+    ])
+
+    renderAt('driver-1')
+    await screen.findByRole('button', { name: 'Не согласен' })
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/handoffs/h1/refuse
+
+    await userEvent.click(screen.getByRole('button', { name: 'Не согласен' }))
+
+    const refuseCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/handoffs/h1/refuse')
+    expect(refuseCall).toBeDefined()
+    expect((refuseCall?.[1] as RequestInit).method).toBe('POST')
+    // D-07 Invariant #24: refusal cancels only the Handoff proposal -- the
+    // passenger's own screen must still show the ride as accepted, not
+    // cancelled or changed in any other way.
+    expect(await screen.findByText(/принял ваш заказ/)).toBeInTheDocument()
+  })
+
   // --- D-06 (Settlement as Evidence): agreed amount, never a Proposal fallback ---
 
   // Scenario A: no Assignment/Trip exists yet (PRICE_PROPOSED) --

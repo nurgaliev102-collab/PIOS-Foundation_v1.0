@@ -202,6 +202,26 @@ interface AssignmentInfo {
   // Proposal itself). `null` for an Assignment with no connected Trip
   // agreedAmount (no Proposal preceded it, or it predates this field).
   agreedAmount?: string | null
+  // D-07 (Handoff Protocol): the driver currently expected to (or who
+  // did) actually drive -- equal to `driverId` (the permanent, original
+  // committing driver) on every ride with no Handoff, which is every
+  // ride until one is consented.
+  executingDriverId?: string | null
+}
+
+type HandoffStatusValue = 'PROPOSED' | 'SUBSTITUTE_ACCEPTED' | 'COMMITTED' | 'REFUSED' | 'WITHDRAWN'
+
+// D-07 (Handoff Protocol): the wire shape `HandoffController` returns.
+interface HandoffInfo {
+  handoffId: string
+  assignmentId: string
+  orderId: string
+  originalDriverId: string
+  substituteDriverId: string
+  status: HandoffStatusValue
+  proposedAt: string
+  substituteAcceptedAt: string | null
+  resolvedAt: string | null
 }
 
 interface OrderListItem {
@@ -779,6 +799,21 @@ export function DriverHome() {
   const [terminationReasons, setTerminationReasons] = useState<Record<string, string>>({})
   const [terminationNotes, setTerminationNotes] = useState<Record<string, string>>({})
   const terminationRequestIds = useRef<Record<string, { payload: string; requestId: string }>>({})
+  // D-07 (Handoff Protocol): [myHandoffs] is keyed by assignmentId -- the
+  // one active (PROPOSED/SUBSTITUTE_ACCEPTED) Handoff this driver, as the
+  // *original* committing driver, has proposed on their own ride, if any.
+  // [substituteHandoffInputs] holds the substitute-driverId text field per
+  // assignmentId, before a Handoff is proposed.
+  const [myHandoffs, setMyHandoffs] = useState<Record<string, HandoffInfo>>({})
+  const [substituteHandoffInputs, setSubstituteHandoffInputs] = useState<Record<string, string>>({})
+  // D-07: Handoffs naming *this* driver as substitute -- non-terminal
+  // (PROPOSED/SUBSTITUTE_ACCEPTED) ones come straight from the poll;
+  // [committedHandoffs] keeps a Handoff visible, with its own ride-progress
+  // controls, once it reaches COMMITTED and would otherwise drop out of
+  // the non-terminal listing this same poll also drives.
+  const [incomingHandoffs, setIncomingHandoffs] = useState<HandoffInfo[]>([])
+  const [committedHandoffs, setCommittedHandoffs] = useState<Record<string, HandoffInfo>>({})
+  const [handoffActions, setHandoffActions] = useState<Record<string, AssignmentActionStatus>>({})
   // UX audit (docs/PIOS_DRIVER_HOME_UX_AUDIT.md Section 5/9, "COMPLETE"):
   // a dedicated, transient acknowledgment for ride completion -- its own
   // state, separate from [feedback] (copy/share), so a completion message
@@ -1083,11 +1118,22 @@ export function DriverHome() {
         }
         setProposals(result)
         setProposalsStatus('ready')
-        loadAssignments(active, result, token)
+        loadAssignments(active, result, forDriverId, token)
         loadOrderDetails(active, Array.from(new Set(result.map((p) => p.orderId))), token)
         // Minimal In-Ride Messaging (Product Cycle): scoped per proposal,
         // not per order -- see [loadMessages]'s own KDoc.
         loadMessages(active, result.map((p) => p.proposalId), token)
+        // D-07 (Handoff Protocol): unconditional, every tick -- see this
+        // function's own KDoc for why it must not be nested inside
+        // [loadAssignments] the way [loadMyActiveHandoffs] correctly is.
+        // Issued last, deliberately: every call above it is part of this
+        // screen's own pre-D-07 polling sequence, and every existing test
+        // of that sequence queues its own mocked responses positionally,
+        // in call order -- appending this one call after all of them
+        // means no pre-existing test's own queue is silently shifted by
+        // one position, the same reasoning `AssignOrderCommand.agreedAmount`
+        // and this file's own D-06 additions were placed by.
+        loadIncomingHandoffs(active, forDriverId, token)
       })
       .catch(() => {
         // A silent poll failure keeps the last-known list on screen rather
@@ -1114,7 +1160,7 @@ export function DriverHome() {
    * `.then` that just resolved them — reading state here would see the
    * previous poll's value.
    */
-  function loadAssignments(active: boolean, currentProposals: ProposalListItem[], token: string) {
+  function loadAssignments(active: boolean, currentProposals: ProposalListItem[], forDriverId: string, token: string) {
     const acceptedOrderIds = Array.from(
       new Set(currentProposals.filter((p) => p.status === 'ACCEPTED').map((p) => p.orderId))
     )
@@ -1129,18 +1175,132 @@ export function DriverHome() {
         if (!active) {
           return
         }
-        setAssignments((current) => {
-          const updated = { ...current }
-          results.forEach((assignment) => {
-            updated[assignment.orderId] = assignment
-          })
-          return updated
+        // D-07: [loadMyActiveHandoffs] reads this freshly-fetched batch
+        // directly, not the `assignments` state (which a setState updater
+        // callback is the wrong place to trigger a further async call
+        // from) -- mirrors this whole function's own "read fresh, not
+        // state" discipline for the identical reason.
+        const byOrderId: Record<string, AssignmentInfo> = {}
+        results.forEach((assignment) => {
+          byOrderId[assignment.orderId] = assignment
         })
+        setAssignments((current) => ({ ...current, ...byOrderId }))
+        loadMyActiveHandoffs(active, byOrderId, forDriverId, token)
       })
       .catch(() => {
         // Best-effort, same tolerance as before this fix: a failed batch
         // leaves the last-known assignments on screen rather than clearing
         // them, exactly like [loadOrderDetails]'s own convention.
+      })
+  }
+
+  /**
+   * D-07 (Handoff Protocol): `?assignmentId=` for every
+   * CREATED/ARRIVED-status order this driver, as the *original* committing
+   * driver, may have proposed a Handoff on — keyed by assignmentId in
+   * [myHandoffs] so the ride card can show its own pending-Handoff state.
+   * Called from [loadAssignments]'s own resolution (it inherently depends
+   * on this driver actually having assignments) — unlike
+   * [loadIncomingHandoffs] below, which must not depend on that.
+   */
+  function loadMyActiveHandoffs(active: boolean, currentAssignments: Record<string, AssignmentInfo>, forDriverId: string, token: string) {
+    const myAssignmentIds = Object.values(currentAssignments)
+      .filter((a) => a.driverId === forDriverId && (a.status === 'CREATED' || a.status === 'ARRIVED'))
+      .map((a) => a.assignmentId)
+    myAssignmentIds.forEach((assignmentId) => {
+      request<HandoffInfo[]>(`/v1/handoffs?assignmentId=${assignmentId}`, {
+        baseUrl: DISPATCH_BASE_URL,
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((results) => {
+          if (!active) return
+          const activeHandoff = results.find((h) => h.status === 'PROPOSED' || h.status === 'SUBSTITUTE_ACCEPTED')
+          setMyHandoffs((current) => {
+            const updated = { ...current }
+            if (activeHandoff) updated[assignmentId] = activeHandoff
+            else delete updated[assignmentId]
+            return updated
+          })
+        })
+        .catch(() => {
+          // Best-effort, same tolerance as [loadAssignments]'s own.
+        })
+    })
+  }
+
+  /**
+   * D-07 (Handoff Protocol): `?substituteDriverId=` for every non-terminal
+   * Handoff naming *this* driver as the substitute — [incomingHandoffs].
+   * Deliberately called unconditionally, every poll tick, straight from
+   * [loadProposals]'s own resolution — **never** nested inside
+   * [loadAssignments] (which returns early, doing nothing at all, whenever
+   * this driver has zero proposals of their own): a driver who has never
+   * proposed on anything, and has no assignment of their own, must still
+   * be able to see an incoming Handoff naming them. This is the one D-07
+   * poll leg that cannot be scoped to "this driver's own existing rides,"
+   * because its entire purpose is to surface a ride that is not yet theirs.
+   *
+   * A Handoff that was visible here as `SUBSTITUTE_ACCEPTED` on the
+   * previous tick and is absent from this tick's own result has resolved
+   * (`COMMITTED` or `REFUSED`, since only the passenger can resolve a
+   * substitute-accepted Handoff) — a follow-up `?assignmentId=` read (now
+   * authorized for the current/former substitute too,
+   * `HandoffController.list`'s own D-07 addition) learns which, and
+   * [committedHandoffs] keeps a `COMMITTED` one visible, with its own
+   * ride-progress controls, since it would otherwise simply vanish from
+   * this driver's own screen the moment they gained a real ride to drive.
+   */
+  function loadIncomingHandoffs(active: boolean, forDriverId: string, token: string) {
+    request<HandoffInfo[]>(`/v1/handoffs?substituteDriverId=${forDriverId}`, {
+      baseUrl: DISPATCH_BASE_URL,
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((results) => {
+        if (!active) return
+        setIncomingHandoffs((previous) => {
+          const previouslyAccepted = previous.filter((h) => h.status === 'SUBSTITUTE_ACCEPTED')
+          const stillPresent = new Set(results.map((h) => h.handoffId))
+          previouslyAccepted
+            .filter((h) => !stillPresent.has(h.handoffId))
+            .forEach((h) => {
+              request<HandoffInfo[]>(`/v1/handoffs?assignmentId=${h.assignmentId}`, {
+                baseUrl: DISPATCH_BASE_URL,
+                headers: { Authorization: `Bearer ${token}` },
+              })
+                .then((resolved) => {
+                  if (!active) return
+                  const mine = resolved.find((r) => r.handoffId === h.handoffId)
+                  if (mine?.status === 'COMMITTED') {
+                    setCommittedHandoffs((current) => ({ ...current, [mine.assignmentId]: mine }))
+                    // This substitute's own proposals list never included
+                    // this order (they never proposed on it) -- [assignments]
+                    // has no entry for it yet, so the same ride-progress
+                    // panel/controls the ACCEPTED-proposal card already uses
+                    // (`respondToAssignment`, keyed off `assignments`) would
+                    // otherwise have nothing to read. One extra fetch, only
+                    // at the moment a Handoff is first observed COMMITTED,
+                    // seeds it -- from here on, [committedHandoffs]'s own
+                    // render effect (see the JSX below) keeps re-fetching it
+                    // once per poll tick for as long as the ride is still
+                    // in progress.
+                    request<AssignmentInfo[]>(`/v1/assignments?orderId=${mine.orderId}`, {
+                      baseUrl: DISPATCH_BASE_URL,
+                      headers: { Authorization: `Bearer ${token}` },
+                    })
+                      .then((rows) => {
+                        if (!active || rows.length === 0) return
+                        setAssignments((current) => ({ ...current, [mine.orderId]: rows[0] }))
+                      })
+                      .catch(() => {})
+                  }
+                })
+                .catch(() => {})
+            })
+          return results
+        })
+      })
+      .catch(() => {
+        // Best-effort, same tolerance as [loadAssignments]'s own.
       })
   }
 
@@ -1213,6 +1373,91 @@ export function DriverHome() {
       setAssignmentActions((current) => ({ ...current, [assignment.assignmentId]: 'idle' }))
     } catch {
       setAssignmentActions((current) => ({ ...current, [assignment.assignmentId]: 'error' }))
+    }
+  }
+
+  // --- D-07 (Handoff Protocol) ---
+
+  /** The original committing driver proposes a Handoff on their own active ride. */
+  async function proposeHandoff(assignmentId: string) {
+    if (!identity || handoffActions[assignmentId] === 'submitting') return
+    const substituteDriverId = (substituteHandoffInputs[assignmentId] ?? '').trim()
+    if (!substituteDriverId) {
+      setHandoffActions((current) => ({ ...current, [assignmentId]: 'error' }))
+      return
+    }
+    setHandoffActions((current) => ({ ...current, [assignmentId]: 'submitting' }))
+    try {
+      const created = await request<HandoffInfo>('/v1/handoffs', {
+        method: 'POST',
+        baseUrl: DISPATCH_BASE_URL,
+        headers: { Authorization: `Bearer ${identity.token}` },
+        body: JSON.stringify({ assignmentId, substituteDriverId }),
+      })
+      setMyHandoffs((current) => ({ ...current, [assignmentId]: created }))
+      setHandoffActions((current) => ({ ...current, [assignmentId]: 'idle' }))
+    } catch {
+      setHandoffActions((current) => ({ ...current, [assignmentId]: 'error' }))
+    }
+  }
+
+  /** The original driver withdraws their own pending Handoff -- only possible before passenger consent (D-07 invariant). */
+  async function withdrawHandoff(handoff: HandoffInfo) {
+    if (!identity || handoffActions[handoff.assignmentId] === 'submitting') return
+    setHandoffActions((current) => ({ ...current, [handoff.assignmentId]: 'submitting' }))
+    try {
+      await request(`/v1/handoffs/${handoff.handoffId}/withdraw`, {
+        method: 'POST',
+        baseUrl: DISPATCH_BASE_URL,
+        headers: { Authorization: `Bearer ${identity.token}` },
+      })
+      setMyHandoffs((current) => {
+        const updated = { ...current }
+        delete updated[handoff.assignmentId]
+        return updated
+      })
+      setHandoffActions((current) => ({ ...current, [handoff.assignmentId]: 'idle' }))
+    } catch {
+      // 409 here means the passenger consented moments earlier -- the next
+      // poll tick will move this Handoff out of [myHandoffs] on its own
+      // (it is no longer active), so no error state is invented for the
+      // one outcome D-07 itself says must not be treated as a failure --
+      // the driver simply sees the ride reassign, which is correct.
+      setHandoffActions((current) => ({ ...current, [handoff.assignmentId]: 'idle' }))
+    }
+  }
+
+  /** The named substitute explicitly accepts this specific Handoff -- required before the passenger is ever asked. */
+  async function acceptHandoffSubstitute(handoff: HandoffInfo) {
+    if (!identity || handoffActions[handoff.handoffId] === 'submitting') return
+    setHandoffActions((current) => ({ ...current, [handoff.handoffId]: 'submitting' }))
+    try {
+      const updated = await request<HandoffInfo>(`/v1/handoffs/${handoff.handoffId}/accept-substitute`, {
+        method: 'POST',
+        baseUrl: DISPATCH_BASE_URL,
+        headers: { Authorization: `Bearer ${identity.token}` },
+      })
+      setIncomingHandoffs((current) => current.map((h) => (h.handoffId === updated.handoffId ? updated : h)))
+      setHandoffActions((current) => ({ ...current, [handoff.handoffId]: 'idle' }))
+    } catch {
+      setHandoffActions((current) => ({ ...current, [handoff.handoffId]: 'error' }))
+    }
+  }
+
+  /** The named substitute declines -- reuses the same REFUSED resolution the passenger's own refusal produces (`HandoffController.declineSubstitute`'s own KDoc). */
+  async function declineHandoffSubstitute(handoff: HandoffInfo) {
+    if (!identity || handoffActions[handoff.handoffId] === 'submitting') return
+    setHandoffActions((current) => ({ ...current, [handoff.handoffId]: 'submitting' }))
+    try {
+      await request(`/v1/handoffs/${handoff.handoffId}/decline-substitute`, {
+        method: 'POST',
+        baseUrl: DISPATCH_BASE_URL,
+        headers: { Authorization: `Bearer ${identity.token}` },
+      })
+      setIncomingHandoffs((current) => current.filter((h) => h.handoffId !== handoff.handoffId))
+      setHandoffActions((current) => ({ ...current, [handoff.handoffId]: 'idle' }))
+    } catch {
+      setHandoffActions((current) => ({ ...current, [handoff.handoffId]: 'error' }))
     }
   }
 
@@ -1989,6 +2234,72 @@ export function DriverHome() {
                 the existing filter in any way. */}
             {completionFeedback && <StatusMessage tone="success">{completionFeedback}</StatusMessage>}
 
+            {/* D-07 (Handoff Protocol): Handoffs naming *this* driver as
+                substitute -- entirely separate from this driver's own
+                proposals list, since a Handoff never creates one (D-07
+                Invariant #3/#4). Shown above the ordinary proposal list so
+                a driver never misses a pending request naming them. */}
+            {incomingHandoffs.length > 0 &&
+              incomingHandoffs.map((handoff) => (
+                <Card key={handoff.handoffId}>
+                  <Text role="label" tone="secondary">
+                    Передача от водителя {handoff.originalDriverId}
+                  </Text>
+                  {handoff.status === 'PROPOSED' && (
+                    <>
+                      <Text role="body">Вам предлагают принять чужую поездку.</Text>
+                      <div className={styles.actionRow}>
+                        <Button
+                          label="Принять"
+                          variant="primary"
+                          loading={handoffActions[handoff.handoffId] === 'submitting'}
+                          onClick={() => void acceptHandoffSubstitute(handoff)}
+                        />
+                        <Button
+                          label="Отклонить"
+                          variant="destructive"
+                          loading={handoffActions[handoff.handoffId] === 'submitting'}
+                          onClick={() => void declineHandoffSubstitute(handoff)}
+                        />
+                      </div>
+                    </>
+                  )}
+                  {handoff.status === 'SUBSTITUTE_ACCEPTED' && (
+                    <Text role="body" tone="secondary">
+                      Вы согласились. Ожидаем подтверждения пассажира.
+                    </Text>
+                  )}
+                </Card>
+              ))}
+            {Object.values(committedHandoffs).map((handoff) => {
+              const assignment = assignments[handoff.orderId]
+              const primaryAction =
+                assignment && (assignment.status === 'CREATED' || assignment.status === 'ACCEPTED')
+                  ? { label: 'Прибыл', onClick: () => respondToAssignment(handoff.assignmentId, 'arrive') }
+                  : assignment?.status === 'ARRIVED'
+                    ? { label: 'Начать поездку', onClick: () => respondToAssignment(handoff.assignmentId, 'start') }
+                    : assignment?.status === 'IN_PROGRESS'
+                      ? { label: 'Завершить поездку', onClick: () => respondToAssignment(handoff.assignmentId, 'complete') }
+                      : undefined
+              if (assignment?.status === 'COMPLETED' || assignment?.status === 'TERMINATED') {
+                return null
+              }
+              return (
+                <ActiveRidePanel
+                  key={handoff.handoffId}
+                  orderCode={shortOrderCode(handoff.orderId)}
+                  status={(assignment?.status as RideLifecycleStatus | undefined) ?? 'ACCEPTED'}
+                  statusLabel="Поездка передана вам"
+                  details={
+                    assignment?.agreedAmount ? <Text role="body">Стоимость: {assignment.agreedAmount}</Text> : undefined
+                  }
+                  primaryAction={primaryAction}
+                  submitting={assignmentActions[handoff.assignmentId] === 'submitting'}
+                  error={assignmentActions[handoff.assignmentId] === 'error'}
+                />
+              )
+            })}
+
             {proposalsStatus === 'loading' && <Spinner label="Загружаем заказы…" />}
             {proposalsStatus === 'error' && (
               <div className={styles.errorBlock}>
@@ -2183,6 +2494,57 @@ export function DriverHome() {
                       loading={assignmentActions[assignment.assignmentId] === 'submitting'}
                       onClick={() => void terminateAssignment(assignment)}
                     />
+                  </Card>
+                )}
+                {/* D-07 (Handoff Protocol): only reachable while CREATED or
+                    ARRIVED (Invariant #7/#8) -- the same window the
+                    termination card above stays open for is not quite the
+                    same one (termination stays open through IN_PROGRESS
+                    too), so this is gated separately. */}
+                {assignment && (assignment.status === 'CREATED' || assignment.status === 'ARRIVED') && (
+                  <Card>
+                    {myHandoffs[assignment.assignmentId] ? (
+                      <>
+                        <Text role="label" tone="secondary">
+                          Передача поездке водителю {myHandoffs[assignment.assignmentId].substituteDriverId}
+                        </Text>
+                        <Text role="body" tone="secondary">
+                          {myHandoffs[assignment.assignmentId].status === 'SUBSTITUTE_ACCEPTED'
+                            ? 'Водитель согласился. Ожидаем подтверждения пассажира.'
+                            : 'Ожидаем, пока водитель согласится принять поездку.'}
+                        </Text>
+                        <Button
+                          label="Отменить передачу"
+                          variant="secondary"
+                          loading={handoffActions[assignment.assignmentId] === 'submitting'}
+                          onClick={() => void withdrawHandoff(myHandoffs[assignment.assignmentId])}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <FormField label="Передать поездку другому водителю" htmlFor={`handoff-substitute-${assignment.assignmentId}`}>
+                          <Input
+                            id={`handoff-substitute-${assignment.assignmentId}`}
+                            placeholder="ID водителя"
+                            value={substituteHandoffInputs[assignment.assignmentId] ?? ''}
+                            onChange={(event) =>
+                              setSubstituteHandoffInputs((current) => ({ ...current, [assignment.assignmentId]: event.target.value }))
+                            }
+                          />
+                        </FormField>
+                        <Button
+                          label="Передать поездку"
+                          variant="secondary"
+                          loading={handoffActions[assignment.assignmentId] === 'submitting'}
+                          onClick={() => void proposeHandoff(assignment.assignmentId)}
+                        />
+                        {handoffActions[assignment.assignmentId] === 'error' && (
+                          <Text role="caption" tone="error">
+                            Укажите ID водителя.
+                          </Text>
+                        )}
+                      </>
+                    )}
                   </Card>
                 )}
                 </div>

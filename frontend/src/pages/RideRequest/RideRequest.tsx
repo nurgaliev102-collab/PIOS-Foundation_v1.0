@@ -149,6 +149,21 @@ interface AssignmentStatusItem {
   // the Proposal's own statedPrice. `null`/absent for a Trip with none
   // (no Proposal preceded it, or it predates this field).
   agreedAmount?: string | null
+  // D-07 (Handoff Protocol): needed to poll `GET /v1/handoffs?assignmentId=`.
+  assignmentId: string
+}
+
+// D-07 (Handoff Protocol): the wire shape `HandoffController` returns.
+interface HandoffInfo {
+  handoffId: string
+  assignmentId: string
+  orderId: string
+  originalDriverId: string
+  substituteDriverId: string
+  status: 'PROPOSED' | 'SUBSTITUTE_ACCEPTED' | 'COMMITTED' | 'REFUSED' | 'WITHDRAWN'
+  proposedAt: string
+  substituteAcceptedAt: string | null
+  resolvedAt: string | null
 }
 
 interface CancellationStatusItem {
@@ -581,6 +596,12 @@ export function RideRequest() {
   // ADR-057: the driver's own stated time to pickup, read from the same
   // poll -- mirrors [statedPrice] exactly.
   const [statedEtaMinutes, setStatedEtaMinutes] = useState<number | null>(null)
+  // D-07 (Handoff Protocol): the one live (SUBSTITUTE_ACCEPTED, the only
+  // stage at which the passenger is ever shown anything, Invariant #28)
+  // Handoff for this order's own Assignment, if any -- polled alongside
+  // the Assignment's own status, below.
+  const [currentHandoff, setCurrentHandoff] = useState<HandoffInfo | null>(null)
+  const [handoffAction, setHandoffAction] = useState<'idle' | 'submitting' | 'error'>('idle')
   // ADR-058 (Scheduled Pickup Time): whether this passenger is booking for
   // "сейчас" (default, sends nothing) or a chosen future date/time.
   const [isScheduled, setIsScheduled] = useState(false)
@@ -1011,6 +1032,36 @@ export function RideRequest() {
               // substituted here: it is historical proposal evidence, not
               // the agreed amount.
               setStatedPrice(assignments[0]?.agreedAmount ?? null)
+              // D-07 (Handoff Protocol): only while the Trip is still
+              // CREATED/ARRIVED does a live Handoff make sense to show --
+              // once IN_PROGRESS/COMPLETED/TERMINATED, Handoff is forbidden
+              // (Invariant #7/#8) and any prior one has already resolved
+              // one way or another. `ACCEPTED` is included alongside
+              // `CREATED`: it is `Assignment.status`'s own value for the
+              // same underlying `Trip.status == CREATED` state, whenever
+              // ride progress has not reached `ARRIVED` yet -- the exact
+              // same "CREATED or ACCEPTED means not yet arrived" reading
+              // `DriverHome.tsx`'s own primary-action logic already uses.
+              const assignmentId = assignments[0]?.assignmentId
+              if (assignmentId && (status === 'CREATED' || status === 'ACCEPTED' || status === 'ARRIVED' || !status)) {
+                request<HandoffInfo[]>(`/v1/handoffs?assignmentId=${assignmentId}`, {
+                  baseUrl: DISPATCH_BASE_URL,
+                  headers: { Authorization: `Bearer ${currentIdentity.token}` },
+                })
+                  .then((handoffs) => {
+                    if (!active) return
+                    // D-07 Invariant #28: the passenger is never shown a
+                    // proposal the named substitute has not themselves
+                    // accepted yet -- a merely PROPOSED Handoff stays
+                    // invisible here.
+                    setCurrentHandoff(handoffs.find((h) => h.status === 'SUBSTITUTE_ACCEPTED') ?? null)
+                  })
+                  .catch(() => {
+                    // Best-effort, same tolerance as every other poll leg here.
+                  })
+              } else {
+                setCurrentHandoff(null)
+              }
             })
             .catch(() => {
               if (active) {
@@ -1568,6 +1619,57 @@ export function RideRequest() {
         return
       }
       setPriceDecisionStatus('error')
+    }
+  }
+
+  // --- D-07 (Handoff Protocol) ---
+
+  /** The passenger's own constitutive consent to the exact, already-substitute-accepted Handoff (Invariant #12/#28). */
+  async function consentToHandoff() {
+    if (!currentHandoff || handoffAction === 'submitting' || !identity) {
+      return
+    }
+    setHandoffAction('submitting')
+    try {
+      await request(`/v1/handoffs/${currentHandoff.handoffId}/consent`, {
+        method: 'POST',
+        baseUrl: DISPATCH_BASE_URL,
+        headers: { Authorization: `Bearer ${identity.token}` },
+      })
+      setHandoffAction('idle')
+      // The executing driver has changed -- the next poll tick (3s) will
+      // pick up the resolved Handoff (no longer SUBSTITUTE_ACCEPTED, so
+      // [currentHandoff] clears on its own) and this same order's own
+      // updated `driverId`-facing facts. No optimistic local update is
+      // made here beyond clearing the pending action state, mirroring
+      // [handleConfirmPrice]'s own restraint.
+    } catch (error) {
+      if (handleSessionExpiredError(error)) {
+        return
+      }
+      setHandoffAction('error')
+    }
+  }
+
+  /** The passenger declines -- per D-07 Invariant #24, this cancels only the Handoff proposal; the existing ride is completely unaffected. */
+  async function refuseHandoff() {
+    if (!currentHandoff || handoffAction === 'submitting' || !identity) {
+      return
+    }
+    setHandoffAction('submitting')
+    try {
+      await request(`/v1/handoffs/${currentHandoff.handoffId}/refuse`, {
+        method: 'POST',
+        baseUrl: DISPATCH_BASE_URL,
+        headers: { Authorization: `Bearer ${identity.token}` },
+      })
+      setCurrentHandoff(null)
+      setHandoffAction('idle')
+    } catch (error) {
+      if (handleSessionExpiredError(error)) {
+        return
+      }
+      setHandoffAction('error')
     }
   }
 
@@ -2262,6 +2364,37 @@ export function RideRequest() {
                       />
                     </div>
                     {priceDecisionStatus === 'error' && (
+                      <StatusMessage tone="error">Не удалось отправить решение. Попробуйте ещё раз.</StatusMessage>
+                    )}
+                  </>
+                )}
+                {/* D-07 (Handoff Protocol): shown only once the named
+                    substitute has themselves already accepted (Invariant
+                    #28) -- [currentHandoff] itself is never set to a merely
+                    PROPOSED Handoff, so no separate status check is needed
+                    here beyond its own presence. A blocking choice, not a
+                    toast (Invariant #12): the passenger must take an
+                    affirmative action either way. */}
+                {currentHandoff && (
+                  <>
+                    <Text role="body" tone="secondary">
+                      Вашу поездку выполнит другой водитель — {currentHandoff.substituteDriverId}.
+                    </Text>
+                    <div className={styles.actionRow}>
+                      <Button
+                        label="Согласен"
+                        variant="primary"
+                        loading={handoffAction === 'submitting'}
+                        onClick={() => void consentToHandoff()}
+                      />
+                      <Button
+                        label="Не согласен"
+                        variant="destructive"
+                        loading={handoffAction === 'submitting'}
+                        onClick={() => void refuseHandoff()}
+                      />
+                    </div>
+                    {handoffAction === 'error' && (
                       <StatusMessage tone="error">Не удалось отправить решение. Попробуйте ещё раз.</StatusMessage>
                     )}
                   </>
