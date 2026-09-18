@@ -1,14 +1,14 @@
 # D-07 Handoff — Implementation-Ready Specification
 
-**Type: SPECIFICATION, not implementation.** Consolidates the Product Owner decisions already locked in `docs/PIOS_D07_HANDOFF_RECONCILIATION.md` (the "Product Owner Decision — D-07 (2026-09-18)" section and this task's own further-locked OQ-1/OQ-2/OQ-3/OQ-4/OQ-7 answers) into a single, implementation-ready technical contract. No code, schema, migration, API, frontend, test, or event contract was changed to produce this document. Written against `HEAD = 12b8bbe99eca8121cf02d62bc9e3e39de38a4ac4`.
+**Type: SPECIFICATION, not implementation. FINAL LOCK.** Consolidates every Product Owner decision locked to date: `docs/PIOS_D07_HANDOFF_RECONCILIATION.md`'s own "Product Owner Decision — D-07 (2026-09-18)" section (architecture = DESIGN 1), this document's own first pass (OQ-1/OQ-2/OQ-3/OQ-4/OQ-7, at `HEAD = 12b8bbe`), and this final pass's own further-locked decisions (substitute acceptance, withdrawal, no TTL, eligibility, guest consent, atomic revalidation). No code, schema, migration, API, frontend, test, or event contract was changed to produce this document. Written against `HEAD = 378c878fa874678f0dda04cf2314ce69d66df25e`.
 
-This document does not reopen, reinterpret, or re-derive D-07's architecture (DESIGN 1) or the locked answers to OQ-1, OQ-2, OQ-3, OQ-4, or OQ-7. Where an implementation detail is not yet decided by any ratified document, it is marked **OPEN** rather than guessed.
+**Nothing below reopens** D-07's architecture (DESIGN 1), OQ-1, OQ-2, OQ-3, OQ-4, OQ-7, substitute acceptance, expiry, withdrawal, eligibility, or guest consent — all are now locked. Where the *first* pass of this specification marked something **OPEN**, this revision states plainly whether that item is now **RESOLVED** (with the resolving decision cited) or remains genuinely open — the first pass's own reasoning for why it was open is preserved inline, not deleted, so the resolution history stays legible.
 
 ---
 
 ## 1. Purpose
 
-**Handoff, exactly as locked:** a mechanism by which the driver already committed to an order (the *original committing driver*, recorded as `Assignment.driver` and never rewritten) may, with the named substitute's own agreement and the passenger's own explicit, informed consent, transfer *who actually executes* the ride to a different, named driver — without creating a new commitment, without ending the existing one, and without altering any fact the existing commitment already carries (`Trip.agreedAmount`, the `Connection`/relationship record, or the order itself).
+**Handoff, exactly as locked:** a mechanism by which the driver already committed to an order (the *original committing driver*, recorded as `Assignment.driver` and never rewritten) may, with the named substitute driver's own explicit acceptance and the passenger's own explicit, informed, constitutive consent, transfer *who actually executes* the ride to a different, named driver — without creating a new commitment, without ending the existing one, and without altering any fact the existing commitment already carries (`Trip.agreedAmount`, the `Connection`/relationship record, or the order itself).
 
 **The single sentence that governs every design choice below**, as given in the PO decision lock: *"Это всё та же поездка. Меняется только фактический исполнитель."* — it is still the same ride; only the actual executor changes.
 
@@ -18,42 +18,53 @@ This document does not reopen, reinterpret, or re-derive D-07's architecture (DE
 
 ## 2. Invariants
 
-Every invariant below is either (a) already directly stated in the locked PO decision, (b) mechanically implied by DESIGN 1 combined with facts already true of the existing codebase (cited), or (c) named in this task's own required minimum list. None is invented.
+Every invariant below is either (a) already directly stated in a locked PO decision, (b) mechanically implied by DESIGN 1 combined with facts already true of the existing codebase (cited), or (c) named in a required minimum list this or a prior pass was given. None is invented. Invariants #1-26 are unchanged from the first pass (renumbered only where a new one is inserted for grouping clarity); #27 onward are newly locked in this pass.
 
 | # | Invariant | Source |
 |---|---|---|
 | 1 | **One `Assignment` per `Order`, for the entire lifetime of that Order.** | Already true today, unconditionally — `Assignment.create`'s own guard, `check(existingAssignments.none { it.order == order })` (`Assignment.kt:189-191`), and DESIGN 1 relies on this remaining true rather than changing it. |
-| 2 | **One `Trip` per `Assignment`.** | Already true today — `trips.assignment_id UNIQUE` plus `Trip.create`'s own in-memory check (`Trip.kt:49-54`, per D-07 reconciliation §11 item 4's citation). |
-| 3 | **Handoff does not create a second `Assignment`.** | PO decision items 1, 3 ("no new Assignment," "the existing Assignment/Trip remains the same commitment"). |
+| 2 | **One `Trip` per `Assignment`.** | Already true today — `trips.assignment_id UNIQUE` plus `Trip.create`'s own in-memory check (`Trip.kt:49-54`). |
+| 3 | **Handoff does not create a second `Assignment`.** | PO decision items 1, 3. |
 | 4 | **Handoff does not create a second `Trip`.** | PO decision item 2. |
-| 5 | **A commitment already `TERMINATED` (or `COMPLETED`) cannot be handed off.** | PO decision item 16 ("Handoff must not turn a terminated commitment back into executable state"); mechanically enforced today by `Trip.terminate`'s own guard already excluding these two states from every further transition (`Trip.kt:130-133`) — Handoff must respect the same boundary, not create a new one. |
-| 6 | **Handoff cannot revive `TERMINATED`.** | Same as #5, restated as its own explicit item (PO decision item 16). |
-| 7 | **Handoff is only reachable while the Trip is `CREATED` or `ARRIVED`.** | This task's own locked OQ-1 answer. |
-| 8 | **Handoff is forbidden once the Trip has reached `IN_PROGRESS`, `COMPLETED`, or `TERMINATED`.** | Same locked OQ-1 answer, restated as the negative form for direct implementability against `TripStatus`'s own five values (`TripStatus.kt:25-30`). |
-| 9 | **The substitute must be explicitly named by the original committing driver.** | PO decision item 10 combined with the reconciliation's own Part 4.2 principle 3 ("PIOS does not substitute a random driver for the one a client came to," `Proposal.kt:239-243`, already live code for a different, but principle-identical, case). |
-| 10 | **PIOS never autonomously selects the substitute.** | PO decision item 10, verbatim. |
-| 11 | **Passenger consent is mandatory.** | PO decision item 11. |
-| 12 | **Consent is constitutive only once the passenger has positively confirmed — not a notification, not a default, not a timeout-as-acceptance.** | PO decision item 11 combined with this task's own locked OQ-2 answer ("Consent becomes constitutive only after positive confirmation"). |
-| 13 | **Consent must be tied to the exact named substitute, not to "a handoff" in the abstract.** | Direct consequence of #9 + #11/#12 — consenting to an unnamed or different substitute is not consent to *this* handoff. |
-| 14 | **Handoff is single-hop only.** | PO decision item 12. |
-| 15 | **Chained Handoff (a substitute naming a further substitute) is prohibited.** | PO decision item 13. |
-| 16 | **The original committing driver remains a durable, queryable historical fact, never overwritten.** | PO decision items 5, 6. `Assignment.driver` already fills this role today and must continue to, unmodified by Handoff. |
-| 17 | **The current executing driver is separately identifiable from the original committing driver.** | PO decision items 4, 5 — necessarily a *new* fact, since nothing in the existing model carries it (`docs/PIOS_D07_HANDOFF_RECONCILIATION.md` §"Direct technical implication"). |
-| 18 | **`Trip.agreedAmount` is unchanged by Handoff, in every case, unconditionally.** | PO decision item 7; D-06's own capture-once-immutable design (`Trip.kt`, D-06 KDoc) already structurally supports this — Handoff introduces no new write path to this field. |
-| 19 | **`Connection`/`PrimaryConnection` (the passenger's relationship record) is unchanged by Handoff.** | PO decision item 8; ADR-054 Parts 1-4 remain unamended by this work. |
-| 20 | **No fee, split, credit (financial sense), or commission of any kind attaches to a Handoff.** | PO decision item 9, and this task's own locked OQ-3 answer ("PIOS never splits money or participates in payment"). |
-| 21 | **No financial credit accrues to the original driver for having handed off.** | This task's own locked OQ-3 answer, first clause. |
-| 22 | **The original driver retains the historical/origination fact regardless of outcome.** | Locked OQ-3, second clause — restates invariant #16 in attribution terms; see §10. |
-| 23 | **The executing/substitute driver receives execution attribution and stated-earnings attribution for the ride they actually execute.** | Locked OQ-3, third clause — see §10 for the precise boundary of what this does and does not authorize. |
-| 24 | **A passenger's refusal cancels only the proposed Handoff — the existing Assignment/Trip, and the original driver's own commitment to it, are unaffected.** | This task's own locked OQ-4 answer, first two clauses. |
-| 25 | **Passenger refusal alone never terminates the commitment.** | Locked OQ-4, fourth clause — termination, if it happens at all after a refusal, only ever happens through the ordinary, already-built D-01 flow, triggered independently. |
-| 26 | **No Handoff frequency/concentration cap blocks a Handoff before sufficient observable behavior exists to base one on.** | This task's own locked OQ-7 answer — see §10/§15 for what remains D-08/future work versus what this implies structurally now (namely: observability must exist as a capability before any cap logic could ever be layered on top, but no cap logic itself is authorized here). |
+| 5 | **A commitment already `TERMINATED` (or `COMPLETED`) cannot be handed off.** | PO decision items 17-18; mechanically enforced today by `Trip.terminate`'s own guard already excluding these two states from every further transition (`Trip.kt:130-133`). |
+| 6 | **Handoff cannot revive `TERMINATED`.** | PO decision item 18, restated as its own explicit item. |
+| 7 | **Handoff is only reachable while the Trip is `CREATED` or `ARRIVED`.** | PO decision item 19; locked OQ-1. |
+| 8 | **Handoff is forbidden once the Trip has reached `IN_PROGRESS`, `COMPLETED`, or `TERMINATED`.** | Same as #7, restated as the negative form against `TripStatus`'s own five values (`TripStatus.kt:25-30`). |
+| 9 | **The substitute must be explicitly named by the original committing driver.** | PO decision items 11-12 combined with the reconciliation's own principle 3 ("PIOS does not substitute a random driver for the one a client came to," `Proposal.kt:239-243`). |
+| 10 | **PIOS never autonomously selects the substitute.** | PO decision item 11, verbatim. |
+| 11 | **Passenger consent is mandatory.** | PO decision item 13. |
+| 12 | **Consent is constitutive only once the passenger has positively confirmed — not a notification, not a default, not a timeout-as-acceptance.** | PO decision item 13; locked OQ-2. |
+| 13 | **Consent must be tied to the exact named substitute, not to "a handoff" in the abstract.** | Direct consequence of #9 + #11/#12. |
+| 14 | **Handoff is single-hop only.** | PO decision item 15. |
+| 15 | **Chained Handoff (a substitute naming a further substitute) is prohibited.** | PO decision item 16. |
+| 16 | **The original committing driver remains a durable, queryable historical fact, never overwritten.** | PO decision items 4, 33. `Assignment.driver` already fills this role and must continue to, unmodified by Handoff. |
+| 17 | **The current executing driver is separately identifiable from the original committing driver.** | PO decision item 5 — necessarily a *new* fact, since nothing in the existing model carries it. |
+| 18 | **`Trip.agreedAmount` is unchanged by Handoff, in every case, unconditionally.** | PO decision item 3. |
+| 19 | **`Connection`/`PrimaryConnection` is unchanged by Handoff.** | PO decision item 6; ADR-054 Parts 1-4 remain unamended. |
+| 20 | **No fee, split, credit (financial sense), or commission of any kind attaches to a Handoff.** | PO decision items 7-10, 35; locked OQ-3. |
+| 21 | **No financial credit accrues to the original driver for having handed off.** | PO decision item 9; locked OQ-3, first clause. |
+| 22 | **The original driver retains the historical/origination fact regardless of outcome.** | PO decision item 33; locked OQ-3, second clause. |
+| 23 | **The executing/substitute driver receives execution attribution and stated-earnings attribution for the ride they actually execute.** | PO decision item 34; locked OQ-3, third clause. |
+| 24 | **A passenger's refusal cancels only the proposed Handoff — the existing Assignment/Trip, and the original driver's own commitment to it, are unaffected.** | Locked OQ-4, first two clauses. |
+| 25 | **Passenger refusal alone never terminates the commitment.** | PO decision item 20; locked OQ-4, fourth clause. |
+| 26 | **No Handoff frequency/concentration cap blocks a Handoff before sufficient observable behavior exists to base one on.** | PO decision items 30-31; locked OQ-7. |
+| 27 | **The substitute driver must explicitly accept the specific Handoff before the passenger is ever asked to consent.** | PO decision item 14 — **this resolves what the first pass of this document left OPEN** (§5/§7/§15's own prior "whether a separate substitute-acceptance step exists" question). |
+| 28 | **A consent request cannot be constitutive of anything if the named substitute has not themselves accepted first.** | Direct consequence of #27 — the state model (§5) must make this structurally true, not merely policy-true. |
+| 29 | **No artificial Handoff TTL exists.** | PO decision item 27 — **resolves the first pass's own "expiry — OPEN" item.** A `PROPOSED`/`SUBSTITUTE_ACCEPTED` Handoff does not lapse from the mere passage of time. |
+| 30 | **A Handoff remains pending until exactly one of: passenger accepts; passenger refuses; original driver withdraws; or the Commitment enters a state where Handoff is forbidden (Invariant #8).** | PO decision item 28 — the exhaustive, closed list of ways a pending Handoff resolves. |
+| 31 | **The original driver may withdraw a Handoff before passenger consent.** | PO decision item 21 — **resolves the first pass's own "withdrawal — OPEN" item**, for the *before-consent* case. |
+| 32 | **Once the passenger has given constitutive consent, the original driver cannot simply withdraw the Handoff.** | PO decision item 22 — the *after-consent* case, decided the opposite way from #31. Consistent with #12: consent, once constitutive, is not unilaterally reversible by the party who is no longer the executing driver. |
+| 33 | **Before passenger consent is recorded, the system must atomically revalidate the current state** (the Handoff is still `SUBSTITUTE_ACCEPTED`/live, the Trip is still `CREATED`/`ARRIVED`, no termination has intervened). | PO decision item 29 — a concurrency invariant, not merely a data-model one; see §8. |
+| 34 | **The substitute must be an existing, registered driver Identity with a valid driver association.** | PO decision item 23 — **resolves the first pass's own "substitute eligibility — OPEN" item**, in the direction of requiring real, registered eligibility rather than leaving the reference unverified. |
+| 35 | **No PIOS automatic discovery or selection of the substitute is introduced by the eligibility check in #34** — verifying that a named substitute is real and registered is not the same as PIOS choosing one (Invariant #10 stays absolute). | PO decision item 23's own qualifier, read together with items 11-12. |
+| 36 | **A requester cannot arbitrarily supply or bind another driver's identity to any Handoff operation.** | PO decision item 24 — restates, for Handoff specifically, the discipline already enforced elsewhere (§11). |
+| 37 | **A guest passenger may consent to a Handoff without prior registration**, through the existing protected guest context, bound to the exact Commitment/Handoff. | PO decision items 25-26 — **resolves the first pass's own "guest consent — OPEN" item**, in the direction of permitting it (not excluding it), with an explicit binding requirement. |
 
 ---
 
 ## 3. Lifecycle
 
-All four diagrams operate on the **same, single** `Assignment`/`Trip` pair — no diagram below ever produces a second one, per Invariants #3/#4.
+All diagrams operate on the **same, single** `Assignment`/`Trip` pair — none ever produces a second one (Invariants #3/#4).
 
 **Normal (no Handoff):**
 
@@ -62,42 +73,52 @@ Order → Proposal ACCEPTED → Assignment.create + Trip.create
   → Trip: CREATED → ARRIVED → IN_PROGRESS → COMPLETED
 ```
 
-**Handoff, successful (consented before `IN_PROGRESS`):**
+**Handoff, successful (consented before `IN_PROGRESS`) — updated to include the now-locked substitute-acceptance step:**
 
 ```
-Assignment/Trip exists, Trip.status ∈ {CREATED, ARRIVED}   (Invariant #7)
-  → original driver proposes Handoff, naming a substitute   (Invariant #9)
-  → substitute [see §7 — whether a separate substitute-acceptance
-     step exists before passenger consent is OPEN, §15]
-  → passenger consents to the exact named substitute          (Invariants #11-13)
+Assignment/Trip exists, Trip.status ∈ {CREATED, ARRIVED}       (Invariant #7)
+  → original driver proposes Handoff, naming a substitute       (Invariant #9)
+  → substitute driver explicitly accepts this specific Handoff  (Invariant #27 — now required, not optional)
+  → passenger is shown the exact, now-accepted substitute and consents   (Invariants #11-13, #28)
+  → system atomically revalidates state immediately before recording consent   (Invariant #33)
   → existing Assignment/Trip CONTINUES UNCHANGED — same id, same row
-  → the executing driver (a new, separate fact — Invariant #17) becomes the substitute
+  → the executing driver (Invariant #17) becomes the substitute
   → Trip.status proceeds: → IN_PROGRESS → COMPLETED, executed by the substitute
 ```
 
 **Handoff, rejected by passenger:**
 
 ```
-Assignment/Trip exists, Trip.status ∈ {CREATED, ARRIVED}
-  → original driver proposes Handoff, naming a substitute
+... substitute accepts (as above) ...
   → passenger refuses
-  → the Handoff proposal is discarded — no Assignment/Trip mutation of any kind (Invariant #24)
+  → the Handoff resolves to REFUSED — no Assignment/Trip mutation of any kind   (Invariant #24)
   → original driver remains the executing driver, exactly as before the proposal
   → Trip continues its ordinary lifecycle, unaffected
 ```
 
-**Original driver cannot fulfil, after a refused (or never-proposed) Handoff:**
+**Handoff, withdrawn by the original driver before consent — newly locked, not in the first pass:**
+
+```
+Assignment/Trip exists, Handoff PROPOSED or SUBSTITUTE_ACCEPTED, not yet CONSENTED
+  → original driver withdraws                                     (Invariant #31)
+  → the Handoff resolves to WITHDRAWN — no Assignment/Trip mutation of any kind
+  → original driver remains the executing driver
+```
+
+Withdrawal **after** passenger consent is not a valid transition (Invariant #32) — there is no diagram for it because it cannot occur; see §7/§8.
+
+**Original driver cannot fulfil, after a refused, withdrawn, or never-proposed Handoff:**
 
 ```
 Assignment/Trip exists
-  → (optionally) Handoff proposed and refused, per the diagram above
+  → (optionally) Handoff proposed and refused/withdrawn, per the diagrams above
   → original driver independently cannot fulfil the commitment
   → the ORDINARY, ALREADY-BUILT D-01 termination flow is used
     (CommitmentTerminationApplicationService.terminate, initiator = DRIVER)
   → Trip/Assignment: → TERMINATED, via the existing, unmodified mechanism
 ```
 
-This fourth diagram is the locked OQ-4 answer's third clause made explicit: **Handoff never invents a new termination path.** A failed original driver, whether or not a Handoff was ever proposed, ends the commitment exactly the way D-01 already ends it today — `CommitmentTerminationApplicationService.terminate` (`CommitmentTerminationApplicationService.kt:41-117`), unchanged.
+This last diagram is locked OQ-4's third clause made explicit: **Handoff never invents a new termination path.** A failed original driver, whether or not a Handoff was ever proposed, refused, or withdrawn, ends the commitment exactly the way D-01 already ends it today — `CommitmentTerminationApplicationService.terminate` (`CommitmentTerminationApplicationService.kt:41-117`), unchanged.
 
 ---
 
@@ -105,13 +126,11 @@ This fourth diagram is the locked OQ-4 answer's third clause made explicit: **Ha
 
 | Actor | Definition | Can initiate |
 |---|---|---|
-| **Original / committing driver** | The driver named on `Assignment.driver` at `Assignment.create` time — unchanged for the life of the commitment (Invariant #16). | Proposes a Handoff, naming the substitute (Invariant #9). This reuses the existing driver-authorization pattern already live for `AssignmentTerminationController.terminate` (`verified.drv == assignment.driver.driverId`, `AssignmentTerminationController.kt:50`) — the same check, for a different action. |
-| **Current executing driver** | Whoever is, at any given moment, the driver actually expected to execute the ride — `Assignment.driver` until and unless a Handoff has been consented, the substitute thereafter (Invariant #17). Before any Handoff, the original and executing driver are the same person; this is not a separate identity, only a separate *fact*. | N/A — this is a derived role, not an actor who takes actions in their own right; see "current executing driver" as a *fact*, not a party, in §6. |
-| **Substitute driver** | The specific, named driver the original driver proposes. Never chosen by PIOS (Invariant #10). Not verified against `driver-management` beyond the plain reference (reference-not-ownership, per `PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4.4's own note that `toDriver` is "a plain string, never verified against driver-management"). | Whether the substitute must take an affirmative acceptance action before the passenger is even asked is **OPEN — see §7, §15.** If such a step exists, the substitute initiates it; this specification does not assume it exists. |
-| **Passenger** | The order's own passenger, reached the same way every existing passenger-facing check already reaches them — via the order's `ACCEPTED` Proposal's `passengerReference` (`Proposal.passengerReference`, already the pattern `AssignmentController.listAssignmentsHttp`'s passenger branch uses, `AssignmentController.kt:206-207`). | Consents to, or refuses, the exact named substitute (Invariants #11-13, #24-25). |
-| **PIOS** | The system itself. | **Never** initiates or selects a substitute (Invariant #10). Its only role is to enforce the invariants above and record the resulting facts — not to act as a party to the Handoff. |
-
-**Authorization rules not yet groundable in existing architecture** are named, not invented, in §11.
+| **Original / committing driver** | The driver named on `Assignment.driver` at `Assignment.create` time — unchanged for the life of the commitment (Invariant #16). | Proposes a Handoff, naming the substitute (Invariant #9); may withdraw it **only before passenger consent** (Invariant #31/#32). Reuses the existing driver-authorization pattern already live for `AssignmentTerminationController.terminate` (`verified.drv == assignment.driver.driverId`, `AssignmentTerminationController.kt:50`). |
+| **Current executing driver** | Whoever is, at any given moment, the driver actually expected to execute the ride — `Assignment.driver` until and unless a Handoff has been consented, the substitute thereafter (Invariant #17). Before any Handoff, the original and executing driver are the same person; this is not a separate identity, only a separate *fact*. | N/A — a derived role, not an actor who takes actions in their own right (§6). |
+| **Substitute driver** | The specific, named, registered driver (Invariant #34) the original driver proposes. Never chosen by PIOS (Invariant #10, #35). Named on the proposal from the moment of `PROPOSED`, but not yet a party to the commitment until they accept. | **Explicitly accepts (or, symmetrically, could decline) the specific Handoff naming them, before the passenger is ever asked** (Invariant #27) — this is now a required, locked step, not an open question. |
+| **Passenger** | The order's own passenger, reached the same way every existing passenger-facing check already reaches them — via the order's `ACCEPTED` Proposal's `passengerReference` (`AssignmentController.listAssignmentsHttp`'s passenger branch, `AssignmentController.kt:206-207`). May be a guest identity (Invariant #37). | Consents to, or refuses, the exact named, already-substitute-accepted Handoff (Invariants #11-13, #24-25, #28). |
+| **PIOS** | The system itself. | **Never** initiates or selects a substitute (Invariant #10). Verifies the substitute is a real, registered driver with a valid association (Invariant #34) — a check, not a selection. Enforces every invariant above and records the resulting facts; not a party to the Handoff. |
 
 ---
 
@@ -121,19 +140,20 @@ A minimal, purpose-built state set for the Handoff proposal/request itself — *
 
 ```
 PROPOSED
-  → CONSENTED   (passenger accepts the exact named substitute)
-  → REFUSED     (passenger declines)
-  → WITHDRAWN   (original driver withdraws before either resolution — OPEN, see below)
+  → SUBSTITUTE_ACCEPTED   (the named substitute explicitly accepts — now required, Invariant #27)
+      → CONSENTED   (passenger positively confirms — the one and only moment execution changes)
+      → REFUSED     (passenger declines)
+      → WITHDRAWN   (original driver withdraws — only reachable from PROPOSED or SUBSTITUTE_ACCEPTED, never from CONSENTED, Invariant #32)
+  → WITHDRAWN         (original driver withdraws before the substitute has even accepted)
 ```
 
-- **`PROPOSED`**: the original driver has named a substitute. Nothing about the ride has changed yet (mirrors `PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4.4's own "nothing about the ride changes" language for its `PROPOSED` state, reused here because it is exactly accurate under DESIGN 1 too).
-- **`CONSENTED`**: the passenger has positively confirmed the exact named substitute (Invariant #12). This is the one and only moment the executing-driver fact (Invariant #17) changes.
-- **`REFUSED`**: the passenger has declined. Per Invariant #24, this has no effect on the underlying Assignment/Trip.
-- **`WITHDRAWN`**: named for completeness (an original driver may reasonably want to retract a proposal before the passenger answers) but **not decided by any locked PO input** — see §15. If the PO does not want this state, `PROPOSED` simply persists until `CONSENTED`/`REFUSED` or is superseded by the underlying Trip leaving the `CREATED`/`ARRIVED` window (Invariant #7/#8), at which point it becomes moot by construction rather than by an explicit transition.
+Revision from the first pass of this document, recorded rather than silently overwritten:
 
-**Explicitly not modeled, per instruction**: any `EXPIRED`/timeout-based auto-resolution state. Whether a Handoff proposal that receives no passenger answer within some window should lapse is **OPEN — see §15.** No duration, and no expiry mechanism, is assumed here.
-
-**A `SUBSTITUTE_ACCEPTED` (or equivalently named) intermediate state — proposed in `PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4.4, between `PROPOSED` and passenger consent — is deliberately not included above**, because whether the current business flow actually requires a separate substitute-acceptance step before the passenger is asked is itself **OPEN — see §7, §15.** Including it here would invent a decision this specification is not authorized to make.
+- **`SUBSTITUTE_ACCEPTED` is now included** — the first pass deliberately omitted it as an open question ("whether the current business flow actually requires a separate substitute-acceptance step... is itself OPEN"). PO decision item 14 resolves this: the step is required. `PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4.4's own original reasoning for it — "asking the passenger to consent to a driver who has not themselves agreed would produce a consent to something that may evaporate" — is exactly the reasoning this locked decision now ratifies.
+- **`CONSENTED` is only reachable from `SUBSTITUTE_ACCEPTED`, never directly from `PROPOSED`.** This is what makes Invariant #28 ("a consent request cannot be constitutive if the substitute hasn't accepted first") a structural property of the state machine, not merely a policy statement an implementation could accidentally bypass.
+- **`WITHDRAWN` is now included, with an explicit, asymmetric reachability rule**: reachable from `PROPOSED` or `SUBSTITUTE_ACCEPTED` (Invariant #31), **never** from `CONSENTED` (Invariant #32). The first pass left this entirely open ("not decided by any locked PO input"); it is now fully resolved in both directions.
+- **No `EXPIRED` state exists, and none is added.** The first pass already omitted one as open; PO decision item 27 now closes the question definitively in the same direction — **there is no TTL, by design, not by omission.** Invariant #30's own closed list of resolution triggers (accept, refuse, withdraw, or the Trip leaving the eligible window) is exhaustive; a bare timeout is not a fifth trigger.
+- **A Handoff whose underlying Trip leaves `{CREATED, ARRIVED}`** (starts, completes, or is independently terminated) while the Handoff is still `PROPOSED` or `SUBSTITUTE_ACCEPTED` becomes moot by construction, per Invariant #30's own fourth trigger and Invariant #8 — this is not a new explicit state, it is the existing Trip-state boundary doing the same work it already does for every other Handoff-forbidding condition.
 
 ---
 
@@ -143,77 +163,101 @@ PROPOSED
 
 | Information | Why it must exist | Authoritative or derived? | Needs persistence? |
 |---|---|---|---|
-| **Original committing driver** | Answers "who originally accepted the commitment?" (this task's own Critical Attribution Rule). | **Authoritative, already exists**: `Assignment.driver` (`Assignment.kt`). Not a new fact — Handoff must simply never write to it. | Already persisted; no change. |
-| **Current executing driver** | Answers "who actually executed (or will execute) the ride?" — the other half of the Critical Attribution Rule, and the direct implication of Invariant #17. | **Authoritative, does not yet exist.** `PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4.5 names the shape (`Trip.executingDriver`, defaulting to `assignment.driver`, changed only at `CONSENTED`) — this specification records that shape as the one already evaluated and consistent with DESIGN 1, without re-authorizing it as final schema. | Yes — this is the one genuinely new durable fact DESIGN 1 requires. |
-| **Substitute driver (named on the proposal itself)** | The specific driver the original driver proposed, before/regardless of consent. | **Authoritative** for the Handoff proposal's own record; becomes the same value as "current executing driver" only upon `CONSENTED`. | Yes, on the Handoff record itself (§5's state model needs a subject). |
-| **Handoff initiator** | Always the original committing driver under the locked design (Invariant #9) — recorded for audit completeness, not because any other initiator is possible. | Authoritative, but degenerate (always equals `Assignment.driver` at proposal time, per Invariant #16). | Yes, for audit (§12). |
-| **Passenger consent (boolean/fact of `CONSENTED`)** | The constitutive act itself (Invariants #11, #12). | Authoritative. | Yes. |
-| **Consent timestamp** | Required for audit (§12) and for any future observability work (Invariant #26/D-08(a)). | Derived fact of the consent act, but must be stored, not recomputed. | Yes. |
-| **Handoff (proposal) timestamp** | Same reasoning as consent timestamp, for the `PROPOSED` moment. | Derived fact of the proposal act. | Yes. |
-| **Linkage to the existing Assignment/Trip** | Handoff has no independent existence — it always refers to exactly one Assignment (Invariant #1/#2) and, transitively, its one Trip. | Authoritative (a foreign reference), not derived. | Yes — the same `assignmentId`-shaped reference `Trip` itself already uses (`Trip.assignmentId`, `Trip.kt`). |
-| **Single-hop protection** | Invariants #14/#15 must be checkable, not merely honored by convention. | Derived — computable from "does a `CONSENTED` Handoff already exist for this Assignment, and if so, is the *current* proposer the original driver or a previous substitute." | Only if not already derivable from the linkage + initiator fields above; likely no separate field needed, but this is an implementation judgment, not decided here. |
-| **Audit/history of every Handoff attempt** (proposed, consented, refused, and — if authorized — withdrawn) | Item 6 of the PO decision ("Handoff must preserve historical attribution of the original commitment") and §12's own requirement. | Each individual Handoff record is itself the audit trail; per DESIGN 1, **multiple historical Handoff records may exist for one Assignment over its lifetime** (a refused one, followed by a later consented one, for instance) — none of them is ever deleted or overwritten, mirroring this codebase's own "never delete documentation"/"historical evidence" discipline already applied to `Proposal` and `Termination` records elsewhere. | Yes, and specifically append-only. |
+| **Original committing driver** | Answers "who originally accepted the commitment?" | **Authoritative, already exists**: `Assignment.driver`. Handoff must simply never write to it. | Already persisted; no change. |
+| **Current executing driver** | Answers "who actually executed (or will execute) the ride?" (Invariant #17). | **Authoritative, does not yet exist.** `PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4.5 names the shape (`Trip.executingDriver`, defaulting to `assignment.driver`, changed only at `CONSENTED`) — recorded as the evaluated, DESIGN-1-consistent shape, not re-authorized as final schema. | Yes — the one genuinely new durable fact DESIGN 1 requires. |
+| **Substitute driver (named on the proposal)** | The specific driver proposed, before/regardless of acceptance or consent. | **Authoritative** for the Handoff record; becomes the same value as "current executing driver" only upon `CONSENTED`. | Yes. |
+| **Handoff initiator** | Always the original committing driver (Invariant #9) — recorded for audit completeness. | Authoritative, but degenerate. | Yes, for audit (§12). |
+| **Substitute-acceptance fact and timestamp** | The now-required, locked gate before consent can occur (Invariant #27/#28). | Authoritative — a distinct act from proposal or consent. | Yes — newly required by this pass (absent from the first pass's own table). |
+| **Passenger consent (fact of `CONSENTED`)** | The constitutive act itself (Invariants #11, #12). | Authoritative. | Yes. |
+| **Consent timestamp** | Required for audit (§12) and for any future observability work (Invariant #26/D-08(a)). | Derived fact of the consent act, but must be stored. | Yes. |
+| **Handoff (proposal) timestamp** | Same reasoning as consent timestamp, for `PROPOSED`. | Derived fact of the proposal act. | Yes. |
+| **Withdrawal fact and timestamp, if withdrawn** | Newly required by this pass (Invariant #31/#32) — must also record *that it could only have happened pre-consent*, which is structurally guaranteed by §5's own state machine rather than needing a separate stored flag. | Derived fact of the withdrawal act. | Yes. |
+| **Linkage to the existing Assignment/Trip** | Handoff has no independent existence — always refers to exactly one Assignment (Invariant #1/#2) and, transitively, its one Trip. | Authoritative (a foreign reference). | Yes — the same `assignmentId`-shaped reference `Trip` itself already uses. |
+| **Single-hop protection** | Invariants #14/#15 must be checkable. | Derived — computable from "does a `CONSENTED` Handoff already exist for this Assignment, and is the *current* proposer the original driver or a previous substitute." | Likely derivable from the linkage + initiator fields; an implementation judgment, not decided here. |
+| **Eligibility check result (substitute is a real, registered driver with a valid association)** | Invariant #34 must be enforceable at propose time, not merely assumed. | Not itself a stored fact on the Handoff record — a **read-time check** against `driver-management`'s own existing driver registry at proposal time (see §11), the same way `ProposalApplicationService.handle` already checks availability for an ordinary Proposal. | No new field on the Handoff record itself required for this — the check is a precondition, not a stored attribute. |
+| **Audit/history of every Handoff attempt** (proposed, substitute-accepted, consented, refused, or withdrawn) | PO decision item 6 ("preserve historical attribution") and §12's own requirement. | Each individual Handoff record is itself the audit trail; per DESIGN 1, **multiple historical Handoff records may exist for one Assignment over its lifetime** — none ever deleted or overwritten, mirroring `Proposal`/`Termination`'s own existing historical-evidence discipline. | Yes, and specifically append-only. |
 
-**Not decided here, and explicitly out of this section's own scope per instruction**: table name, column names, migration numbering, which module owns the Handoff record (the reconciliation's own §"Direct technical implication" already names Dispatch as the natural owner, consistent with `PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4.3's own reasoning — restated here as inherited context, not re-decided).
+**Not decided here, and explicitly out of this section's own scope**: table name, column names, migration numbering, exact module ownership (Dispatch is the natural owner per the reconciliation's own reasoning, restated as inherited context, not re-decided).
 
 ---
 
 ## 7. API Contract
 
-**Described, not implemented.** No endpoint path, HTTP verb, or request/response shape below is authorized as final — each entry specifies only the *operation's own contract*, per instruction.
+**Described, not implemented.** No endpoint path, HTTP verb, or request/response shape below is authorized as final.
 
 ### Operation: Propose Handoff
 
 - **Actor**: original committing driver.
 - **Intent**: name a substitute for the existing, live commitment.
 - **Input**: the target Assignment (or its Trip) identity; the substitute driver's identifier.
-- **Server-derived fields**: the initiator (from the verified session, never client-supplied — mirrors `AssignmentTerminationController.terminate`'s own pattern of deriving the driver from `verified.drv`, never trusting a request body field for it); the proposal timestamp.
-- **Expected result**: a new Handoff record in `PROPOSED` state (Invariant #9's precondition — the caller must be `Assignment.driver`).
-- **Authorization**: caller's `verified.drv` must equal `Assignment.driver.driverId` — the existing driver-check pattern, reused (§4).
-- **Idempotency**: **OPEN** — whether a repeated identical proposal (same substitute, same assignment) is idempotent-safe or rejected as a duplicate is not decided by any locked input; the existing codebase's own precedent (`TerminateCommitmentCommand.requestId`-based idempotency, `CommitmentTerminationApplicationService.kt:53-61`) is a plausible shape but is not itself authorized here.
-- **Forbidden conditions**: Trip not in `{CREATED, ARRIVED}` (Invariant #7/#8); an existing non-terminal Handoff already pending for this Assignment (Invariant #14's single-hop enforcement extends to "no second live proposal," per §8 race #4); caller is not `Assignment.driver`; the named substitute equals the original driver (a degenerate, meaningless handoff — not explicitly named in any locked decision, flagged here as an obvious edge case implementation must reject, not as a new PO decision).
+- **Server-derived fields**: the initiator (from the verified session, never client-supplied); the proposal timestamp.
+- **Expected result**: a new Handoff record in `PROPOSED` state.
+- **Authorization**: caller's `verified.drv` must equal `Assignment.driver.driverId` (§4).
+- **Eligibility check** *(newly required by this pass — resolves the first pass's own "substitute eligibility — OPEN" item)*: the named substitute must resolve to a real, registered driver Identity with a valid driver association (Invariant #34) — rejected outright (not merely accepted as an unverified string) if it does not. This is a verification, never a PIOS-side selection (Invariant #35).
+- **Idempotency**: reclassified in this pass from an open PO question to an ordinary implementation detail — no product decision is required to choose between "absorb a repeated identical request" and "reject as a duplicate"; the existing codebase's own precedent (`TerminateCommitmentCommand.requestId`-based idempotency, `CommitmentTerminationApplicationService.kt:53-61`) is available to the implementing team without further PO input.
+- **Forbidden conditions**: Trip not in `{CREATED, ARRIVED}` (Invariant #7/#8); an existing non-terminal Handoff already pending for this Assignment (Invariant #14); caller is not `Assignment.driver`; the named substitute equals the original driver; the named substitute fails the eligibility check above.
+
+### Operation: Substitute Acceptance — **now a required operation, resolved from the first pass's OPEN item**
+
+- **Actor**: the named substitute driver.
+- **Intent**: explicitly accept this specific Handoff (Invariant #27).
+- **Input**: the Handoff proposal's own identity.
+- **Server-derived fields**: acceptance timestamp; the accepting identity, from the verified session, never client-supplied.
+- **Expected result**: the Handoff transitions `PROPOSED → SUBSTITUTE_ACCEPTED`. Nothing about the ride itself changes yet (mirrors the same "nothing changes yet" property `PROPOSED` already has).
+- **Authorization**: caller's `verified.drv` must equal the Handoff's own named substitute driver id — a **new** authorization pattern this specification names (§11), since no existing check compares a caller against "the substitute named on someone else's proposal."
+- **Forbidden conditions**: the Handoff is not `PROPOSED`; caller is not the named substitute; the underlying Trip has left `{CREATED, ARRIVED}` since the proposal (a race — §8).
 
 ### Operation: Passenger Consent
 
-- **Actor**: passenger.
-- **Intent**: positively confirm the exact named substitute (Invariant #12/#13).
-- **Input**: the Handoff proposal's own identity; confirmation that the passenger has seen and accepts the *named* substitute (not a bare "yes" disconnected from which substitute — the input must be bound to the specific proposal, closing the risk of a stale consent being replayed against a *later*, different proposal for the same Assignment).
+- **Actor**: passenger (including a guest passenger, Invariant #37).
+- **Intent**: positively confirm the exact, already-substitute-accepted Handoff (Invariant #12/#13/#28).
+- **Input**: the Handoff proposal's own identity; confirmation bound to that specific proposal (not a bare "yes" disconnected from which substitute — closing the risk of a stale consent being replayed against a later, different proposal for the same Assignment).
 - **Server-derived fields**: consent timestamp; the consenting identity, from the verified session, never client-supplied.
+- **Precondition, newly explicit in this pass**: the Handoff must already be `SUBSTITUTE_ACCEPTED` (Invariant #28) — consenting to a merely-`PROPOSED` Handoff is rejected outright, not merely discouraged.
+- **Atomic revalidation, newly required (Invariant #33)**: immediately before recording consent, under the same order lock, the system must re-confirm the Handoff is still `SUBSTITUTE_ACCEPTED` and the Trip is still `{CREATED, ARRIVED}` — not merely rely on whatever was true when the passenger's own screen last polled.
 - **Expected result**: the Handoff transitions to `CONSENTED`; the executing-driver fact (§6) updates to the substitute; the original Assignment/Trip is otherwise untouched (Invariants #3, #4, #18, #19).
-- **Authorization**: caller's `verified.sub` must equal the order's own Proposal's `passengerReference.passengerId` — the existing passenger-check pattern, reused (§4). Self-only: a passenger may only consent on their own order, never another passenger's.
-- **Idempotency**: a repeated consent to an already-`CONSENTED` Handoff should be a safe no-op, not an error — consistent with this codebase's general precedent of idempotent resolution endpoints (e.g., `POST /v1/connections`'s own 201/200 idempotency, ADR-054 Part 4). Not itself re-authorized here as a specific status code.
-- **Forbidden conditions**: the Handoff is not `PROPOSED` (already `CONSENTED`/`REFUSED`, or does not exist); the underlying Trip has left `{CREATED, ARRIVED}` since the proposal was made (a race — see §8 race #5); caller is not the order's own passenger.
+- **Authorization**: caller's `verified.sub` must equal the order's own Proposal's `passengerReference.passengerId` (§4). Self-only. Guest identities are not excluded (Invariant #37) — the same check applies regardless of whether the identity is phone-verified.
+- **Idempotency**: a repeated consent to an already-`CONSENTED` Handoff is a safe no-op, consistent with this codebase's general precedent for idempotent resolution endpoints.
+- **Forbidden conditions**: the Handoff is not `SUBSTITUTE_ACCEPTED`; the underlying Trip has left `{CREATED, ARRIVED}` since substitute acceptance (§8); caller is not the order's own passenger.
 
 ### Operation: Passenger Refusal
 
 - **Actor**: passenger.
-- **Intent**: decline the exact named substitute (Invariant #24).
+- **Intent**: decline the exact named, substitute-accepted Handoff (Invariant #24).
 - **Input**: the Handoff proposal's own identity.
-- **Server-derived fields**: refusal timestamp; the refusing identity, from the verified session.
-- **Expected result**: the Handoff transitions to `REFUSED`; the Assignment/Trip is completely unaffected (Invariant #24/#25) — no cancellation, no termination, no state change to anything but the Handoff record itself.
+- **Server-derived fields**: refusal timestamp; the refusing identity.
+- **Expected result**: the Handoff transitions to `REFUSED`; the Assignment/Trip is completely unaffected (Invariant #24/#25).
 - **Authorization**: same passenger-check pattern as consent.
-- **Forbidden conditions**: same as consent's "not `PROPOSED`" case.
+- **Forbidden conditions**: the Handoff is not `PROPOSED` or `SUBSTITUTE_ACCEPTED`.
 
-### Operation: Substitute Acceptance — **OPEN, not specified as a required operation**
+### Operation: Withdraw Handoff — **newly specified, resolved from the first pass's OPEN item**
 
-`PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4.4 proposes a `SUBSTITUTE_ACCEPTED` step *before* the passenger is asked, reasoning that "asking the passenger to consent to a driver who has not themselves agreed would produce a consent to something that may evaporate." **This specification does not assume that step exists**, because no locked PO decision confirms or declines it — see §15. If the Product Owner confirms it is required, it would be a fourth operation, actor = substitute driver, gating the passenger-consent operation above on its own prior `CONSENTED`-equivalent state; until then, it is named here only as an explicit open item, not designed.
+- **Actor**: original committing driver.
+- **Intent**: retract a Handoff before it becomes irreversible.
+- **Input**: the Handoff proposal's own identity.
+- **Server-derived fields**: withdrawal timestamp; the withdrawing identity (must match the proposal's own initiator).
+- **Expected result**: the Handoff transitions to `WITHDRAWN`; the Assignment/Trip is completely unaffected.
+- **Authorization**: caller's `verified.drv` must equal `Assignment.driver.driverId` (the same check as Propose).
+- **Forbidden conditions, exact and locked (Invariant #31/#32)**: the Handoff is already `CONSENTED` — withdrawal after constitutive consent is never permitted, unconditionally. Withdrawal from `PROPOSED` or `SUBSTITUTE_ACCEPTED` is permitted.
 
 ---
 
 ## 8. Concurrency
 
-All races below assume the existing D-01 locking discipline is reused unmodified: `PostgreSQLOrderGuard.lock(order)` (`PostgreSQLOrderGuard.kt:9-17`), taken first, inside the same transaction, before any Assignment/Trip/Handoff row lock — exactly the same guard `CommitmentTerminationApplicationService.terminate` (line 52) and `DispatchAssignmentApplicationService.completeAssignment` (line 320) already share today. Handoff introduces no new lock primitive; it must participate in this same one.
+All races assume the existing D-01 locking discipline is reused unmodified: `PostgreSQLOrderGuard.lock(order)` (`PostgreSQLOrderGuard.kt:9-17`), taken first, inside the same transaction, before any Assignment/Trip/Handoff row lock. Handoff introduces no new lock primitive.
 
 | # | Race | Lock boundary | Expected winner | Final valid state | Rejected operation |
 |---|---|---|---|---|---|
-| 1 | **Two concurrent Handoff proposals for the same Assignment** | Both acquire `orderGuard.lock(order)` before checking for an existing non-terminal Handoff. | Whichever acquires the order lock first. | Exactly one `PROPOSED` Handoff exists for the Assignment. | The second proposal — rejected once the first's existence is visible under lock (mirrors `Trip.create`'s own "in-memory check alone loses the race" lesson, `Trip.kt:49-54` — a persistent uniqueness constraint on "at most one non-terminal Handoff per Assignment" is the backstop, same two-layer pattern). |
-| 2 | **Handoff proposal vs. passenger refusal of a *different*, already-superseded proposal** | Both under the same order lock; refusal targets a specific Handoff id, not "the current one" implicitly. | N/A — not actually a race once refusal is bound to a specific proposal id (§7's own consent/refusal input design already closes this). | The targeted proposal resolves to `REFUSED`; any newer, different `PROPOSED` Handoff for the same Assignment is unaffected. | A refusal request naming a stale Handoff id that is no longer the live one — rejected as a not-found/conflict, not silently applied to the wrong proposal. |
-| 3 | **Handoff (proposal or consent) vs. D-01 termination** | Both acquire `orderGuard.lock(order)` first — same shared lock D-01 already uses. | Whichever acquires the lock first. | If termination wins: Trip → `TERMINATED`; any pending Handoff for that Assignment becomes moot (Invariant #6 forbids ever consenting it afterward — must be checked under the same lock at consent time, not only at proposal time, since the proposal may have been made before termination started). If Handoff-consent wins: executing driver updates; a subsequent termination attempt proceeds exactly as D-01 already handles a live commitment. | Whichever operation observes the order already resolved the other way loses, cleanly (mirrors `CommitmentTerminationPostgreSQLTest.kt`'s own "single first committer" proof for completion-vs-termination, unmodified, now extended by analogy to Handoff-vs-termination). |
-| 4 | **Handoff consent vs. termination, specifically at the consent moment** | Same order lock, re-checked at consent time (not only at proposal time) — this is the critical implementation requirement Invariant #6 imposes: a `PROPOSED` Handoff whose underlying Trip is terminated *after* the proposal but *before* consent must not be consentable. | Termination, if it reaches the lock first. | Trip → `TERMINATED`; the Handoff, if not yet consented, must be foreclosed (transitioned to some terminal-negative state, or simply rejected at consent time — exact mechanism is an implementation detail, not decided here, but the *outcome* — consent must fail — is Invariant #6 itself, not optional). | The consent operation, if it arrives after termination has already committed. |
-| 5 | **Handoff consent vs. Trip start (`arrive`→`start`, i.e., entering `IN_PROGRESS`)** | Same order lock. Invariant #7/#8 means consent must re-verify `Trip.status ∈ {CREATED, ARRIVED}` under the very same lock it uses to write the executing-driver change — not merely at proposal time. | Whichever operation (start, or consent) acquires the lock first. | If `start` wins: Trip → `IN_PROGRESS`; the pending Handoff must then be rejected at consent time (Invariant #8), not silently honored. If consent wins: executing driver updates while still `CREATED`/`ARRIVED`; `start` then proceeds normally, now understood as the substitute's own ride-progress action (§11's authorization-check implication). | Consent, if `start` already committed first. |
-| 6 | **Stale consent** (a consent request arriving for a Handoff that has already resolved — `CONSENTED` by an earlier, duplicate request, or `REFUSED`) | Read-then-check under the order lock, same as every other resolution here. | The first resolution to commit. | The Handoff's own terminal state, set exactly once. | A second, stale consent/refusal request — idempotent no-op if it matches the already-committed outcome (§7's own idempotency note), rejected as a conflict if it contradicts it (e.g., consent arriving after refusal already committed). |
-| 7 | **Chained Handoff attempt** (a substitute, once `CONSENTED`, tries to propose their own Handoff) | Same order lock; the propose-operation's own authorization check (§7) must compare the caller against the *original* `Assignment.driver`, not the current executing driver, to enforce Invariant #15. | N/A — not a race, a straightforward rejection: the caller (the substitute) is never `Assignment.driver`, so the existing driver-authorization check (§4, §7) already rejects them by construction, with no new lock logic required beyond re-using the unchanged `Assignment.driver` comparison. | Assignment/Trip execution stays with the already-consented substitute; no chained Handoff record is ever created. | The substitute's own propose-Handoff attempt — rejected at the authorization layer, before any lock contention is even relevant. |
-| 8 | **The same substitute proposed twice** (either by the same original driver reissuing the proposal, or — degenerate — as a retry) | Same as race #1 (two concurrent/duplicate proposals), plus §7's own OPEN idempotency question for the propose operation specifically. | Depends on whether propose is specified as idempotent (OPEN, §7) or rejected as a duplicate. | Exactly one live `PROPOSED` Handoff naming that substitute exists at any time, regardless of how many times the original driver issued the request. | The second, duplicate call — either absorbed idempotently or rejected as a conflict; which of the two is not decided here (§7). |
+| 1 | **Two concurrent Handoff proposals for the same Assignment** | Both acquire `orderGuard.lock(order)` before checking for an existing non-terminal Handoff. | Whichever acquires the lock first. | Exactly one non-terminal Handoff exists for the Assignment. | The second proposal — rejected once the first's existence is visible under lock; a persistent uniqueness constraint on "at most one non-terminal Handoff per Assignment" is the backstop, the same two-layer pattern already used for `trips.assignment_id UNIQUE`. |
+| 2 | **Consent arriving before substitute acceptance has committed** | Both under the same order lock; consent's own precondition check (§7) requires `SUBSTITUTE_ACCEPTED`. | Whichever commits first. | If acceptance wins: consent then proceeds normally. If consent somehow arrives first (client-side race, not a true server race since the passenger cannot even be shown a substitute who hasn't accepted per §13): rejected outright by the precondition check (Invariant #28) — this is a **hard, structural rejection, not a timing race** the server needs to arbitrate, since `SUBSTITUTE_ACCEPTED` is a strict precondition, not a best-effort ordering. | A consent request for a Handoff still in `PROPOSED`. |
+| 3 | **Handoff (any stage) vs. D-01 termination** | Both acquire `orderGuard.lock(order)` first — the same shared lock D-01 already uses. | Whichever acquires the lock first. | If termination wins: Trip → `TERMINATED`; any pending Handoff for that Assignment becomes moot (Invariant #6 forbids ever consenting it afterward — re-checked at consent time under the same lock, per Invariant #33). If Handoff-consent wins: executing driver updates; a subsequent termination attempt proceeds exactly as D-01 already handles a live commitment. | Whichever operation observes the order already resolved the other way, cleanly (mirrors `CommitmentTerminationPostgreSQLTest.kt`'s own "single first committer" proof for completion-vs-termination, extended by analogy). |
+| 4 | **Handoff consent vs. termination, specifically at the atomic-revalidation moment** | Same order lock, re-checked at consent time per Invariant #33 — not merely at proposal or substitute-acceptance time. | Termination, if it reaches the lock first. | Trip → `TERMINATED`; the Handoff, if not yet consented, is foreclosed at the revalidation step — consent must fail (Invariant #6/#33, not optional). | The consent operation, if it arrives after termination has already committed. |
+| 5 | **Handoff consent vs. Trip start (entering `IN_PROGRESS`)** | Same order lock. Invariant #33's own atomic revalidation re-verifies `Trip.status ∈ {CREATED, ARRIVED}` at the exact moment consent is recorded, not merely at proposal or acceptance time. | Whichever operation (start, or consent) acquires the lock first. | If `start` wins: Trip → `IN_PROGRESS`; the pending Handoff is rejected at the revalidation step (Invariant #8). If consent wins: executing driver updates while still `CREATED`/`ARRIVED`; `start` then proceeds normally, understood as the substitute's own ride-progress action. | Consent, if `start` already committed first. |
+| 6 | **Stale consent/refusal/withdrawal** (a request arriving for a Handoff that has already resolved) | Read-then-check under the order lock, same as every other resolution here. | The first resolution to commit. | The Handoff's own terminal state, set exactly once. | A second, stale request — idempotent no-op if it matches the already-committed outcome, rejected as a conflict if it contradicts it. |
+| 7 | **Chained Handoff attempt** (a substitute, once `CONSENTED`, tries to propose their own Handoff) | Same order lock; the propose-operation's own authorization check must compare the caller against the *original* `Assignment.driver`, not the current executing driver (Invariant #15). | N/A — not a race, a straightforward rejection: the caller (the substitute) is never `Assignment.driver`. | Execution stays with the already-consented substitute; no chained Handoff record is ever created. | The substitute's own propose-Handoff attempt — rejected at the authorization layer. |
+| 8 | **The same substitute proposed twice** | Same as race #1, plus §7's own reclassified (non-PO-blocking) idempotency question for the propose operation. | Depends on the implementation's own idempotency choice (§7 — no longer a PO decision). | Exactly one live Handoff naming that substitute exists at any time. | The second, duplicate call — absorbed or rejected per the implementation's own choice. |
+| 9 | **Withdrawal racing consent — newly named in this pass (Invariant #32)** | Both under the same order lock. | Whichever commits first. | If consent wins first: the Handoff is `CONSENTED`; a subsequent withdrawal attempt is rejected outright (Invariant #32 is unconditional, not merely first-committer-wins — even a withdrawal that would have "won" a naive race must still fail once consent has actually committed). If withdrawal wins first: the Handoff is `WITHDRAWN`; a subsequent consent attempt fails the `SUBSTITUTE_ACCEPTED`-or-live precondition. | Withdrawal, specifically, whenever it targets an already-`CONSENTED` Handoff — this is the one race in this table where the *locked business rule itself* (not merely lock ordering) forbids one outcome regardless of timing. |
+| 10 | **Substitute acceptance racing withdrawal or Trip-state change** | Same order lock. | Whichever commits first. | If withdrawal/termination/start wins: the acceptance attempt is rejected (the Handoff is no longer `PROPOSED`). If acceptance wins: the Handoff reaches `SUBSTITUTE_ACCEPTED` normally. | The acceptance operation, if it arrives after the Handoff has already left `PROPOSED` for any reason. |
 
 No test is written or implemented for any of the above, per instruction.
 
@@ -221,67 +265,70 @@ No test is written or implemented for any of the above, per instruction.
 
 ## 9. Events
 
-**No event contract is changed by this document.** This section distinguishes what already exists from what a future implementation would need to add — a gap list, not a schema change.
+**No event contract is changed by this document.**
 
-**Existing events that can be reused, unmodified:**
-- `CommitmentTerminated` (`CommitmentTerminationApplicationService.kt:146-163`) — reused exactly as-is for the "original driver cannot fulfil" lifecycle path (§3's fourth diagram); Handoff introduces no variant of this event.
-- `AssignmentCompleted`/`TripCompleted` — reused exactly as-is for a Handoff-executed ride's own completion; per Invariant #18, `payload.statedPrice` (D-06's own `agreedAmount`-sourced field, `DispatchAssignmentApplicationService.kt:325-334`) is completely unaffected by which driver executed the ride, so no change to this payload is required *by Handoff itself* — see below for the one open question this raises for Driver Management's own consumption, which is an attribution question (§10), not an event-contract one.
+**Existing events reused, unmodified:**
+- `CommitmentTerminated` — reused exactly as-is for the "original driver cannot fulfil" lifecycle path (§3).
+- `AssignmentCompleted`/`TripCompleted` — reused exactly as-is; per Invariant #18, `payload.statedPrice` is completely unaffected by which driver executed the ride.
 
-**New Handoff-specific events that would be required** (naming, not authorizing, per `PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4.6's own already-evaluated minimum, restated here as inherited, not re-decided, context):
-- A `HandoffProposed`-shaped fact, emitted at `PROPOSED`. Per that same evaluation, no server-side consumer is obviously required initially — the substitute driver's own app could learn of it by the existing poll pattern (`ADR-071`), not a new push mechanism.
-- A `HandoffConsented`-shaped fact, emitted at `CONSENTED` — this is the one event that *must* exist as a real, durable domain fact, because it is the moment the executing driver changes (Invariant #17), and it is what any future attribution-consuming code (§10) would need to key off of.
-- A `HandoffRefused`-shaped fact (or a shared "resolved negatively" shape covering refusal and, if authorized, withdrawal) — for audit (§12), not because any consumer is yet known to need it.
+**New Handoff-specific events that would be required** (naming, not authorizing):
+- `HandoffProposed`, emitted at `PROPOSED`.
+- `HandoffSubstituteAccepted`, emitted at `SUBSTITUTE_ACCEPTED` — **new in this pass**, since the state itself is newly locked (§5); this is the fact that unlocks the passenger-consent step and so is a real, necessary domain event, not merely audit.
+- `HandoffConsented`, emitted at `CONSENTED` — the moment the executing driver changes; the one event any future attribution-consuming code (§10) would key off of.
+- `HandoffRefused` and `HandoffWithdrawn` (or one shared "resolved negatively" shape covering both) — for audit (§12).
 
-**Payload information required**, at minimum, for `HandoffConsented` specifically: the Assignment/Trip identity; the original driver; the substitute (now executing) driver; the consent timestamp. No currency, fee, or financial field of any kind (Invariant #20).
+**Payload information required**, at minimum, for `HandoffConsented`: the Assignment/Trip identity; the original driver; the substitute (now executing) driver; the consent timestamp. No currency, fee, or financial field of any kind (Invariant #20).
 
-**`eventVersion` implication, flagged not implemented**: if attribution work (§10) ever requires `AssignmentCompleted`/`TripCompleted` to carry an *executing*-driver-distinct-from-`driverId` field (the same additive-field shape D-06 already used for `statedPrice`, and `PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4.6 itself names as the open "consumer question that must not be guessed"), that would be an **additive field, `eventVersion` staying at its current value** (1) — following the exact precedent ADR-065/D-06 already established (`DispatchAssignmentApplicationService.kt`'s own `envelopeFor` KDoc). This is flagged as a likely future need, not implemented, and not itself authorized here — it depends entirely on §10's own still-open attribution question.
+**`eventVersion` implication, flagged not implemented**: if attribution work (§10) ever requires `AssignmentCompleted`/`TripCompleted` to carry an executing-driver-distinct-from-`driverId` field, that would be an **additive field, `eventVersion` staying at its current value (1)** — following the exact precedent ADR-065/D-06 already established. Flagged as a likely future need, not implemented, and not itself authorized here.
 
 ---
 
 ## 10. Attribution
 
-Integrates the D-08 boundary (`PIOS_FINAL_PRODUCT_OWNER_DECISION_BRIEF.md:1763-1774`) with this task's own locked OQ-3 answer, without implementing either.
+Integrates the D-08 boundary (`PIOS_FINAL_PRODUCT_OWNER_DECISION_BRIEF.md:1763-1774`) with the now-locked OQ-3/attribution decisions, without implementing either.
 
-**What is locked (this task's OQ-3 answer, verbatim in substance):**
-- No financial credit/reward for the original driver for having handed off (Invariant #21).
-- The original driver retains the historical/origination fact regardless (Invariant #22) — i.e., "who committed to this order" is never erased or reassigned, matching D-08(b)'s own "relationship-facing facts credit the committing driver" half.
-- The executing/substitute driver receives **execution attribution and stated-earnings attribution** for the ride they actually execute (Invariant #23) — this newly, explicitly resolves the *metric*-attribution half of OQ-3/D-08(b) that the prior reconciliation pass (`docs/PIOS_D07_HANDOFF_RECONCILIATION.md`'s own updated OQ matrix) had found still open: it is now locked as "executing driver," matching D-08(b)'s own recommended split exactly, on both halves.
-- PIOS never splits money or participates in payment of any kind (Invariant #20) — no commission, no fee, on either driver, for either half of the attribution.
+**What is locked:**
+- No financial credit/reward for the original driver (Invariant #21).
+- The original driver retains the historical/origination fact regardless (Invariant #22, PO decision item 33) — matching D-08(b)'s own "relationship-facing facts credit the committing driver" half.
+- The executing/substitute driver receives **execution attribution and stated-earnings attribution** for the ride they actually execute (Invariant #23, PO decision item 34) — fully matching D-08(b)'s own recommended split, on both halves.
+- PIOS never splits or transfers money in connection with a Handoff, in any form (Invariant #20, #35, PO decision item 35).
 
 **What this does NOT authorize, per instruction ("Do not implement D-08 caps or scoring"):**
-- No implementation of `totalStatedEarnings`/`completedRidesCount` re-routing logic (Driver Management's own existing derived-metric machinery, `AssignmentCompletedApplicationService.kt`, D-02/D-06-bound) is designed or built here. This section records *which* driver the future metric should credit once built, not how.
-- No cap, threshold, or scoring mechanism of any kind (D-08(a)'s own remaining open half — see §14, §15).
-- No new business-metric concept beyond the two that already exist (`totalStatedEarnings`, `completedRidesCount`) is proposed — attribution here means "which existing driver's existing counters move," not a new counter.
+- No implementation of `totalStatedEarnings`/`completedRidesCount` re-routing logic is designed or built here — this section records *which* driver the future metric should credit once built, not how.
+- No cap, threshold, or scoring mechanism of any kind (D-08(a)'s own remaining open half — see §14/§15).
+- No new business-metric concept beyond the two that already exist is proposed.
 
-**Genuine open question this section surfaces, not decided by OQ-3's own locked wording:** whether the *original* driver's own existing counters (e.g. a distinct "facilitated" or "handed off" count, separate from `completedRidesCount`) should reflect anything at all about having facilitated a handoff. OQ-3's locked answer says the original driver "retains the historical/origination fact" but does not say whether that fact is ever surfaced as a *counted* metric anywhere (as opposed to simply being queryable per-Assignment, per §12's own audit requirement). This is named in §15 as a residual, narrower attribution question, distinct from — and not reopening — the already-locked executing/committing split.
+**Genuinely still open, narrower than the now-locked split itself**: whether the original driver's own facilitation fact should ever surface as a *counted* metric (distinct from simply being queryable per-Assignment) — named as future, non-blocking work in §15, per this task's own explicit "Known non-blocking future work" list.
 
 ---
 
 ## 11. Security
 
-Authorization invariants, grounded only in what already exists (`SessionTokenVerifier.VerifiedToken(sub: String, drv: String?)`, `SessionTokenVerifier.kt`).
+Authorization invariants, grounded in what already exists (`SessionTokenVerifier.VerifiedToken(sub: String, drv: String?)`, `SessionTokenVerifier.kt`) plus the eligibility/guest decisions newly locked in this pass.
 
-- **A requester cannot choose an arbitrary driver identity to act as.** Every operation in §7 derives the acting identity from the verified session (`verified.sub`/`verified.drv`), never from a client-supplied field — the same discipline already governing `AssignmentTerminationController.terminate`'s own `TerminateAssignmentRequest` (it accepts no driver-identity field at all; `verified.drv` is the only source, `AssignmentTerminationController.kt:44,50`). Handoff's propose/consent/refuse operations must follow the identical pattern.
-- **The substitute must correspond to a real, eligible identity — but "eligible" is not further defined by any locked decision.** `DriverReference` is, and per `PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4.4's own already-evaluated note, remains "a plain string, never verified against driver-management" (reference-not-ownership, `ADR-005`/`ADR-019`). Whether Handoff should be the first place this reference *is* cross-checked (e.g., against `DriverAvailabilityRepository`, the way `ProposalApplicationService.handle` already gates proposing to an unavailable driver, `ProposalApplicationService.kt:137-149`) is **OPEN — see §15.**
+- **A requester cannot choose an arbitrary driver identity to act as.** Every operation in §7 derives the acting identity from the verified session (`verified.sub`/`verified.drv`), never from a client-supplied field — the same discipline already governing `AssignmentTerminationController.terminate` (`AssignmentTerminationController.kt:44,50`). PO decision item 24 restates this explicitly for Handoff.
+- **The substitute must correspond to a real, eligible, registered driver Identity with a valid driver association — resolved, no longer OPEN.** PO decision item 23 requires this outright: unlike the ordinary `DriverReference`'s existing "plain string, never verified" convention (`PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4.4), Handoff's own propose operation must actually check the named substitute against `driver-management`'s own registered-driver data before accepting the proposal (§7). This is a *verification*, not a selection — it never causes PIOS to choose or suggest a substitute (Invariant #35).
+- **Substitute self-authorization for the acceptance step — a genuinely new pattern (§7).** `verified.drv` must equal the Handoff's own named substitute driver id. No existing endpoint compares a caller against "the substitute named on someone else's proposal"; this is the one authorization shape Handoff introduces that has no direct precedent elsewhere in the codebase, named explicitly so it is not silently assumed to already exist.
 - **Passenger consent must be self-only, authenticated.** `verified.sub == proposal.passengerReference.passengerId` — the exact, already-live pattern (`AssignmentController.kt:206-207`), reused unmodified.
-- **One actor cannot impersonate another party.** Covered by the two bullets above — every check compares the verified session's own identity, never a request-body-asserted one, against the specific role being exercised.
-- **Guest handling.** No guest-specific restriction is known to exist anywhere in the current identity model beyond the standard identity-matching check above (guest vs. phone-verified identities are distinguished elsewhere, per this session's own prior D-03 closure work, but nothing in that work or in any Handoff-adjacent document restricts a guest passenger's ability to consent to something their own session is otherwise authorized to act on). **If the Product Owner wants guest passengers specifically excluded from Handoff consent, that is a new rule, not inferable from existing architecture — flagged as OPEN, §15, rather than assumed either way.**
-- **Server derives every actor identity.** Restated once more because it is the single rule every operation in §7 depends on: no operation accepts a client-asserted driver id, passenger id, or substitute id as its own authorization basis — only as *content* (e.g., "which substitute is being named"), never as *proof of who is asking*.
+- **Guest passengers may consent — resolved, no longer OPEN.** PO decision items 25-26: a guest (non-phone-verified) passenger identity may consent through the existing protected guest context, on the same authorization terms as any other passenger session (`verified.sub` matching), **provided the consent is bound to the exact Commitment/Handoff** — i.e., the same anti-replay/anti-cross-binding discipline §7's own consent operation already requires (the input must name the specific Handoff, never "consent to whatever is pending for this session"), applied without exception to a guest session too.
+- **One actor cannot impersonate another party.** Covered by every bullet above — every check compares the verified session's own identity, never a request-body-asserted one, against the specific role being exercised.
+- **Server derives every actor identity.** No operation accepts a client-asserted driver id, passenger id, or substitute id as its own authorization basis — only as *content*, never as *proof of who is asking*.
 
 ---
 
 ## 12. Observability / Audit
 
-Every Handoff attempt (proposed, consented, refused, and — if authorized, §15 — withdrawn) must be durably recorded, per §6's own append-only requirement, sufficient to answer, for any Assignment, at any later time:
+Every Handoff attempt (proposed, substitute-accepted, consented, refused, or withdrawn) must be durably recorded, per §6's own append-only requirement, sufficient to answer, for any Assignment, at any later time:
 
-- Who initiated the Handoff (always the original committing driver, per Invariant #9 — recorded anyway, for audit completeness rather than ambiguity).
+- Who initiated the Handoff (always the original committing driver).
 - Who was the original executor/committer before this Handoff (`Assignment.driver`, unchanged, always available).
+- Who was named as the substitute, and whether/when they accepted.
 - Who became the substitute, if the Handoff was consented.
-- Who consented (the passenger identity, from the verified session at consent time) — or who refused.
-- The proposal timestamp and the resolution (consent/refusal) timestamp.
-- The final result (consented-and-executing, refused-and-discarded, or — if authorized — withdrawn).
+- Who consented — or who refused, or who withdrew (and, per Invariant #32, withdrawal is only ever recordable *before* consent, never after — the audit trail itself is a witness to this invariant holding).
+- The proposal timestamp, the substitute-acceptance timestamp, and the resolution (consent/refusal/withdrawal) timestamp.
+- The final result.
 
-**Sensitive data discipline**: no field beyond the above is logged. In particular, no free-text note, no location data, and no content beyond the plain identifiers and timestamps already named — mirroring this codebase's own existing restraint on `Termination.note` (capped, optional, never used for ranking or metrics per `ADR-080`'s own Decision text) as the nearest precedent for "record enough to audit, nothing more."
+**Sensitive data discipline**: no field beyond the above is logged — no free-text note, no location data — mirroring `Termination.note`'s own existing restraint (capped, optional, never used for ranking or metrics per `ADR-080`).
 
 ---
 
@@ -289,54 +336,108 @@ Every Handoff attempt (proposed, consented, refused, and — if authorized, §15
 
 **UX states only — no UI is designed or implemented here.**
 
-- **Handoff proposed**: the original driver's own screen reflects that a Handoff is pending, naming the substitute they chose.
-- **Passenger sees the exact substitute**: per OQ-2 (locked by the prior reconciliation pass, §10 of that document — not reopened here), the passenger must be shown the *specific* named substitute before being asked to consent, not a generic "your driver wants to hand off" notice. What facts about the substitute are shown (name, availability — per `DRIVER_IDENTITY_DESIGN_DECISION.md`'s own already-ratified limits, no rating, no ride count) is inherited from that same existing constraint, not re-decided here.
-- **Passenger accepts**: a blocking confirmation step, not a toast or passive notice (Invariant #12) — the passenger must take an affirmative action.
-- **Passenger refuses**: an equally explicit, available action; per Invariant #24, refusing must visibly leave the original driver as the ride's own driver, with no ambiguity that anything changed.
-- **Original driver remains visible if refusal occurs**: the passenger-facing screen must not, even transiently, suggest the substitute is now their driver if the Handoff was refused — this is a direct UX consequence of Invariant #24's own "existing Assignment/Trip remains unchanged."
-- **Execution driver updates after successful Handoff**: once `CONSENTED`, every passenger-facing and driver-facing surface that currently shows "your driver" (which today reads `Assignment.driver` directly, per `docs/PIOS_D07_HANDOFF_RECONCILIATION.md` §9/§10's own inventory of existing authorization/data-surfacing patterns) must instead reflect the current executing driver (§6) — a read-model change, not designed here beyond naming that it is required.
+- **Handoff proposed**: the original driver's own screen reflects that a Handoff is pending, naming the substitute they chose, and that it is awaiting the substitute's own acceptance first.
+- **Substitute sees the proposal and can accept or decline it — new in this pass**, since the acceptance step is now locked (§5/§7): the substitute's own screen must surface this Handoff distinctly from an ordinary Proposal, since it is not one.
+- **Passenger sees the exact substitute, only after they have accepted**: per Invariant #28, the passenger is never shown a consent prompt for a substitute who has not yet accepted — what facts about the substitute are shown (name, availability — no rating, no ride count, per `DRIVER_IDENTITY_DESIGN_DECISION.md`'s own already-ratified limits) is inherited from that existing constraint.
+- **Passenger accepts**: a blocking confirmation step, not a toast or passive notice (Invariant #12).
+- **Passenger refuses**: an equally explicit, available action; refusing must visibly leave the original driver as the ride's own driver, with no ambiguity that anything changed (Invariant #24).
+- **Original driver may withdraw, only while the option is genuinely available** — the original driver's own screen must stop offering a withdraw action the moment the Handoff reaches `CONSENTED` (Invariant #32), not merely disable it after a failed attempt.
+- **Original driver remains visible if refusal or withdrawal occurs**: the passenger-facing screen must not, even transiently, suggest the substitute is now their driver unless `CONSENTED` has actually been recorded.
+- **Execution driver updates after successful Handoff**: once `CONSENTED`, every passenger-facing and driver-facing surface that currently shows "your driver" (which today reads `Assignment.driver` directly) must instead reflect the current executing driver (§6) — a read-model change, named as required, not designed here.
 
 ---
 
 ## 14. Compatibility
 
-- **D-01 (Commitment Termination)**: fully compatible by construction. `TERMINATED` remains terminal (Invariant #5/#6); Handoff never calls `Trip.terminate`/`Assignment.terminate`; the "original driver cannot fulfil" path (§3's fourth diagram) reuses D-01's own existing, unmodified termination flow rather than inventing a parallel one.
-- **D-02 (Driver Business Metrics Carry No Value)**: unaffected in kind — §10's own attribution work moves *which* driver an existing metric credits, never introduces a new metric, a ranking, or a scoring mechanism (`ADR-081`'s own boundary, restated, not reopened).
-- **D-03 (Phone-Verified Identity Recovery)**: unaffected — Handoff's own authorization model (§11) reuses the existing session-token verification `identity` already issues and every other module already verifies locally (ADR-055 Decision 1); nothing about Handoff touches identity recovery itself.
-- **D-06 (Settlement as Evidence)**: fully compatible. `Trip.agreedAmount` is untouched (Invariant #18); there is exactly one Trip, never two, which is precisely the property D-06's own capture-once, no-later-Proposal-reread design depends on (per the prior reconciliation's own explicit finding, `docs/PIOS_D07_HANDOFF_RECONCILIATION.md` §"D-06 (Settlement as Evidence)" subsection).
-- **D-08 (Handoff's binding conditions)**: **partially resolved, partially still open.** D-08(b) (split attribution) is now fully locked by this task's own OQ-3 answer (§10). D-08(a) (observation-before-cap) is only partially addressed — Invariant #26 states the *principle* (no cap before observation), but the observability mechanism itself, and any cap value or threshold, remain explicitly unbuilt and unauthorized here (§15).
-- **Explicitly outside D-07's own scope, named so nothing is silently assumed**: Settlement's own "what constitutes settled" question (OQ-8); Fallback Tier-2/Network's own reserved question (OQ-10, ADR-068's own); any ride-outcome taxonomy; any payment/billing mechanism of any kind.
+- **D-01 (Commitment Termination)**: fully compatible by construction. `TERMINATED` remains terminal (Invariant #5/#6); Handoff never calls `Trip.terminate`/`Assignment.terminate`; the "original driver cannot fulfil" path reuses D-01's own existing, unmodified termination flow.
+- **D-02 (Driver Business Metrics Carry No Value)**: unaffected in kind — §10's own attribution work moves *which* driver an existing metric credits, never introduces a new metric, ranking, or scoring mechanism (`ADR-081`'s own boundary).
+- **D-03 (Phone-Verified Identity Recovery)**: unaffected — Handoff's own authorization model reuses the existing session-token verification unmodified; the newly-locked guest-consent allowance (§11) does not touch identity recovery itself, only which sessions may consent.
+- **D-06 (Settlement as Evidence)**: fully compatible. `Trip.agreedAmount` is untouched (Invariant #18); there is exactly one Trip, never two.
+- **D-08 (Handoff's binding conditions)**: **fully resolved on attribution (D-08(b)), partially resolved on cap/observability (D-08(a)).** D-08(b)'s split is now fully locked (§10) — relationship-facing facts to the committing driver, execution/earnings facts to the executing driver, exactly as recommended. D-08(a)'s own principle (no cap before observation) is locked (Invariant #26/#31 as recorded in the prior pass), but the observability mechanism itself and any cap value/threshold remain explicitly unbuilt — classified as D-08's own separate, future work (§15).
+- **Explicitly outside D-07's own scope**: Settlement's own "what constitutes settled" question (OQ-8); Fallback Tier-2/Network's own reserved question (OQ-10); any ride-outcome taxonomy; any payment/billing mechanism of any kind.
 
 ---
 
-## 15. Open Questions
+## 15. Final Consistency Check
 
-**Not reopened**: D-07's architecture (DESIGN 1, locked), OQ-1 (timing window, locked), OQ-2 (consent framing, locked), OQ-3 (attribution split, locked), OQ-4 (refusal consequence, locked), OQ-7 (observation-before-cap principle, locked). Every item below is a genuinely distinct, narrower implementation question these locked answers do not themselves resolve.
+Performed against `docs/PIOS_D07_HANDOFF_RECONCILIATION.md`, this document's own body above, `ADR-054`, and D-01/D-06/D-08's own already-cited sources. Each item is classified as **REAL contradiction**, **documentation gap**, or **no contradiction**. Where a documentation gap was found, it was closed in the sections above (this is that fix); no code was touched for any of these.
 
-1. **Substitute driver acceptance — does it exist as a separate, required step before passenger consent?** `PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4.4 proposes one (`SUBSTITUTE_ACCEPTED`); no locked PO decision confirms or declines it. §5/§7 both flag this explicitly rather than assume either answer.
-2. **Handoff proposal expiry/timeout.** Whether an un-answered `PROPOSED` Handoff should ever auto-resolve (and if so, to what state, after what duration) is not decided by any locked input. §5 explicitly omits an `EXPIRED` state rather than invent one.
-3. **Handoff withdrawal by the original driver, before passenger resolution.** Named in §5 as a plausible `WITHDRAWN` state but not itself authorized — whether the original driver may retract a pending proposal is unaddressed by every locked decision so far.
-4. **Substitute eligibility verification.** Whether Handoff should be the first place `DriverReference` is cross-checked against `driver-management`'s own availability/eligibility data (as `ProposalApplicationService.handle` already does for ordinary proposals) or should remain a plain, unverified reference (§11).
-5. **Guest passenger consent.** Whether a guest (non-phone-verified) passenger identity may consent to a Handoff on the same terms as any other passenger session, or should be excluded — no existing document addresses this (§11).
-6. **Original driver's own facilitation metric, if any.** Whether "retains the historical/origination fact" (locked, OQ-3) should ever surface as a counted business metric for the original driver, distinct from simply being queryable per-Assignment (§10) — narrower than, and not a reopening of, the already-locked executing/committing split itself.
-7. **D-08(a)'s own remaining half — the exact observability mechanism, and any eventual cap threshold/window.** Explicitly classified as **D-08, not D-07**, per instruction: this specification records only that no cap may block Handoff before observability exists (Invariant #26); the mechanism and any numeric threshold are future, separately-scoped work.
-8. **Idempotency semantics for the propose and consent operations** (§7) — whether repeated identical requests are absorbed safely or rejected, and by what key (a client-supplied request id, mirroring `TerminateCommitmentCommand.requestId`, is a plausible but unauthorized shape).
+**A. D-01 contradiction — could any Handoff path revive `TERMINATED`?**
+**No contradiction.** Invariants #5/#6, PO decision items 17-18, and §3's own lifecycle diagrams all converge on the same rule: Handoff is reachable only from `{CREATED, ARRIVED}` (Invariant #7/#8), and `Trip.terminate`'s own existing guard already excludes `TERMINATED`/`COMPLETED` from every further transition. No diagram in §3, and no operation in §7, contains a path from `TERMINATED` back into any Handoff state.
+
+**B. D-06 contradiction — could Handoff create a second Trip or change `agreedAmount`?**
+**No contradiction.** Invariants #4/#18 are unconditional; every lifecycle diagram in §3 operates on "the same, single `Assignment`/`Trip` pair," stated explicitly at the top of that section; §9's own event analysis confirms `payload.statedPrice` needs no change because it is sourced from the one, unchanged `Trip.agreedAmount` regardless of which driver executes.
+
+**C. D-08 contradiction — could Handoff attribution create financial credit or alter the existing D-08 boundary?**
+**No contradiction.** Invariants #20-23 and §10's own "What this does NOT authorize" list are explicit that attribution moves *existing, non-financial* metrics (`completedRidesCount`, `totalStatedEarnings` — both already ratified as carrying no value per D-02/`ADR-081`) between which driver's counter they credit; no new financial mechanism, commission, or credit (in the monetary sense) is introduced. D-08(b)'s own recommended split is matched exactly, not altered.
+
+**D. ADR-054 contradiction — does the D-07 model require a narrow amendment rather than silently violating ADR-054?**
+**Documentation gap, now closed.** ADR-054 Part 5's own text ("No Team, Fleet, crew, or delegation mechanism of any kind") is not amended, narrowed, or reinterpreted anywhere in this document — it remains exactly as ratified. This specification does not implement anything, so it cannot itself violate the ban; but it must, and does, record plainly that a real implementation would require the narrow, dated, in-place supersession pointer the reconciliation already identified. Recorded explicitly, per this task's own §"Prefer recording in D-07 specification" instruction, immediately below in §17 — no amendment to `ADR-054` itself is made by this document.
+
+**E. Assignment invariant — does the specification accidentally require a second Assignment anywhere?**
+**No contradiction.** Every operation in §7, every state in §5, and every diagram in §3 operates on the Assignment/Trip pair that already exists at proposal time; nothing in this specification's own text calls, references, or implies a second `Assignment.create`. Invariant #1/#3 restate this as a standing constraint every later section is written against.
+
+**F. Identity/security — could a caller choose an arbitrary `driverId`?**
+**No contradiction.** §11's own "server derives every actor identity" rule, applied to all five operations in §7 (propose, accept, consent, refuse, withdraw), means every actor identity is read from the verified session (`verified.sub`/`verified.drv`), never from request content. The one genuinely new authorization shape (§7's Substitute Acceptance operation, §11's own "genuinely new pattern" note) is explicitly named as new precisely so it does not get silently assumed to inherit protection it does not yet have anywhere else in the codebase.
+
+**G. Guest — could a public/unbound guest request become consent for another Commitment?**
+**No contradiction, given the binding requirement is honored.** PO decision item 26 requires guest consent to be "bound to the exact Commitment/Handoff" — §7's own Consent operation already requires the input to name the specific Handoff proposal, not merely "whatever is pending," and §11 explicitly extends this same anti-replay/anti-cross-binding requirement to guest sessions without exception. The risk this question names (an unbound guest action silently applying to the wrong Commitment) is exactly what the existing "consent must be tied to the exact named substitute/Handoff" design (Invariant #13, §7's own input specification) already forecloses — it was not a guest-specific gap.
+
+**H. Chaining — could the substitute become a new original driver and perform another Handoff?**
+**No contradiction.** Invariant #15 (chained Handoff prohibited) and §8's race #7 both confirm this is rejected at the authorization layer: the propose operation's own check compares the caller against `Assignment.driver` — the *original* committing driver, which never changes (Invariant #16) — so a `CONSENTED` substitute, now the executing driver, still fails that check if they attempt to propose their own Handoff. The executing-driver fact (§6) and the authorization fact (`Assignment.driver`) are deliberately different fields for exactly this reason.
+
+**I. Consent — could passenger consent occur before substitute acceptance?**
+**No contradiction, closed structurally in this pass.** §5's own revised state model makes `CONSENTED` reachable only from `SUBSTITUTE_ACCEPTED`, never directly from `PROPOSED` — this was the specific gap the first pass of this specification left open (no substitute-acceptance state existed at all), and this pass's own Invariant #27/#28 and §7's own "Precondition, newly explicit in this pass" note close it. §8's own race #2 additionally names the concurrency form of this same question and confirms the precondition check, not merely lock ordering, is what prevents it.
+
+**J. Withdrawal — could the original driver withdraw after constitutive passenger consent?**
+**No contradiction, closed explicitly in this pass.** Invariant #32 and §7's own Withdraw Handoff operation state the forbidden condition unconditionally: "the Handoff is already `CONSENTED`" is a hard rejection, not a race-dependent outcome. §8's own race #9 names this specifically as "the one race in this table where the locked business rule itself, not merely lock ordering, forbids one outcome regardless of timing" — i.e., even if a withdrawal request technically arrives at the lock before a slower consent request finishes committing, withdrawal must still fail once consent has actually committed; this is stated explicitly so an implementer does not mistake it for an ordinary first-committer-wins race.
 
 ---
 
-## 16. Implementation Sequence
+## 16. Open Questions
 
-A staged order only — no stage is implemented by this document.
+**Not reopened**: D-07's architecture (DESIGN 1), OQ-1, OQ-2, OQ-3, OQ-4, OQ-7, substitute acceptance, expiry, withdrawal, eligibility, guest consent — all locked. Everything the first pass of this document listed as open under those headings is now resolved above; nothing below restates them.
 
-1. **Domain invariants** — encode §2's invariants directly into a `Handoff` domain type (or equivalent) and the `Trip.executingDriver`-shaped fact (§6), the same way `Termination`/`Trip.terminate` already encode D-01's own invariants as `check()` preconditions rather than external validation.
-2. **Persistence** — the minimal, append-only schema §6 describes, once its still-open shape questions (§15 items 2-3, table ownership) are resolved by the implementing team within the boundaries this spec sets.
-3. **Application services** — the propose/consent/refuse operations (§7), including the concurrency discipline (§8) reusing `OrderGuard` unmodified.
-4. **API** — the transport layer for §7's three (or four, pending §15 item 1) operations, following this codebase's own existing controller/authorization conventions (§4, §11).
-5. **Events** — `HandoffProposed`/`HandoffConsented`/`HandoffRefused` (§9), plus, only once §10's attribution question is fully implementable, the additive `AssignmentCompleted`/`TripCompleted` field §9 flags as a likely future need.
-6. **Frontend** — the UX states §13 names, on both the original driver's and the passenger's own existing screens, plus whatever the substitute driver's own screen needs once §15 item 1 is resolved.
-7. **Concurrency tests** — real-PostgreSQL races matching §8's own eight named scenarios, in the same style already proven for D-01 (`CommitmentTerminationPostgreSQLTest.kt`).
-8. **Integration tests** — the four lifecycle diagrams in §3, end to end.
-9. **Full regression** — dispatch, order-management, driver-management, and frontend suites, the same discipline already applied for D-01/D-06 (per this session's own prior closure reports), to confirm Handoff's additive changes disturb nothing already shipped.
+**Known non-blocking future work** (named, not treated as implementation blockers):
+
+1. **D-08(a)'s own remaining mechanism** — the exact observability tooling, and any eventual cap threshold/window, once real usage data exists. Classified as **D-08, not D-07**; Invariant #26/#31 already state the binding *principle* (no cap before observation) this specification enforces today.
+2. **Whether the original driver's own facilitation/origination fact should ever become a counted, driver-facing metric** — distinct from simply being queryable per-Assignment (§10/§12, which already satisfy the audit requirement regardless of how this is answered).
+3. **Other future Settlement/Network decisions** (OQ-8, OQ-10) — confirmed, once again, as entirely outside D-07's own scope; Handoff neither depends on nor advances either.
+
+**No item in this list blocks implementation of D-07 as specified above.** No new PO question is invented here beyond what genuinely remains open per this task's own explicit instruction not to do so.
+
+---
+
+## 17. ADR-054 Amendment — Recorded, Not Made
+
+**`ADR-054` is not modified by this document, and no amendment is written here.** Per this task's own instruction ("prefer recording in D-07 specification"), the requirement is recorded plainly instead:
+
+> **`ADR-054` requires a narrow amendment to permit this specific single-hop, consent-based Handoff mechanism while preserving its other delegation prohibitions.**
+
+Specifically, once implementation is authorized, the amendment would need to be a second, narrow, dated, in-place supersession pointer into `ADR-054:126` ("No Team, Fleet, crew, or delegation mechanism of any kind"), of the exact same shape as the already-existing one at `ADR-054:128` (the ADR-068 Fallback-candidate-filtering amendment) — naming DESIGN 1 specifically, citing the now-fully-locked OQ-1/OQ-2/OQ-3/OQ-4/OQ-7 plus substitute-acceptance/withdrawal/eligibility/guest-consent decisions by number, and explicitly reaffirming that every other part of ADR-054 Part 5's own prohibition (no general Team/Fleet/crew concept, no group, no shared client list) remains exactly as ratified. **No historical ADR-054 text is erased, rewritten, or reinterpreted by this document.**
+
+---
+
+## Implementation Readiness
+
+**D-07 is READY for implementation**, in the sense that every product-level decision this specification's own §2-§14 depend on is now locked — no further Product Owner input is required to begin domain modeling, persistence design, or application-service work against the invariants, lifecycle, state model, data model, API contract, concurrency rules, attribution boundary, and security rules stated above. The items in §16 are named future work, not blockers, per that section's own explicit conclusion.
+
+**What implementation work is required** (unchanged in substance from the first pass, restated here as the current, final sequence):
+
+1. **Domain invariants** — encode §2's invariants directly into a `Handoff` domain type and the `Trip.executingDriver`-shaped fact (§6), the same way `Termination`/`Trip.terminate` already encode D-01's own invariants as `check()` preconditions.
+2. **Persistence** — the minimal, append-only schema §6 describes (table/column naming, migration numbering, and module ownership left to the implementing team within these boundaries).
+3. **Application services** — the propose/substitute-accept/consent/refuse/withdraw operations (§7), including the concurrency discipline (§8) reusing `OrderGuard` unmodified, and the eligibility check (§11) against `driver-management`'s own registered-driver data.
+4. **Authorization** — the four authorization patterns §11 names, including the one genuinely new one (substitute self-authorization for the acceptance step).
+5. **API** — the transport layer for §7's five operations, following this codebase's own existing controller/authorization conventions.
+6. **Events** — `HandoffProposed`/`HandoffSubstituteAccepted`/`HandoffConsented`/`HandoffRefused`/`HandoffWithdrawn` (§9), plus, only once needed, the additive `AssignmentCompleted`/`TripCompleted` executing-driver field §9 flags.
+7. **Frontend** — the UX states §13 names, on the original driver's, the substitute's, and the passenger's own screens.
+8. **Concurrency tests** — real-PostgreSQL races matching §8's own ten named scenarios, in the same style already proven for D-01 (`CommitmentTerminationPostgreSQLTest.kt`).
+9. **Integration tests** — the four lifecycle diagrams in §3, end to end, including the withdrawal path.
+10. **Full regression** — dispatch, order-management, driver-management, and frontend suites, the same discipline already applied for D-01/D-06, to confirm Handoff's additive changes disturb nothing already shipped.
+
+**What decisions remain outside D-07**, restated once more for this section's own completeness: D-08(a)'s exact observability mechanism and cap threshold; whether facilitation ever becomes a counted metric; Settlement's own "what constitutes settled" question; Fallback Tier-2/Network's own reserved question. None of these gate the sequence above.
+
+**No implementation code is written by this document.**
 
 ---
 
@@ -344,7 +445,7 @@ A staged order only — no stage is implemented by this document.
 
 Documents and files read or directly cited to produce this specification (none modified):
 
-- `docs/PIOS_D07_HANDOFF_RECONCILIATION.md` (both its original reconciliation body and its "Product Owner Decision — D-07 (2026-09-18)" addendum).
+- `docs/PIOS_D07_HANDOFF_RECONCILIATION.md` (original reconciliation body and its "Product Owner Decision — D-07 (2026-09-18)" addendum).
 - `docs/PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4 (technical design precedent for `Handoff`/`executingDriver`), Part 6 (OQ-1…OQ-10 origin).
 - `docs/PIOS_TAXI_HANDOFF_OPEN_QUESTIONS.md` (OQ option tables).
 - `docs/PIOS_FINAL_PRODUCT_OWNER_DECISION_BRIEF.md` (D-07/D-08 sections, `:1750-1774`).
