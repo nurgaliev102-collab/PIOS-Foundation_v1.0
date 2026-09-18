@@ -275,4 +275,111 @@ class TripTest {
         assertEquals("300", trip1.agreedAmount)
         assertEquals("450", trip2.agreedAmount)
     }
+
+    // --- Executing driver (D-07, Handoff Protocol) ---
+
+    @Test
+    fun `a freshly created trip's executingDriver defaults to its own committing driver`() {
+        val trip = Trip.create(assignment()).trip
+
+        assertEquals(driver, trip.executingDriver)
+        assertEquals(driver, trip.driver)
+    }
+
+    @Test
+    fun `assignExecutingDriver changes executingDriver without ever touching driver, the permanent original committer`() {
+        val trip = Trip.create(assignment()).trip
+        val substitute = DriverReference("driver-substitute")
+
+        trip.assignExecutingDriver(substitute)
+
+        assertEquals(substitute, trip.executingDriver)
+        assertEquals(driver, trip.driver, "the original committing driver must never change")
+    }
+
+    @Test
+    fun `assignExecutingDriver is allowed while CREATED`() {
+        val trip = Trip.create(assignment()).trip
+        val substitute = DriverReference("driver-substitute")
+
+        trip.assignExecutingDriver(substitute)
+
+        assertEquals(substitute, trip.executingDriver)
+    }
+
+    @Test
+    fun `assignExecutingDriver is allowed while ARRIVED`() {
+        val trip = Trip.create(assignment()).trip
+        trip.arrive()
+        val substitute = DriverReference("driver-substitute")
+
+        trip.assignExecutingDriver(substitute)
+
+        assertEquals(substitute, trip.executingDriver)
+    }
+
+    @Test
+    fun `assignExecutingDriver is rejected once IN_PROGRESS`() {
+        val trip = Trip.create(assignment()).trip
+        trip.arrive()
+        trip.start()
+
+        assertFailsWith<IllegalStateException> {
+            trip.assignExecutingDriver(DriverReference("driver-substitute"))
+        }
+    }
+
+    @Test
+    fun `assignExecutingDriver is rejected once COMPLETED`() {
+        val trip = Trip.create(assignment()).trip
+        trip.arrive()
+        trip.start()
+        trip.complete()
+
+        assertFailsWith<IllegalStateException> {
+            trip.assignExecutingDriver(DriverReference("driver-substitute"))
+        }
+    }
+
+    @Test
+    fun `assignExecutingDriver is rejected once TERMINATED`() {
+        val trip = Trip.create(assignment()).trip
+        trip.terminate(
+            Termination(
+                requestId = "req-1",
+                initiator = TerminationInitiator.PASSENGER,
+                reasonCode = TerminationReasonCode.PLANS_CHANGED,
+                terminatedAt = Instant.parse("2026-09-18T12:00:00Z"),
+                note = null
+            )
+        )
+
+        assertFailsWith<IllegalStateException> {
+            trip.assignExecutingDriver(DriverReference("driver-substitute"))
+        }
+    }
+
+    @Test
+    fun `ride-progress events report executingDriver, not the original committing driver, once it has changed`() {
+        val substitute = DriverReference("driver-substitute")
+        val trip = Trip.create(assignment()).trip
+        trip.assignExecutingDriver(substitute)
+
+        val arrived = trip.arrive()
+        val started = trip.start()
+        val completed = trip.complete()
+
+        assertEquals(substitute, arrived.driverId)
+        assertEquals(substitute, started.driverId)
+        assertEquals(substitute, completed.driverId)
+    }
+
+    @Test
+    fun `ride-progress events still report the original driver when no Handoff ever happened`() {
+        val trip = Trip.create(assignment()).trip
+
+        val arrived = trip.arrive()
+
+        assertEquals(driver, arrived.driverId)
+    }
 }
