@@ -61,6 +61,19 @@ import java.util.UUID
  * ([com.pios.dispatch.persistence.PostgreSQLProposalRepository]'s own
  * reflective constructor lookup is widened to match, per that class's own
  * KDoc on this constructor being reflectively invoked).
+ *
+ * [viaTrustedFallback] (D-09.1, Tier 1 Visible) is `true` only when this
+ * Proposal was created by `FallbackDispatchApplicationService` with a
+ * non-null trusted candidate (ADR-068 Tier 1) -- set once, at [propose],
+ * never changed afterward. A purely factual record of which selection
+ * path produced this Proposal; carries no score, weight, or priority
+ * meaning of its own (D-09 Architect Review: "a per-instance fact, not an
+ * aggregate metric"). Deliberately not surfaced on `ProposalResponse` or
+ * `POST /v1/proposals` -- ADR-068 Part 5 freezes that contract; this fact
+ * is instead propagated into `Assignment.viaTrustedFallback` (see that
+ * property's own KDoc) and exposed only there, on `AssignmentResponse`,
+ * exactly mirroring how [isTest] already propagates from this class into
+ * `Assignment.isTest` today.
  */
 class Proposal private constructor(
     val id: ProposalId,
@@ -68,7 +81,8 @@ class Proposal private constructor(
     val driver: DriverReference,
     val createdAt: Instant? = null,
     val isTest: Boolean = false,
-    val passengerReference: PassengerReference? = null
+    val passengerReference: PassengerReference? = null,
+    val viaTrustedFallback: Boolean = false
 ) {
     var status: ProposalStatus = ProposalStatus.OPEN
         private set
@@ -337,7 +351,8 @@ class Proposal private constructor(
             driver: DriverReference,
             existingProposals: Collection<Proposal> = emptyList(),
             isTest: Boolean = false,
-            passengerReference: PassengerReference? = null
+            passengerReference: PassengerReference? = null,
+            viaTrustedFallback: Boolean = false
         ): ProposalCreated {
             check(existingProposals.none { it.order == order && it.status == ProposalStatus.OPEN }) {
                 "Order ${order.orderId} already has an open proposal"
@@ -348,7 +363,8 @@ class Proposal private constructor(
                 driver = driver,
                 createdAt = Instant.now(),
                 isTest = isTest,
-                passengerReference = passengerReference
+                passengerReference = passengerReference,
+                viaTrustedFallback = viaTrustedFallback
             )
             val event = OrderProposed(orderId = order, driverId = driver)
             return ProposalCreated(proposal = proposal, event = event)

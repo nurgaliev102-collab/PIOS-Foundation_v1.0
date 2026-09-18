@@ -25,5 +25,6 @@ data class ProposeDriverCommand(
     val driver: DriverReference,
     val isTest: Boolean = false,
     val passengerReference: PassengerReference? = null,
-    val requestedPickupAt: Instant? = null
+    val requestedPickupAt: Instant? = null,
+    val viaTrustedFallback: Boolean = false
 )

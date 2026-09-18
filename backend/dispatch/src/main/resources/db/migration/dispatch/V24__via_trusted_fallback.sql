@@ -1,0 +1,24 @@
+-- D-09.1 (Tier 1 Visible): additive booleans on both aggregates this
+-- module owns, mirroring V11__add_proposal_and_assignment_is_test.sql's
+-- own precedent exactly -- plain columns, no new domain concept.
+--
+-- DEFAULT FALSE means every existing row becomes `via_trusted_fallback =
+-- false` on migration -- this migration does not attempt to guess which
+-- existing rows were actually selected via Tier 1; it only stops NEW rows
+-- from being ambiguous going forward (same no-backfill discipline
+-- V11/V22/V23 already established).
+--
+-- `proposals.via_trusted_fallback` is set once, at propose time, only by
+-- FallbackDispatchApplicationService (true iff its own trustedDriver
+-- lookup found a candidate -- ADR-068 Tier 1). `assignments.via_trusted_fallback`
+-- is never independently supplied by a caller -- it is derived, in-process,
+-- from the Proposal it was created from (ProposalAssignmentOrchestrationService),
+-- the same same-module derivation `assignments.is_test` already receives.
+--
+-- Deliberately not surfaced on `proposals`' own read side (ProposalResponse,
+-- POST /v1/proposals) -- ADR-068 Part 5 freezes that contract (D-09
+-- Architect Review). The column exists on `proposals` only so the fact
+-- survives until Assignment creation; it is exposed to callers exclusively
+-- via `AssignmentResponse.viaTrustedFallback`.
+ALTER TABLE proposals ADD COLUMN via_trusted_fallback BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE assignments ADD COLUMN via_trusted_fallback BOOLEAN NOT NULL DEFAULT FALSE;

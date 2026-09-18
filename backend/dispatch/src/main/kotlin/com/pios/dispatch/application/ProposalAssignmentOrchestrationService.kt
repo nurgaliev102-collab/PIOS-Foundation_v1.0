@@ -133,7 +133,8 @@ class ProposalAssignmentOrchestrationService(
                 lockedProposal.order,
                 lockedProposal.driver,
                 isTest = lockedProposal.isTest,
-                agreedAmount = lockedProposal.statedPrice
+                agreedAmount = lockedProposal.statedPrice,
+                viaTrustedFallback = lockedProposal.viaTrustedFallback
             )
         )
 
@@ -165,7 +166,8 @@ class ProposalAssignmentOrchestrationService(
                 lockedProposal.order,
                 lockedProposal.driver,
                 isTest = lockedProposal.isTest,
-                agreedAmount = lockedProposal.statedPrice
+                agreedAmount = lockedProposal.statedPrice,
+                viaTrustedFallback = lockedProposal.viaTrustedFallback
             )
         )
 

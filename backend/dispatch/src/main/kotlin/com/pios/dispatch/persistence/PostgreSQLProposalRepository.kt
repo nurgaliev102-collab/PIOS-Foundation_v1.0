@@ -119,13 +119,13 @@ class PostgreSQLProposalRepository(
 ) : ProposalRepository {
 
     private val selectColumns =
-        "id, order_reference, driver_reference, status, stated_price, stated_eta_minutes, created_at, responded_at, is_test, passenger_reference"
+        "id, order_reference, driver_reference, status, stated_price, stated_eta_minutes, created_at, responded_at, is_test, passenger_reference, via_trusted_fallback"
 
     override fun save(proposal: Proposal) {
         jdbcTemplate.update(
             """
-            INSERT INTO proposals (id, order_reference, driver_reference, status, stated_price, stated_eta_minutes, created_at, responded_at, is_test, passenger_reference)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO proposals (id, order_reference, driver_reference, status, stated_price, stated_eta_minutes, created_at, responded_at, is_test, passenger_reference, via_trusted_fallback)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 status = EXCLUDED.status,
                 stated_price = EXCLUDED.stated_price,
@@ -141,7 +141,8 @@ class PostgreSQLProposalRepository(
             proposal.createdAt?.let { Timestamp.from(it) },
             proposal.respondedAt?.let { Timestamp.from(it) },
             proposal.isTest,
-            proposal.passengerReference?.passengerId
+            proposal.passengerReference?.passengerId,
+            proposal.viaTrustedFallback
         )
     }
 
@@ -176,6 +177,12 @@ class PostgreSQLProposalRepository(
         )
 
     private fun reconstruct(rs: ResultSet): Proposal {
+        // D-09.1 binding constraint: Proposal's private constructor gained a
+        // seventh parameter, viaTrustedFallback (Boolean). The reflective
+        // lookup below is widened to (String, String, String, Instant,
+        // Boolean, String, Boolean) to match -- same landmine this class's
+        // own KDoc already documents for every prior added parameter.
+        //
         // ADR-066 Decision 9 assumed `passengerReference` (`PassengerReference?`)
         // would box at the JVM level, requiring `PassengerReference::class.java`
         // here. Verified empirically (`javap` on the compiled class) to be
@@ -193,7 +200,8 @@ class PostgreSQLProposalRepository(
             String::class.java,
             Instant::class.java,
             Boolean::class.java,
-            String::class.java
+            String::class.java,
+            Boolean::class.java
         )
         constructor.isAccessible = true
         val proposal = constructor.newInstance(
@@ -202,7 +210,8 @@ class PostgreSQLProposalRepository(
             rs.getString("driver_reference"),
             rs.getTimestamp("created_at")?.toInstant(),
             rs.getBoolean("is_test"),
-            rs.getString("passenger_reference")
+            rs.getString("passenger_reference"),
+            rs.getBoolean("via_trusted_fallback")
         )
         val status = ProposalStatus.valueOf(rs.getString("status"))
         val statedPrice = rs.getString("stated_price")

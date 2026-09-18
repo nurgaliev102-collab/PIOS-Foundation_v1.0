@@ -195,7 +195,8 @@ class DispatchAssignmentApplicationService(
             order = command.order,
             driver = command.driver,
             existingAssignments = existingAssignments,
-            isTest = command.isTest
+            isTest = command.isTest,
+            viaTrustedFallback = command.viaTrustedFallback
         )
         assignmentRepository.save(created.assignment)
         outboxRepository.save(outboxRecordFor(created.assignment.id, created.event))

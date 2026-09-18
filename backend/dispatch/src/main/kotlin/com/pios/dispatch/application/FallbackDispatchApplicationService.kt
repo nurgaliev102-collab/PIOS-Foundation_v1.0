@@ -167,7 +167,15 @@ class FallbackDispatchApplicationService(
                     order = order,
                     driver = driver,
                     isTest = isTest,
-                    passengerReference = passengerReference
+                    passengerReference = passengerReference,
+                    // D-09.1 (Tier 1 Visible): the exact, already-computed fact
+                    // -- trustedDriver != null means Tier 1 (ADR-068) selected
+                    // this driver, as opposed to falling through to Tier 3.
+                    // Never true for any other Proposal-creation path
+                    // (ProposalController, FirstRefusalApplicationService,
+                    // DispatchRequestApplicationService's named-driver branch),
+                    // none of which sets it.
+                    viaTrustedFallback = trustedDriver != null
                 )
             )
             FallbackDispatchOutcome.Proposed(created.proposal)

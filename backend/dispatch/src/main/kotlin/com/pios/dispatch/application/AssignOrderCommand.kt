@@ -28,5 +28,6 @@ data class AssignOrderCommand(
     val order: OrderReference,
     val driver: DriverReference,
     val isTest: Boolean = false,
-    val agreedAmount: String? = null
+    val agreedAmount: String? = null,
+    val viaTrustedFallback: Boolean = false
 )

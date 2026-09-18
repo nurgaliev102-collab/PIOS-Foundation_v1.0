@@ -41,12 +41,21 @@ import java.util.UUID
  * through, entirely within this module — the same same-module derivation
  * [Assignment.order]/[Assignment.driver] already receive from that
  * Proposal, not a cross-module read.
+ *
+ * [viaTrustedFallback] (D-09.1, Tier 1 Visible) mirrors [isTest]'s own
+ * propagation exactly: derived, not independently supplied, from the
+ * originating [Proposal.viaTrustedFallback] at Assignment-creation time
+ * (`ProposalAssignmentOrchestrationService`). `false` for the manual
+ * assignment path, which has no Proposal at all. A factual record only —
+ * no eligibility, ranking, or financial meaning attaches to it here or
+ * anywhere it is read (`AssignmentResponse`).
  */
 class Assignment private constructor(
     val id: AssignmentId,
     val order: OrderReference,
     val driver: DriverReference,
-    val isTest: Boolean = false
+    val isTest: Boolean = false,
+    val viaTrustedFallback: Boolean = false
 ) {
     var status: AssignmentStatus = AssignmentStatus.CREATED
         private set
@@ -185,7 +194,8 @@ class Assignment private constructor(
             order: OrderReference,
             driver: DriverReference,
             existingAssignments: Collection<Assignment> = emptyList(),
-            isTest: Boolean = false
+            isTest: Boolean = false,
+            viaTrustedFallback: Boolean = false
         ): AssignmentCreated {
             check(existingAssignments.none { it.order == order }) {
                 "Order ${order.orderId} already has an active assignment"
@@ -194,7 +204,8 @@ class Assignment private constructor(
                 id = AssignmentId(UUID.randomUUID().toString()),
                 order = order,
                 driver = driver,
-                isTest = isTest
+                isTest = isTest,
+                viaTrustedFallback = viaTrustedFallback
             )
             val event = OrderAssigned(orderId = order, driverId = driver)
             return AssignmentCreated(assignment = assignment, event = event)

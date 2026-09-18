@@ -94,9 +94,9 @@ class PostgreSQLAssignmentRepository(
             """
             INSERT INTO assignments (
                 id, order_reference, driver_reference, status, status_changed_at,
-                arrived_at, started_at, completed_at, is_test
+                arrived_at, started_at, completed_at, is_test, via_trusted_fallback
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 status = EXCLUDED.status,
                 status_changed_at = EXCLUDED.status_changed_at,
@@ -112,7 +112,8 @@ class PostgreSQLAssignmentRepository(
             assignment.arrivedAt?.let { Timestamp.from(it) },
             assignment.startedAt?.let { Timestamp.from(it) },
             assignment.completedAt?.let { Timestamp.from(it) },
-            assignment.isTest
+            assignment.isTest,
+            assignment.viaTrustedFallback
         )
     }
 
@@ -120,7 +121,7 @@ class PostgreSQLAssignmentRepository(
         val rows = jdbcTemplate.query(
             """
             SELECT id, order_reference, driver_reference, status, status_changed_at,
-                   arrived_at, started_at, completed_at, is_test
+                   arrived_at, started_at, completed_at, is_test, via_trusted_fallback
             FROM assignments WHERE id = ?
             """.trimIndent(),
             { rs, _ -> reconstruct(rs) },
@@ -133,7 +134,7 @@ class PostgreSQLAssignmentRepository(
         jdbcTemplate.query(
             """
             SELECT id, order_reference, driver_reference, status, status_changed_at,
-                   arrived_at, started_at, completed_at, is_test
+                   arrived_at, started_at, completed_at, is_test, via_trusted_fallback
             FROM assignments WHERE order_reference = ?
             """.trimIndent(),
             { rs, _ -> reconstruct(rs) },
@@ -153,7 +154,7 @@ class PostgreSQLAssignmentRepository(
         return jdbcTemplate.query(
             """
             SELECT id, order_reference, driver_reference, status, status_changed_at,
-                   arrived_at, started_at, completed_at, is_test
+                   arrived_at, started_at, completed_at, is_test, via_trusted_fallback
             FROM assignments WHERE order_reference IN ($placeholders)
             """.trimIndent(),
             { rs, _ -> reconstruct(rs) },
@@ -165,7 +166,7 @@ class PostgreSQLAssignmentRepository(
         jdbcTemplate.query(
             """
             SELECT id, order_reference, driver_reference, status, status_changed_at,
-                   arrived_at, started_at, completed_at, is_test
+                   arrived_at, started_at, completed_at, is_test, via_trusted_fallback
             FROM assignments WHERE driver_reference = ?
             """.trimIndent(),
             { rs, _ -> reconstruct(rs) },
@@ -177,6 +178,7 @@ class PostgreSQLAssignmentRepository(
             String::class.java,
             String::class.java,
             String::class.java,
+            Boolean::class.java,
             Boolean::class.java
         )
         constructor.isAccessible = true
@@ -184,7 +186,8 @@ class PostgreSQLAssignmentRepository(
             rs.getString("id"),
             rs.getString("order_reference"),
             rs.getString("driver_reference"),
-            rs.getBoolean("is_test")
+            rs.getBoolean("is_test"),
+            rs.getBoolean("via_trusted_fallback")
         )
         val status = AssignmentStatus.valueOf(rs.getString("status"))
         val statusChangedAt: Instant = rs.getTimestamp("status_changed_at")?.toInstant() ?: Instant.now()

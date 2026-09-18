@@ -36,6 +36,16 @@ package com.pios.dispatch.api
  * Handoff, D-07 invariant #5/#35). Equal to [driverId] for every ride
  * with no Handoff, which is every ride today. `null` only when no Trip
  * is connected yet (never happens on a live path).
+ *
+ * [viaTrustedFallback] (D-09.1, Tier 1 Visible) surfaces
+ * [com.pios.dispatch.domain.Assignment.viaTrustedFallback] — a purely
+ * factual record of whether this Assignment's own originating Proposal
+ * was selected via ADR-068 Tier 1 (trusted fallback), as opposed to
+ * Tier 3, First Refusal, or a manual/coordinator proposal. Deliberately
+ * **not** surfaced on `ProposalResponse`/`POST /v1/proposals` — ADR-068
+ * Part 5 freezes that contract (D-09 Architect Review); this is the one,
+ * additive, already-precedented (`agreedAmount`, `executingDriverId`)
+ * contract this fact is exposed through instead.
  */
 data class AssignmentResponse(
     val assignmentId: String,
@@ -52,5 +62,6 @@ data class AssignmentResponse(
     val terminatedAt: String? = null,
     val terminationNote: String? = null,
     val agreedAmount: String? = null,
-    val executingDriverId: String? = null
+    val executingDriverId: String? = null,
+    val viaTrustedFallback: Boolean = false
 )

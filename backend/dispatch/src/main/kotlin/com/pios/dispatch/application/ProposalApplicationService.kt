@@ -153,7 +153,8 @@ class ProposalApplicationService(
             driver = command.driver,
             existingProposals = existingProposals,
             isTest = command.isTest,
-            passengerReference = command.passengerReference
+            passengerReference = command.passengerReference,
+            viaTrustedFallback = command.viaTrustedFallback
         )
         proposalRepository.save(created.proposal)
         created

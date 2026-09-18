@@ -376,7 +376,8 @@ class AssignmentController(
             trip?.termination?.terminatedAt?.toString(),
             trip?.termination?.note,
             trip?.agreedAmount,
-            trip?.executingDriver?.driverId
+            trip?.executingDriver?.driverId,
+            viaTrustedFallback
         )
     }
 
