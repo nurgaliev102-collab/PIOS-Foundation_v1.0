@@ -584,6 +584,75 @@ describe('RideRequest', () => {
     expect(screen.queryByText(/Будет примерно через/)).not.toBeInTheDocument()
   })
 
+  // --- D-06 (Settlement as Evidence): agreed amount, never a Proposal fallback ---
+
+  // Scenario A: no Assignment/Trip exists yet (PRICE_PROPOSED) --
+  // proposal.statedPrice is the only fact on record, shown as the
+  // driver's own offer.
+  it('shows the driver-proposed price from Proposal.statedPrice while still PRICE_PROPOSED, with no Trip yet', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'proposal-1', status: 'PRICE_PROPOSED', statedPrice: '620', statedEtaMinutes: null },
+    ])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('Водитель предлагает: 620')).toBeInTheDocument()
+  })
+
+  // Scenario B: an Assignment/Trip exists (ACCEPTED) with a captured
+  // agreedAmount -- that is what is shown, sourced from the assignments
+  // endpoint, not from the proposal poll.
+  it('shows the committed Trip\'s own agreedAmount once accepted', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', statedPrice: '620', statedEtaMinutes: null }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', agreedAmount: '620' }]) // GET /v1/assignments?orderId=order-1
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('Стоимость: 620')).toBeInTheDocument()
+  })
+
+  // Scenario C: an Assignment/Trip exists but its own agreedAmount is
+  // null (a historical, pre-D-06 Trip -- no backfill) while the
+  // proposal's own statedPrice is still a different, non-null value on
+  // the very same poll response. The historical proposal value must
+  // never be substituted for the (missing) agreed amount.
+  it('never substitutes proposal.statedPrice for a committed Trip whose own agreedAmount is null', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', statedPrice: '620', statedEtaMinutes: null }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', agreedAmount: null }]) // GET /v1/assignments?orderId=order-1
+
+    renderAt('driver-1')
+
+    await screen.findByText(/принял ваш заказ/)
+    expect(screen.queryByText('620')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Стоимость/)).not.toBeInTheDocument()
+  })
+
+  // Scenario D: neither an agreedAmount nor a statedPrice exists anywhere
+  // (e.g. a manual assignment with no Proposal at all) -- the UI stays
+  // stable, the rest of the screen still renders, and no value is
+  // invented.
+  it('renders a stable screen with no price line when neither agreedAmount nor statedPrice exists', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: null }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', agreedAmount: null }]) // GET /v1/assignments?orderId=order-1
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText(/принял ваш заказ/)).toBeInTheDocument()
+    expect(screen.queryByText(/Стоимость/)).not.toBeInTheDocument()
+  })
+
   // --- Scheduled pickup time (ADR-058) ---
 
   it('lets a passenger schedule a ride for later, sending requestedPickupAt as an ISO string', async () => {

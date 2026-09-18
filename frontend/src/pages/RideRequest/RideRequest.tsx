@@ -976,12 +976,13 @@ export function RideRequest() {
           // assignments/orders requests -- see that call site's own
           // comment for why the position matters here specifically.
           setProposalId(acceptedItem.proposalId)
-          // ADR-042 R9: read back here, not only in the branch above,
-          // since this same poll keeps running through ARRIVED/IN_PROGRESS/
-          // COMPLETED too -- the amount was fixed at accept time and never
-          // changes again, so re-setting it every tick is harmless and
-          // keeps this the single place [statedPrice] is ever written.
-          setStatedPrice(acceptedItem.statedPrice)
+          // D-06 (Settlement as Evidence): once accepted, an
+          // Assignment/Trip exists for this order (see the comment on the
+          // assignments request just below), and the Trip's own
+          // agreedAmount -- not proposal.statedPrice -- becomes the only
+          // source for [statedPrice] from here on; that request's own
+          // `.then()` sets it, unconditionally, including to `null`.
+          // Nothing is set from acceptedItem.statedPrice here any more.
           // ADR-057: same read-back pattern as statedPrice immediately above.
           setStatedEtaMinutes(acceptedItem.statedEtaMinutes)
           // Accepted -- an Assignment now exists (created in the same
@@ -1002,14 +1003,14 @@ export function RideRequest() {
               // ADR-071: same read, kept for `deriveNotificationFacts` --
               // see [assignmentStatusForNotifications]'s own KDoc above.
               setAssignmentStatusForNotifications(status ?? 'CREATED')
-              // D-06: once the Trip's own agreedAmount is on record,
-              // it supersedes the acceptedItem.statedPrice this poll set
-              // just above -- falls back to that value only for a Trip
-              // that predates this field (no backfill).
-              const agreedAmount = assignments[0]?.agreedAmount
-              if (agreedAmount != null) {
-                setStatedPrice(agreedAmount)
-              }
+              // D-06 (Settlement as Evidence): the connected Trip's own
+              // agreedAmount is the only source for [statedPrice] once an
+              // Assignment exists -- set unconditionally, including to
+              // `null` for a Trip that predates this field (no backfill,
+              // D-06 Decision item 7). proposal.statedPrice is never
+              // substituted here: it is historical proposal evidence, not
+              // the agreed amount.
+              setStatedPrice(assignments[0]?.agreedAmount ?? null)
             })
             .catch(() => {
               if (active) {

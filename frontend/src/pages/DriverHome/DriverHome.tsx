@@ -393,6 +393,7 @@ function ProposalDetails({
   messageStatus,
   onMessageDraftChange,
   onSendMessage,
+  hasAssignment,
   agreedAmount,
 }: {
   proposal: ProposalListItem
@@ -404,9 +405,15 @@ function ProposalDetails({
   messageStatus: ProposalActionStatus
   onMessageDraftChange: (value: string) => void
   onSendMessage: () => void
-  // D-06: the connected Assignment/Trip's own agreedAmount, when one
-  // exists -- `undefined`/`null` before agreement (OPEN/PRICE_PROPOSED),
-  // when `proposal.statedPrice` is still the only fact on record.
+  // D-06: whether a connected Assignment/Trip exists for this proposal's
+  // own order yet -- `agreedAmount` is meaningful (even when `null`) only
+  // when this is true; before that (OPEN/PRICE_PROPOSED), no Trip exists
+  // and `proposal.statedPrice` is still the only fact on record.
+  hasAssignment: boolean
+  // The connected Trip's own agreedAmount (D-06) -- authoritative once
+  // [hasAssignment] is true, including when `null` (never substituted
+  // with `proposal.statedPrice`, which is historical proposal evidence
+  // only, not the agreed amount).
   agreedAmount?: string | null
 }) {
   return (
@@ -457,17 +464,17 @@ function ProposalDetails({
           visible in.
 
           D-06 (Settlement as Evidence): once an Assignment/Trip exists
-          for this proposal's own order, [agreedAmount] -- the Trip's own
-          captured amount, not a re-read of Proposal -- is authoritative
-          and shown instead. Before that (OPEN/PRICE_PROPOSED), no Trip
-          exists yet and [proposal.statedPrice] remains the only fact on
-          record -- unchanged negotiation-time behavior. `agreedAmount`
-          falling back to `proposal.statedPrice` covers only a Trip
-          created before this field existed (no backfill, D-06 Decision
-          item 7), not an architectural fallback. */}
-      {(agreedAmount ?? proposal.statedPrice) && (
-        <Text role="body">Стоимость: {agreedAmount ?? proposal.statedPrice}</Text>
-      )}
+          ([hasAssignment]), the Trip's own captured [agreedAmount] is the
+          *only* source shown, including when it is `null` (a Trip that
+          predates this field, D-06 Decision item 7 -- no backfill): the
+          card then shows no agreed amount rather than substituting
+          [proposal.statedPrice], which is historical proposal evidence,
+          not the agreed amount. Before a Trip exists (OPEN/PRICE_PROPOSED),
+          [proposal.statedPrice] remains the only fact on record --
+          unchanged negotiation-time behavior. */}
+      {hasAssignment
+        ? agreedAmount && <Text role="body">Стоимость: {agreedAmount}</Text>
+        : proposal.statedPrice && <Text role="body">Стоимость: {proposal.statedPrice}</Text>}
       {/* ADR-057 (Driver Stated Time to Pickup): same read-back pattern
           as statedPrice immediately above. */}
       {typeof proposal.statedEtaMinutes === 'number' && (
@@ -2018,6 +2025,7 @@ export function DriverHome() {
                   setMessageDrafts((current) => ({ ...current, [proposal.proposalId]: value }))
                 }
                 onSendMessage={() => void handleSendMessage(proposal.proposalId)}
+                hasAssignment={assignment != null}
                 agreedAmount={assignment?.agreedAmount}
               />
             )
@@ -2500,10 +2508,11 @@ export function DriverHome() {
                         route={formatHistoryRoute(order)}
                         counterpart={order?.passengerName?.trim() || 'Пассажир'}
                         // D-06: the completed Trip's own agreedAmount is
-                        // authoritative; proposal.statedPrice is the
-                        // fallback only for a Trip that predates this
-                        // field (no backfill).
-                        price={assignment?.agreedAmount ?? proposal.statedPrice}
+                        // the only source shown here -- `null` (a Trip
+                        // that predates this field, no backfill) renders
+                        // this card's own honest "not stated" caption,
+                        // never proposal.statedPrice.
+                        price={assignment?.agreedAmount ?? null}
                       />
                     )
                   })}

@@ -10,7 +10,7 @@ export interface RideHistoryCardProps {
   route: string | null
   /** The other party's own name, or an honest generic label ("Пассажир"/"Водитель") when none is on file -- never a raw id (mirrors `DriverHome.tsx`'s own `shortOrderCode` discipline: no UUID ever shown to a person). */
   counterpart: string
-  /** Already formatted with a currency-free unit -- the completed Trip's own captured `agreedAmount` (D-06), itself exactly the plain string the driver originally typed (`Proposal.statedPrice`, ADR-042) at the moment the ride was agreed; the caller falls back to `proposal.statedPrice` directly only for a Trip that predates D-06 (no backfill). `null` renders an honest "not stated" caption instead of fabricating a number. */
+  /** Already formatted with a currency-free unit -- the completed Trip's own captured `agreedAmount` (D-06), exactly the plain string the driver originally typed (`Proposal.statedPrice`, ADR-042) at the moment the ride was agreed. `null` (including for a Trip that predates D-06 and was never backfilled) renders an honest "not stated" caption instead of fabricating a number or substituting `Proposal.statedPrice`, which is historical proposal evidence, not the agreed amount. */
   price: string | null
 }
 

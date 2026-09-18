@@ -346,6 +346,10 @@ describe('DriverHome', () => {
   // Product Owner instruction, 2026-09-05: once a price is proposed, the
   // driver has nothing left to do until the passenger decides -- no
   // Accept/Decline pair, just the waiting state and the stated price.
+  //
+  // D-06 (Settlement as Evidence), Scenario A: no Assignment/Trip exists
+  // yet for a PRICE_PROPOSED proposal, so `proposal.statedPrice` is the
+  // only fact on record and is what this test proves gets shown.
   it('shows a PRICE_PROPOSED request as waiting on the client, with no driver action available', async () => {
     mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
     mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
@@ -754,6 +758,13 @@ describe('DriverHome', () => {
 
   // --- History (MVP completion, §1): "Маршруты" tab, real completed rides ---
 
+  // D-06 (Settlement as Evidence), Scenario B: a committed/completed Trip
+  // shows its own `agreedAmount` -- the corrective pass's own fixture
+  // (`agreedAmount: '450'`) is what actually proves this now; before
+  // that correction this same rendered "450" could equally have come
+  // from `proposal.statedPrice`, which is exactly the ambiguity the
+  // correction removes (see the two tests directly below, which pin the
+  // two values apart).
   it('shows a completed ride in the История tab, built from already-loaded proposal/order/assignment data', async () => {
     mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
     mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
@@ -764,7 +775,14 @@ describe('DriverHome', () => {
     mockedRequest.mockResolvedValueOnce({ completedRidesCount: 1, currentStreakWeeks: 1 }) // GET /v1/drivers/driver-1/milestones
     mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
     mockedRequest.mockResolvedValueOnce([
-      { assignmentId: 'a1', orderId: 'o1', driverId: 'driver-1', status: 'COMPLETED', statusChangedAt: '2026-09-14T12:30:00Z' },
+      {
+        assignmentId: 'a1',
+        orderId: 'o1',
+        driverId: 'driver-1',
+        status: 'COMPLETED',
+        statusChangedAt: '2026-09-14T12:30:00Z',
+        agreedAmount: '450',
+      },
     ]) // GET /v1/assignments?orderIds=o1 -- loadAssignments fires before loadOrderDetails/loadMessages
     mockedRequest.mockResolvedValueOnce([
       {
@@ -793,6 +811,101 @@ describe('DriverHome', () => {
     await userEvent.click(await screen.findByRole('tab', { name: 'Главное' }))
     await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
     expect(screen.getByText(/Пока нет заказов\./)).toBeInTheDocument()
+  })
+
+  // D-06 (Settlement as Evidence), Scenario C: a historical Trip with
+  // `agreedAmount: null` (no backfill, D-06 Decision item 7) must never
+  // fall back to `proposal.statedPrice` -- even though the proposal's own
+  // stated price ("450") is right there in the same response, it must
+  // not appear as the ride's price anywhere on this card.
+  it('never substitutes proposal.statedPrice for a historical Trip whose agreedAmount is null', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'ACCEPTED', statedPrice: '450', statedEtaMinutes: 5 },
+    ])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 1, currentStreakWeeks: 1 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
+    mockedRequest.mockResolvedValueOnce([
+      {
+        assignmentId: 'a1',
+        orderId: 'o1',
+        driverId: 'driver-1',
+        status: 'COMPLETED',
+        statusChangedAt: '2026-09-14T12:30:00Z',
+        agreedAmount: null,
+      },
+    ]) // GET /v1/assignments?orderIds=o1 -- pre-D-06 Trip: no agreedAmount on record
+    mockedRequest.mockResolvedValueOnce([
+      {
+        id: 'o1',
+        origin: 'passenger-1',
+        destination: 'ул. Ленина, 10',
+        passengerName: 'Мария',
+        createdAt: '2026-09-14T12:00:00Z',
+        pickupAddress: 'ул. Пушкина, 5',
+        requestedPickupAt: null,
+      },
+    ]) // GET /v1/orders?ids=o1
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals/p1/messages
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Бизнес' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Маршруты' }))
+
+    expect(await screen.findByText('Мария')).toBeInTheDocument()
+    // D-06: this card's own honest "not stated" caption, never the
+    // proposal's own "450".
+    expect(screen.getByText('Цена не указана')).toBeInTheDocument()
+    expect(screen.queryByText('450')).not.toBeInTheDocument()
+  })
+
+  // D-06, Scenario D: with neither an agreedAmount nor a statedPrice
+  // anywhere on record, the UI must stay stable -- an honest empty state,
+  // never a fabricated value -- and the rest of the card still renders.
+  it('renders a stable, honest empty state in История when neither agreedAmount nor statedPrice exists', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: null },
+    ])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 1, currentStreakWeeks: 1 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
+    mockedRequest.mockResolvedValueOnce([
+      {
+        assignmentId: 'a1',
+        orderId: 'o1',
+        driverId: 'driver-1',
+        status: 'COMPLETED',
+        statusChangedAt: '2026-09-14T12:30:00Z',
+        agreedAmount: null,
+      },
+    ]) // GET /v1/assignments?orderIds=o1 -- manual assignment, no Proposal ever involved
+    mockedRequest.mockResolvedValueOnce([
+      {
+        id: 'o1',
+        origin: 'passenger-1',
+        destination: 'ул. Ленина, 10',
+        passengerName: 'Мария',
+        createdAt: '2026-09-14T12:00:00Z',
+        pickupAddress: 'ул. Пушкина, 5',
+        requestedPickupAt: null,
+      },
+    ]) // GET /v1/orders?ids=o1
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals/p1/messages
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Бизнес' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Маршруты' }))
+
+    expect(await screen.findByText('Мария')).toBeInTheDocument()
+    expect(screen.getByText('ул. Пушкина, 5 → ул. Ленина, 10')).toBeInTheDocument()
+    expect(screen.getByText('Завершена')).toBeInTheDocument()
+    expect(screen.getByText('Цена не указана')).toBeInTheDocument()
   })
 
   it('shows an honest empty state in История when nothing has been completed yet', async () => {
