@@ -520,7 +520,7 @@ function ProposalDetails({
           on this card. */}
       {hasAssignment && viaTrustedFallback && (
         <Text role="body" tone="secondary">
-          Вас предложили как доверенного водителя пассажира
+          Заказ направлен вам через доверенный маршрут
         </Text>
       )}
       {/* Minimal In-Ride Messaging (Product Cycle): "коммуникация

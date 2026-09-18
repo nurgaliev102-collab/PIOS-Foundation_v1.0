@@ -518,7 +518,7 @@ describe('DriverHome', () => {
     renderDriverHome()
 
     await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
-    expect(await screen.findByText('Вас предложили как доверенного водителя пассажира')).toBeInTheDocument()
+    expect(await screen.findByText('Заказ направлен вам через доверенный маршрут')).toBeInTheDocument()
   })
 
   it('does not show the Tier 1 signal for an ordinary assignment (viaTrustedFallback false)', async () => {
@@ -540,7 +540,7 @@ describe('DriverHome', () => {
 
     await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
     await screen.findByRole('button', { name: 'Прибыл' })
-    expect(screen.queryByText('Вас предложили как доверенного водителя пассажира')).not.toBeInTheDocument()
+    expect(screen.queryByText('Заказ направлен вам через доверенный маршрут')).not.toBeInTheDocument()
   })
 
   it('does not show the Tier 1 signal before an Assignment exists, even if the field were somehow present on the proposal', async () => {
@@ -559,7 +559,7 @@ describe('DriverHome', () => {
 
     await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
     await screen.findByRole('button', { name: 'Предложить цену' })
-    expect(screen.queryByText('Вас предложили как доверенного водителя пассажира')).not.toBeInTheDocument()
+    expect(screen.queryByText('Заказ направлен вам через доверенный маршрут')).not.toBeInTheDocument()
   })
 
   // --- Cancellation (P0-2 Tier 1; ADR-053) ---
