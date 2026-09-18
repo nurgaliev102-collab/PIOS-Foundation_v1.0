@@ -9,12 +9,19 @@ import { LoadingState } from '../../components/LoadingState'
 import { ErrorState } from '../../components/ErrorState'
 import { DriverTrustIndicator } from '../../components/DriverTrustIndicator'
 import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
+import { LocalInvitationProvider } from '../../identity/InvitationProvider'
 import { request, resolveBackendBaseUrl } from '../../api/apiClient'
 import styles from './MyDrivers.module.css'
 
 // ADR-038/ADR-039/ADR-055: same singleton pattern DriverHome.tsx/PassengerLanding.tsx
 // already use for the one real IdentityProvider.
 const identityProvider = new BackendIdentityProvider()
+
+// D-09.2 (Passenger Shares Driver): the exact same singleton
+// InvitationProvider RideRequest.tsx already uses for
+// `handleShareWithFriend` -- same `/i/:driverCode` link, same
+// share()/copy() fallback order, no new invitation mechanism.
+const invitationProvider = new LocalInvitationProvider()
 
 // Passenger Experience's own local port (INTERFACE_CONTRACTS.md) -- same
 // constant PassengerLanding.tsx/RideRequest.tsx already use for
@@ -69,6 +76,10 @@ export function MyDrivers() {
   const navigate = useNavigate()
   const [status, setStatus] = useState<Status>('loading')
   const [drivers, setDrivers] = useState<Array<{ connection: ConnectionItem; driver: DriverInfo | null }>>([])
+  // D-09.2 (Passenger Shares Driver): per-driver feedback only, mirroring
+  // RideRequest.tsx's own `shareFeedback` -- no persisted state, no
+  // request to any backend endpoint.
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -129,6 +140,31 @@ export function MyDrivers() {
           }
         })
     })
+  }
+
+  /**
+   * D-09.2 (Passenger Shares Driver): reuses the exact existing mechanism
+   * `RideRequest.tsx`'s own `handleShareWithFriend` already established --
+   * the same `/i/:driverCode` link a friend would reach this driver
+   * through directly. No new backend endpoint, no new database state, no
+   * referral attribution, no `/v1/connections` call, no new invitation
+   * lifecycle: this function's own body is identical to that one's,
+   * applied to a driver already in this passenger's own saved list
+   * instead of the one just ridden with.
+   */
+  async function handleShare(driverId: string) {
+    try {
+      await invitationProvider.share(invitationProvider.linkFor(driverId))
+      if (!navigator.share) {
+        setShareFeedback('Ссылка скопирована')
+        setTimeout(() => setShareFeedback(null), 2000)
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name !== 'AbortError') {
+        setShareFeedback('Не удалось поделиться')
+        setTimeout(() => setShareFeedback(null), 2000)
+      }
+    }
   }
 
   return (
@@ -194,11 +230,23 @@ export function MyDrivers() {
                       onClick={() => navigate(`/i/${connection.driverId}/request`)}
                       disabled={!isAvailable}
                     />
+                    {/* D-09.2 (Passenger Shares Driver): reuses the exact
+                        existing invite-link mechanism `RideRequest.tsx`'s
+                        own completed-ride screen already established --
+                        this is its second call site, not a new one. */}
+                    <button type="button" className={styles.textAction} onClick={() => void handleShare(connection.driverId)}>
+                      Поделиться с другом
+                    </button>
                   </Card>
                 </div>
               )
             })}
           </div>
+        )}
+        {shareFeedback && (
+          <Text role="body" tone="secondary">
+            {shareFeedback}
+          </Text>
         )}
       </main>
     </div>

@@ -1050,6 +1050,45 @@ describe('RideRequest', () => {
     expect(mockedRequest.mock.calls.some(([path]) => path === '/v1/connections/c-new/primary')).toBe(true)
   })
 
+  // D-09.3 (Driver Asks Passenger To Save Them): the prompt is copy only --
+  // no driver-side action, no new endpoint, no new state. This proves the
+  // copy renders alongside the pre-existing button, and that clicking
+  // through still invokes exactly the pre-existing, unchanged
+  // POST /v1/connections call (Architect Review: Shape A only).
+  it('shows copy framing the save action as the driver\'s own invitation, and the click path is unchanged', async () => {
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByRole('heading', { name: 'Заказать поездку' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-1' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED' }])
+    mockedRequest.mockResolvedValueOnce([{ status: 'COMPLETED' }])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('Водитель будет рад, если вы сохраните его в своих водителях')).toBeInTheDocument()
+    const saveButton = screen.getByRole('button', { name: 'Добавить в мои водители' })
+    const requestTypesBeforeClick = new Set(mockedRequest.mock.calls.map(([path]) => path))
+
+    mockedRequest.mockResolvedValueOnce({ connectionId: 'c-new' })
+    mockedRequest.mockResolvedValueOnce({})
+    await userEvent.click(saveButton)
+
+    // Exactly the pre-existing request shapes -- one new /v1/connections
+    // call (and its own already-existing primary-designation follow-up),
+    // nothing else: no new endpoint, no new request type introduced by
+    // this feature's own copy change.
+    const requestTypesAfterClick = new Set(mockedRequest.mock.calls.map(([path]) => path))
+    const newRequestTypes = [...requestTypesAfterClick].filter((path) => !requestTypesBeforeClick.has(path))
+    expect(newRequestTypes.sort()).toEqual(['/v1/connections', '/v1/connections/c-new/primary'])
+  })
+
   it('saving a driver while another primary already exists creates the connection but does not touch primary', async () => {
     mockMeResponse()
     mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })

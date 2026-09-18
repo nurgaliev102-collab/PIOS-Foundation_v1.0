@@ -498,6 +498,70 @@ describe('DriverHome', () => {
     expect(await screen.findByText('Будет примерно через: 7 мин')).toBeInTheDocument()
   })
 
+  // --- D-09.1 (Tier 1 Visible): a factual signal only, never a score/rank ---
+
+  it('shows the Tier 1 factual signal once an Assignment with viaTrustedFallback true exists', async () => {
+    localStorage.setItem('pios.onboarding.driver-seen', 'true')
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: null },
+    ])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
+    mockedRequest.mockResolvedValueOnce([
+      { assignmentId: 'a1', orderId: 'o1', driverId: 'driver-1', status: 'ACCEPTED', statusChangedAt: null, viaTrustedFallback: true },
+    ]) // GET /v1/assignments?orderIds=o1
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
+    expect(await screen.findByText('Вас предложили как доверенного водителя пассажира')).toBeInTheDocument()
+  })
+
+  it('does not show the Tier 1 signal for an ordinary assignment (viaTrustedFallback false)', async () => {
+    localStorage.setItem('pios.onboarding.driver-seen', 'true')
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: null },
+    ])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
+    mockedRequest.mockResolvedValueOnce([
+      { assignmentId: 'a1', orderId: 'o1', driverId: 'driver-1', status: 'ACCEPTED', statusChangedAt: null, viaTrustedFallback: false },
+    ]) // GET /v1/assignments?orderIds=o1
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
+    await screen.findByRole('button', { name: 'Прибыл' })
+    expect(screen.queryByText('Вас предложили как доверенного водителя пассажира')).not.toBeInTheDocument()
+  })
+
+  it('does not show the Tier 1 signal before an Assignment exists, even if the field were somehow present on the proposal', async () => {
+    localStorage.setItem('pios.onboarding.driver-seen', 'true')
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', orderId: 'o1', driverId: 'driver-1', status: 'OPEN', statedPrice: null, statedEtaMinutes: null },
+    ])
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?ids=o1
+
+    renderDriverHome()
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Работа' }))
+    await screen.findByRole('button', { name: 'Предложить цену' })
+    expect(screen.queryByText('Вас предложили как доверенного водителя пассажира')).not.toBeInTheDocument()
+  })
+
   // --- Cancellation (P0-2 Tier 1; ADR-053) ---
 
   it('shows a withdrawn proposal (passenger cancelled) as its own distinct, non-actionable status', async () => {

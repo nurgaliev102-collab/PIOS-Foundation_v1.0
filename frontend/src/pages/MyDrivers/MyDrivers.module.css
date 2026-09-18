@@ -33,3 +33,24 @@
 .unavailable {
   opacity: 0.7;
 }
+
+/* D-09.2 (Passenger Shares Driver): identical to RideRequest.module.css's
+   own .textAction -- same mechanism, same look, its second call site. */
+.textAction {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  min-height: var(--pios-touch-target-min);
+  font-family: var(--pios-font-family);
+  font-size: var(--pios-font-size-caption);
+  color: var(--pios-color-text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.textAction:focus-visible {
+  outline: 2px solid var(--pios-color-focus-ring);
+  outline-offset: 2px;
+}

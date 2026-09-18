@@ -207,6 +207,11 @@ interface AssignmentInfo {
   // committing driver) on every ride with no Handoff, which is every
   // ride until one is consented.
   executingDriverId?: string | null
+  // D-09.1 (Tier 1 Visible): a purely factual record of whether this
+  // Assignment's own originating Proposal was selected via ADR-068
+  // Tier 1 (trusted fallback) rather than Tier 3/First Refusal/manual.
+  // No score, no ranking, no priority meaning attaches to this.
+  viaTrustedFallback?: boolean | null
 }
 
 type HandoffStatusValue = 'PROPOSED' | 'SUBSTITUTE_ACCEPTED' | 'COMMITTED' | 'REFUSED' | 'WITHDRAWN'
@@ -415,6 +420,7 @@ function ProposalDetails({
   onSendMessage,
   hasAssignment,
   agreedAmount,
+  viaTrustedFallback,
 }: {
   proposal: ProposalListItem
   order: OrderListItem | undefined
@@ -435,6 +441,11 @@ function ProposalDetails({
   // with `proposal.statedPrice`, which is historical proposal evidence
   // only, not the agreed amount).
   agreedAmount?: string | null
+  // D-09.1 (Tier 1 Visible): the connected Assignment's own
+  // `viaTrustedFallback` -- meaningful (and only ever true) once
+  // [hasAssignment] is true, mirroring [agreedAmount]'s own gating
+  // exactly, since no Assignment exists before that.
+  viaTrustedFallback?: boolean | null
 }) {
   return (
     <>
@@ -499,6 +510,18 @@ function ProposalDetails({
           as statedPrice immediately above. */}
       {typeof proposal.statedEtaMinutes === 'number' && (
         <Text role="body">Будет примерно через: {proposal.statedEtaMinutes} мин</Text>
+      )}
+      {/* D-09.1 (Tier 1 Visible): a factual signal only -- gated on
+          [hasAssignment] since the fact lives on Assignment, not Proposal
+          (Architect Review: deliberately never surfaced on ProposalResponse
+          / POST /v1/proposals, to preserve ADR-068's own frozen contract).
+          Not a score, not a rank, not a badge of superiority -- one plain
+          sentence, styled identically to every other secondary detail line
+          on this card. */}
+      {hasAssignment && viaTrustedFallback && (
+        <Text role="body" tone="secondary">
+          Вас предложили как доверенного водителя пассажира
+        </Text>
       )}
       {/* Minimal In-Ride Messaging (Product Cycle): "коммуникация
           принадлежит конкретной поездке, а не платформе в целом" --
@@ -2338,6 +2361,7 @@ export function DriverHome() {
                 onSendMessage={() => void handleSendMessage(proposal.proposalId)}
                 hasAssignment={assignment != null}
                 agreedAmount={assignment?.agreedAmount}
+                viaTrustedFallback={assignment?.viaTrustedFallback}
               />
             )
 

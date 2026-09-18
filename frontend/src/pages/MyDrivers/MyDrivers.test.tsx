@@ -115,6 +115,35 @@ describe('MyDrivers', () => {
     expect(screen.getByText('Водитель PIOS')).toBeInTheDocument()
   })
 
+  // D-09.2 (Passenger Shares Driver): reuses the exact existing
+  // `/i/:driverCode` invite-link mechanism `RideRequest.tsx`'s own
+  // completed-ride screen already established (same Web Share API /
+  // clipboard fallback) -- this is its second call site, not a new
+  // mechanism.
+  it('offers "Поделиться с другом" for a connected driver, sharing that driver\'s own invite link', async () => {
+    seedIdentity()
+    mockedRequest.mockResolvedValueOnce({ id: 'passenger-1', phone: '+70000000000', driverId: null })
+    mockedRequest.mockResolvedValueOnce([
+      { connectionId: 'c1', driverId: 'driver-1', createdAt: '2026-08-01T00:00:00Z', isPrimary: false },
+    ])
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+
+    renderMyDrivers()
+    await screen.findByText('Иван')
+    const callsBeforeShare = mockedRequest.mock.calls.length
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Поделиться с другом' }))
+
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/i/driver-1`)
+    expect(await screen.findByText('Ссылка скопирована')).toBeInTheDocument()
+    // No new backend request at all -- no /v1/connections call, no
+    // referral/attribution call of any kind.
+    expect(mockedRequest.mock.calls.length).toBe(callsBeforeShare)
+  })
+
   it('shows a distinct error state on a connections-fetch failure, with a working retry', async () => {
     seedIdentity()
     mockedRequest.mockResolvedValueOnce({ id: 'passenger-1', phone: '+70000000000', driverId: null })

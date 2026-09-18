@@ -2581,14 +2581,32 @@ export function RideRequest() {
                     {rideStatus === 'COMPLETED' &&
                       saveDriverTargetId &&
                       !circle.some((member) => member.driverId === saveDriverTargetId) && (
-                        <button
-                          type="button"
-                          className={styles.textAction}
-                          onClick={() => void handleSaveDriver()}
-                          disabled={saveDriverStatus === 'submitting'}
-                        >
-                          Добавить в мои водители
-                        </button>
+                        <>
+                          {/* D-09.3 (Driver Asks Passenger To Save Them):
+                              copy only -- the "ask" is product framing, not
+                              a technical signal from the driver. No
+                              driver-side action, endpoint, or state exists
+                              anywhere in this feature; [handleSaveDriver]
+                              below is the exact same, unchanged
+                              passenger-authorized POST /v1/connections call
+                              this screen already made before this task.
+                              Architect Review: Shape A only (passive
+                              passenger-side prompt), never Shape B (a
+                              persisted driver-initiated request) -- see
+                              that review for why Shape B would conflict
+                              with ADR-054/ADR-068 and was rejected. */}
+                          <Text role="caption" tone="secondary">
+                            Водитель будет рад, если вы сохраните его в своих водителях
+                          </Text>
+                          <button
+                            type="button"
+                            className={styles.textAction}
+                            onClick={() => void handleSaveDriver()}
+                            disabled={saveDriverStatus === 'submitting'}
+                          >
+                            Добавить в мои водители
+                          </button>
+                        </>
                       )}
                   </div>
                 )}
