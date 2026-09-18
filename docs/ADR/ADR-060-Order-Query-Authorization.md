@@ -244,6 +244,31 @@ With Decision 1 and this decision in force, no unauthenticated endpoint in PIOS
 returns an order identifier. The developer must verify that claim exhaustively
 before implementation is called complete (see "What implementation must verify").
 
+> **Amendment pointer (2026-09-18, per `ADR-015`).** D-08 (Handoff Observation
+> Foundation, `docs/PIOS_D08_HANDOFF_OBSERVATION_IMPLEMENTATION_SPEC.md` §9)
+> extends this Decision's own pattern — a Dispatch-owned business query endpoint
+> gated by Dispatch's own already-existing `api/OwnerCredentialGate.kt`, the
+> identical component this Decision already reuses, needing no new component —
+> to one further endpoint: `GET /v1/handoffs/observation?driverId=`. Unlike this
+> Decision's own `?driverId=` rule for `GET /v1/proposals` (which accepts
+> **either** a matching `Bearer` token **or** the owner's `Basic` credential),
+> the new endpoint accepts **`Authorization: Basic` only** — no `Bearer` branch
+> exists for it at all, including for the named driver's own token. It is
+> narrower than this Decision, not an extension of its dual-scheme shape.
+>
+> **What this is not.** Unlike this Decision's and Decision 5's own "the owner
+> gains nothing new" framing, this is new read capability: an aggregate,
+> read-only view of a committing driver's own Handoff usage (proposal/
+> acceptance/consent/refusal/withdrawal counts and a computed rate over a
+> trailing window) that no endpoint exposed to the owner before. It introduces
+> no new authentication mechanism, no new principal, and no role model —
+> `ADR-044` Decision 6 ("no roles, no permissions, no user management") remains
+> preserved, the owner still holds exactly one credential with exactly one
+> shape of capability, read-only. It returns no score, rank, tier, or
+> cross-driver comparison of any kind (`docs/PIOS_D08_HANDOFF_OBSERVATION_IMPLEMENTATION_SPEC.md`
+> §5's own boundary). Nothing else in this ADR — Decisions 1–3, 5–7, either
+> access matrix, or any other endpoint — is touched.
+
 ### 5. Owner access is preserved by extending `OwnerCredentialGate` to this one endpoint. This amends ADR-044 Decision 5.
 
 ADR-044 Decision 5 lists *"`GET/POST /v1/orders` … — not gated, not changed, not
