@@ -203,6 +203,49 @@ abstract class ProposalRepositoryContractTest {
 
         assertNull(repository.findById(created.proposal.id)?.statedEtaMinutes)
     }
+
+    // --- D-09.1 (Tier 1 Visible): viaTrustedFallback persists/reconstructs ---
+
+    @Test
+    fun `a proposal created with viaTrustedFallback true can be found with that fact intact`() {
+        val repository = createRepository()
+        val created = Proposal.propose(
+            OrderReference("contract-test-order-tier1-1"),
+            DriverReference("contract-test-driver-tier1-1"),
+            viaTrustedFallback = true
+        )
+
+        repository.save(created.proposal)
+
+        assertEquals(true, repository.findById(created.proposal.id)?.viaTrustedFallback)
+    }
+
+    @Test
+    fun `a proposal created with no viaTrustedFallback argument can be found as false`() {
+        val repository = createRepository()
+        val created = Proposal.propose(OrderReference("contract-test-order-tier1-2"), DriverReference("contract-test-driver-tier1-2"))
+
+        repository.save(created.proposal)
+
+        assertEquals(false, repository.findById(created.proposal.id)?.viaTrustedFallback)
+    }
+
+    @Test
+    fun `viaTrustedFallback survives reconstruction through an accepted, then re-saved, proposal`() {
+        val repository = createRepository()
+        val created = Proposal.propose(
+            OrderReference("contract-test-order-tier1-3"),
+            DriverReference("contract-test-driver-tier1-3"),
+            viaTrustedFallback = true
+        )
+        repository.save(created.proposal)
+
+        created.proposal.accept()
+        repository.save(created.proposal)
+
+        assertEquals(true, repository.findById(created.proposal.id)?.viaTrustedFallback)
+        assertEquals(ProposalStatus.ACCEPTED, repository.findById(created.proposal.id)?.status)
+    }
 }
 
 class InMemoryProposalRepositoryContractTest : ProposalRepositoryContractTest() {

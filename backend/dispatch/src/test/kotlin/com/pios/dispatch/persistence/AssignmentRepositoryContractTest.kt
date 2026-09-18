@@ -134,6 +134,49 @@ abstract class AssignmentRepositoryContractTest {
 
         assertEquals(emptyList(), repository.findByDriver(DriverReference("contract-test-findbydriver-never-assigned")))
     }
+
+    // --- D-09.1 (Tier 1 Visible): viaTrustedFallback persists/reconstructs ---
+
+    @Test
+    fun `an assignment created with viaTrustedFallback true can be found with that fact intact`() {
+        val repository = createRepository()
+        val created = Assignment.create(
+            OrderReference("contract-test-order-tier1-1"),
+            DriverReference("contract-test-driver-tier1-1"),
+            viaTrustedFallback = true
+        )
+
+        repository.save(created.assignment)
+
+        assertEquals(true, repository.findById(created.assignment.id)?.viaTrustedFallback)
+    }
+
+    @Test
+    fun `an assignment created with no viaTrustedFallback argument can be found as false`() {
+        val repository = createRepository()
+        val created = Assignment.create(OrderReference("contract-test-order-tier1-2"), DriverReference("contract-test-driver-tier1-2"))
+
+        repository.save(created.assignment)
+
+        assertEquals(false, repository.findById(created.assignment.id)?.viaTrustedFallback)
+    }
+
+    @Test
+    fun `viaTrustedFallback survives reconstruction through an accepted, then re-saved, assignment`() {
+        val repository = createRepository()
+        val created = Assignment.create(
+            OrderReference("contract-test-order-tier1-3"),
+            DriverReference("contract-test-driver-tier1-3"),
+            viaTrustedFallback = true
+        )
+        repository.save(created.assignment)
+
+        created.assignment.accept()
+        repository.save(created.assignment)
+
+        assertEquals(true, repository.findById(created.assignment.id)?.viaTrustedFallback)
+        assertEquals(AssignmentStatus.ACCEPTED, repository.findById(created.assignment.id)?.status)
+    }
 }
 
 class InMemoryAssignmentRepositoryContractTest : AssignmentRepositoryContractTest() {

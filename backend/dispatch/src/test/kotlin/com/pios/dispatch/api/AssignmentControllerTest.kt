@@ -146,6 +146,39 @@ class AssignmentControllerTest {
         assertTrue(strangerResponse.body?.isEmpty() == true)
     }
 
+    // --- D-09.1 (Tier 1 Visible): viaTrustedFallback on the same, already-authorized read ---
+
+    @Test
+    fun `HTTP assignment listing shows viaTrustedFallback true to the assignment's own driver`() {
+        service.handle(
+            AssignOrderCommand(OrderReference("order-tier1-true"), DriverReference("driver-tier1-true"), viaTrustedFallback = true)
+        )
+
+        val response = controller.listAssignmentsHttp(authorization = driverToken("driver-tier1-true"), orderId = "order-tier1-true")
+
+        assertEquals(true, response.body?.single()?.viaTrustedFallback)
+    }
+
+    @Test
+    fun `HTTP assignment listing shows viaTrustedFallback false for an ordinary assignment`() {
+        service.handle(AssignOrderCommand(OrderReference("order-tier1-false"), DriverReference("driver-tier1-false")))
+
+        val response = controller.listAssignmentsHttp(authorization = driverToken("driver-tier1-false"), orderId = "order-tier1-false")
+
+        assertEquals(false, response.body?.single()?.viaTrustedFallback)
+    }
+
+    @Test
+    fun `a driver cannot read another driver's own assignment, including its viaTrustedFallback flag`() {
+        service.handle(
+            AssignOrderCommand(OrderReference("order-tier1-other-driver"), DriverReference("driver-a"), viaTrustedFallback = true)
+        )
+
+        val response = controller.listAssignmentsHttp(authorization = driverToken("driver-b"), orderId = "order-tier1-other-driver")
+
+        assertTrue(response.body?.isEmpty() == true)
+    }
+
     @Test
     fun `assigning an order to a driver returns 201 with a new assignment id and CREATED status`() {
         val response = controller.assignOrder(AssignOrderRequest("order-1", "driver-1"))

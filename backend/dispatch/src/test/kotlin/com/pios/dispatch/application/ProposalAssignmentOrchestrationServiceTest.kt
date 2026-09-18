@@ -166,6 +166,29 @@ class ProposalAssignmentOrchestrationServiceTest {
         assertEquals(false, outcome.assignmentCreated.assignment.isTest)
     }
 
+    // --- D-09.1 (Tier 1 Visible): viaTrustedFallback propagated exactly like isTest ---
+
+    @Test
+    fun `accepting a viaTrustedFallback proposal creates a viaTrustedFallback assignment -- same propagation as isTest`() {
+        val proposal = proposalApplicationService.handle(
+            ProposeDriverCommand(order, driver, viaTrustedFallback = true)
+        ).proposal
+
+        val outcome = orchestrationService.acceptProposal(AcceptProposalCommand(proposal.id))
+
+        assertEquals(true, outcome.assignmentCreated.assignment.viaTrustedFallback)
+        assertEquals(true, assignmentRepository.findById(outcome.assignmentCreated.assignment.id)?.viaTrustedFallback)
+    }
+
+    @Test
+    fun `accepting an ordinary proposal (no Tier 1) creates an assignment with viaTrustedFallback false`() {
+        val proposal = proposalApplicationService.handle(ProposeDriverCommand(order, driver)).proposal
+
+        val outcome = orchestrationService.acceptProposal(AcceptProposalCommand(proposal.id))
+
+        assertEquals(false, outcome.assignmentCreated.assignment.viaTrustedFallback)
+    }
+
     // --- D-06 (Settlement as Evidence): agreed amount captured at Trip creation ---
 
     @Test

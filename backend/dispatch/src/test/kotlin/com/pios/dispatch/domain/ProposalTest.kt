@@ -24,6 +24,20 @@ class ProposalTest {
     }
 
     @Test
+    fun `D-09_1 -- proposing a driver with no viaTrustedFallback argument defaults to false`() {
+        val created = Proposal.propose(order, driver)
+
+        assertEquals(false, created.proposal.viaTrustedFallback)
+    }
+
+    @Test
+    fun `D-09_1 -- proposing a driver with viaTrustedFallback true records it`() {
+        val created = Proposal.propose(order, driver, viaTrustedFallback = true)
+
+        assertEquals(true, created.proposal.viaTrustedFallback)
+    }
+
+    @Test
     fun `proposing a driver stamps createdAt`() {
         val created = Proposal.propose(order, driver)
 

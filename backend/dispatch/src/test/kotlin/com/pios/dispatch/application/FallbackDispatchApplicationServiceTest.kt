@@ -146,6 +146,16 @@ class FallbackDispatchApplicationServiceTest {
 
         assertEquals(true, outcome.proposal.isTest)
     }
+
+    @Test
+    fun `D-09_1 -- viaTrustedFallback is false when Tier 1 is not even wired in (this service's own two-argument constructor)`() {
+        val driver = DriverReference("driver-1")
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(driver, available = true, isTest = false))
+
+        val outcome = service.attempt(order, passenger) as FallbackDispatchOutcome.Proposed
+
+        assertEquals(false, outcome.proposal.viaTrustedFallback)
+    }
 }
 
 /**
@@ -426,6 +436,28 @@ class FallbackDispatchApplicationServiceTrustedTierTest {
 
         val proposed = assertIs<FallbackDispatchOutcome.Proposed>(outcome)
         assertEquals(stranger, proposed.proposal.driver)
+    }
+
+    @Test
+    fun `D-09_1 -- viaTrustedFallback is true on the created Proposal when Tier 1 actually selects the driver`() {
+        val trusted = DriverReference("driver-trusted")
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(trusted, available = true, isTest = false))
+        trustedDriverRepository.add(TrustedDriverRecord(passenger, trusted))
+
+        val outcome = service.attempt(order, passenger) as FallbackDispatchOutcome.Proposed
+
+        assertEquals(true, outcome.proposal.viaTrustedFallback)
+    }
+
+    @Test
+    fun `D-09_1 -- viaTrustedFallback is false when Tier 1 yields nothing and Tier 3 selects the driver instead`() {
+        val stranger = DriverReference("driver-stranger")
+        driverAvailabilityRepository.upsert(DriverAvailabilityRecord(stranger, available = true, isTest = false))
+        // No TrustedDriverRecord at all for this passenger -- Tier 1 is empty.
+
+        val outcome = service.attempt(order, passenger) as FallbackDispatchOutcome.Proposed
+
+        assertEquals(false, outcome.proposal.viaTrustedFallback)
     }
 }
 

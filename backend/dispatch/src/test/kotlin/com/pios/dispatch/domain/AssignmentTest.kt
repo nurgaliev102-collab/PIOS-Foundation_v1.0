@@ -24,6 +24,20 @@ class AssignmentTest {
     }
 
     @Test
+    fun `D-09_1 -- creating an assignment with no viaTrustedFallback argument defaults to false`() {
+        val created = Assignment.create(order, driver)
+
+        assertEquals(false, created.assignment.viaTrustedFallback)
+    }
+
+    @Test
+    fun `D-09_1 -- creating an assignment with viaTrustedFallback true records it`() {
+        val created = Assignment.create(order, driver, viaTrustedFallback = true)
+
+        assertEquals(true, created.assignment.viaTrustedFallback)
+    }
+
+    @Test
     fun `creating an assignment produces an OrderAssigned event for the same order and driver`() {
         val created = Assignment.create(order, driver)
 
