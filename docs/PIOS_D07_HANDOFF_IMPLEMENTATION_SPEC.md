@@ -459,3 +459,41 @@ Documents and files read or directly cited to produce this specification (none m
 - `backend/dispatch/src/test/kotlin/com/pios/dispatch/persistence/CommitmentTerminationPostgreSQLTest.kt`.
 
 **This is a SPECIFICATION, produced from already-locked decisions. No code, schema, migration, API, frontend, test, or event contract was changed to produce it. Implementation has not started. Stopping here, per instruction, to wait for the next Product Owner or engineering command.**
+
+*(Status as of the specification's own writing, 2026-09-18. Superseded by §18 below, same date: implementation has since been carried out against this specification. Nothing in §§1-17 above is edited or reinterpreted by that section.)*
+
+---
+
+## 18. Implementation Record (2026-09-18)
+
+Recorded after the fact, against the already-locked specification above. Nothing in §§1-17 is changed by this section; where this record names a concrete identifier, it is reporting what was built, not a new decision.
+
+**Domain** (`backend/dispatch/src/main/kotlin/com/pios/dispatch/domain/`):
+- `Handoff.kt` — aggregate, states `PROPOSED → SUBSTITUTE_ACCEPTED → COMMITTED`, with `REFUSED`/`WITHDRAWN` as the two non-terminal-positive exits. (Named `COMMITTED` rather than this document's own working name `CONSENTED` — a naming choice only, not a state-model change; §5's transition table is otherwise implemented exactly as specified.)
+- `HandoffId.kt`, `HandoffStatus.kt` — supporting value types.
+- `HandoffCreated`, `HandoffSubstituteAccepted`, `HandoffCommitted`, `HandoffRefused`, `HandoffWithdrawn` — the five domain events named in §9, one file each, internal-only (not wired to the outbox), mirroring `Proposal`'s own precedent.
+- `Trip.kt` — added `executingDriver: DriverReference` (default `= driver`) and `assignExecutingDriver(driver)`, guarded to `CREATED`/`ARRIVED` exactly per §6/§8. `arrive()`/`start()`/`complete()` now report `executingDriver` (not `driver`) as the returned event's `driverId`, which is how `AssignmentCompleted` attribution (§10) reaches the executing driver with zero shape or `eventVersion` change.
+
+**Persistence:**
+- `V22__handoff.sql` — additive migration: `trips.executing_driver_reference` (nullable, no backfill, falls back to `driver_reference` at read time — the same no-backfill precedent §6 and D-06's `agreedAmount` both already use); `handoffs` table; partial unique index enforcing "at most one active Handoff per Assignment" (`WHERE status IN ('PROPOSED','SUBSTITUTE_ACCEPTED')`), the persistent half of the two-layer invariant enforcement §8 requires.
+- `PostgreSQLHandoffRepository.kt`, `InMemoryHandoffRepository.kt`.
+
+**Application layer** (`backend/dispatch/src/main/kotlin/com/pios/dispatch/application/`):
+- `HandoffApplicationService.kt` — the five operations from §7 (`propose`, `acceptSubstitute`, `consent`, `refuse`, `withdraw`), each: load → `OrderGuard.lock` → re-read under lock → validate → mutate → save, reusing `OrderGuard` unmodified per §8. Actor identity is never accepted as a command field (`HandoffCommands.kt`); it is established solely by the controller layer below, per §11.
+
+**API** (`/v1/handoffs`, `backend/dispatch/src/main/kotlin/com/pios/dispatch/api/HandoffController.kt`):
+- `POST /v1/handoffs` (propose), `POST /v1/handoffs/{id}/accept-substitute`, `POST /v1/handoffs/{id}/decline-substitute` (an addition beyond §7's five named operations — a substitute needs a way to decline *before* accepting, reusing the existing `refuse()` domain transition rather than a new state), `POST /v1/handoffs/{id}/consent`, `POST /v1/handoffs/{id}/refuse`, `POST /v1/handoffs/{id}/withdraw`, `GET /v1/handoffs?assignmentId=|substituteDriverId=`. Authorization follows the existing controller-authorizes/service-trusts-the-caller split and the existing 401→404→403 error-mapping convention (§11); no new API style introduced.
+- `AssignmentController.kt`/`AssignmentTerminationController.kt`/`AssignmentResponse.kt` — ride-progress and termination authorization now compares against `trip.executingDriver` (falling back to `assignment.driver` pre-Handoff), so a committed substitute can operate and the original driver's own authorization is unaffected when no Handoff has occurred.
+
+**Tests:**
+- `domain/TripTest.kt` (appended), `domain/HandoffTest.kt` (new) — pure unit coverage of every transition in §5.
+- `application/HandoffApplicationServiceTest.kt` (new) — in-memory coverage of §7/§11's eligibility, denormalization, and state-guard rules.
+- `api/HandoffControllerTest.kt` (new) — the authorization matrix §11 requires: wrong original driver, wrong substitute, wrong passenger, cross-order access, guest-session consent, forged/chained substitute attempt.
+- `persistence/HandoffConcurrencyPostgreSQLTest.kt` (new) — real PostgreSQL, real threads, 9 tests covering the concurrent races named in §8 (repeated runs where practical), following `CommitmentTerminationPostgreSQLTest.kt`'s own established pattern.
+- Frontend: `DriverHome.test.tsx`, `RideRequest.test.tsx` (both extended) — original driver, substitute, and passenger-side UI states from §13.
+
+**ADR-054 (§17):** the narrow amendment §17 said would be required has been made — a second, dated (2026-09-18), in-place supersession pointer in Part 5, immediately below the existing 2026-09-15/`ADR-068` one, plus a matching sentence in "What This ADR Does Not Authorize" and a parenthetical note on Evolution Path item 1. No historical ADR-054 text was edited or removed.
+
+**Regression:** `:dispatch:test` full suite green apart from two pre-existing, environment-dependent RabbitMQ outbox-relay test failures unrelated to this change (confirmed via `git diff` showing no modification to those files); `driver-management`/`order-management` suites unaffected (no files in those modules changed); frontend `vitest`/`lint`/`build` all green.
+
+**Outside this implementation's scope**, unchanged from §16: D-08's own cap mechanism/threshold, whether facilitation becomes a counted metric, Settlement's OQ-8, Fallback Tier-2's OQ-10.
