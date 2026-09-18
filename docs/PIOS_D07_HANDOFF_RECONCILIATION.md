@@ -2,6 +2,135 @@
 
 **Type: READ-ONLY reconciliation. Not a decision, not an ADR, not an implementation authorization, not a design.** Prepared per explicit Product Owner instruction, "D-07 — HANDOFF PROTOCOL / FINAL READ-ONLY RECONCILIATION BEFORE IMPLEMENTATION." No code, schema, migration, test, or ADR was changed to produce this document. Repository state at time of writing: branch `pios-product-main`, `HEAD = ce71c3cbacb59b04dfa7205f73f54382f427fdac` (D-01/D-02/D-03/D-06 closed; D-06's corrective-pass commit `ce71c3c` local-only at the time of this reconciliation).
 
+**Everything from here through "## 16. Proposed Next Step" is the original, unmodified read-only reconciliation** produced before the Product Owner decision recorded immediately below. It is preserved verbatim, as reconciliation history, per `CLAUDE.md`'s "Never Delete Documentation" — including §15's own analysis of the two candidate designs, which the decision below now resolves. Nothing in that original text has been edited to match the decision; where the decision changes an original finding's status, that is recorded only in the new section that follows, not by silently rewriting the original.
+
+---
+
+## Product Owner Decision — D-07 (2026-09-18)
+
+**Status: DECISION LOCKED — architecture selected. Implementation NOT authorized by this document.** This section is itself a second, later, PO-decision-lock task ("D-07 — PO DECISION LOCK"), layered on top of the original reconciliation above — not a rewrite of it. It resolves §15's own central open question; it does not resolve every open PO decision §14 named, and says explicitly, below, which ones remain.
+
+### The decision, recorded verbatim in substance
+
+> Handoff preserves the existing Assignment/Trip and transfers execution to an explicitly agreed substitute driver.
+
+1. No new Assignment is created during Handoff.
+2. No new Trip is created during Handoff.
+3. The existing Assignment/Trip remains the same commitment.
+4. The executing driver may change through the Handoff mechanism.
+5. The original committing driver must remain distinguishable from the current executing driver.
+6. Handoff must preserve historical attribution of the original commitment.
+7. Handoff does NOT change `Trip.agreedAmount`.
+8. Handoff does NOT change Connection / Relationship ownership.
+9. Handoff does NOT create fee, split, credit, commission, or financial settlement.
+10. PIOS never autonomously selects the substitute driver.
+11. Passenger consent is mandatory and constitutive.
+12. Handoff is single-hop only.
+13. Chained Handoff is prohibited.
+14. This decision does NOT authorize automatic redispatch.
+15. D-01 `TERMINATED` remains terminal.
+16. Handoff must not turn a terminated commitment back into executable state.
+
+**Core business interpretation, as given:** *"Это всё та же поездка. Меняется только фактический исполнитель."* ("It is still the same ride. Only the actual executor changes.")
+
+### Architecture selected
+
+**DESIGN 1 — retain the existing `Assignment`/`Trip` and change the executing driver.** This is exactly the design §15 of the original reconciliation above already described and recommended no position on: "retain `Assignment`/`Trip`, add `Trip.executingDriver`," matching `PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4.5's own recommendation (`Trip.executingDriver` defaults to `assignment.driver`, changed only at consent; `Assignment.driver` — the record of who committed — never rewritten).
+
+### Architecture rejected for D-07
+
+**DESIGN 2 — terminate the original `Assignment`/`Trip` and create a second `Assignment`/`Trip` for the substitute.** This is the alternative §15 described and found blocked.
+
+**Reason, as given and independently consistent with the original reconciliation's own §4/§15 evidence:** Design 2 conflicts with the currently ratified D-01 terminal-state model — a genuinely `TERMINATED` original commitment, followed by a second `Assignment` for the same order, is precisely the sequence `Assignment.create`'s own invariant (`Assignment.kt:189-191`, quoted in full in §4 above) unconditionally rejects, regardless of the first Assignment's status. §15's own conclusion already named this exact blocker; this decision does not remove or narrow that invariant, and this document does not recommend doing so.
+
+### Direct technical implication of the decision, named but not designed
+
+Items 4 and 5 together (`executing driver may change`, `original committing driver must remain distinguishable from current executing driver`) mean **some** field distinct from `Assignment.driver` will be needed to record who is currently executing — `Assignment.driver` itself continues to mean "who committed," per Design 1's own definition, and per item 6's requirement that the original commitment's own attribution be preserved. This reconciliation records that a field of this shape (`PIOS_TAXI_RELATIONSHIP_MODEL_EVALUATION.md` Part 4.5 names it `Trip.executingDriver`) will be *necessary* under the locked architecture. **It does not name a final field, table, or migration** — that remains implementation work, explicitly out of scope for this decision-lock pass ("Do NOT implement Handoff... Do NOT modify... database schema; migrations").
+
+### What item 16 resolves that item 13 (original reconciliation's instruction) left ambiguous
+
+The original reconciliation's §14/§15 flagged a tension in an earlier instruction's item 13 ("the original obligation must not remain executable after Handoff") — under Design 1, no `Assignment`/`Trip` is ever marked `TERMINATED` by Handoff at all, so that earlier wording was, read literally, in tension with Design 1. **This decision's own item 16 — "Handoff must not turn a terminated commitment back into executable state" — resolves that tension by restating the requirement in a form Design 1 actually satisfies**: it is not about the original commitment becoming non-executable (Design 1 does not make it so — it simply stops naming the original driver as the one who acts on it, per the authorization-check change §15 already identified as the actual mechanism), but about Handoff never being usable as a backdoor to revive a commitment that is *already* `TERMINATED` for an unrelated reason (declined, lapsed via the ordinary D-01 path, etc.). This is a **new, additional invariant**, not previously named in the original reconciliation, and it is recorded here as a requirement future implementation must satisfy, not as something already enforced by any existing code.
+
+---
+
+## Updated OQ-1…OQ-10 Matrix (re-evaluated against the locked Design 1)
+
+Classification is exactly one of: **A. CLOSED BY D-07** / **B. STILL REQUIRES EXPLICIT PO DECISION** / **C. IMPLEMENTATION DETAIL — DOES NOT REQUIRE PO DECISION**. No option below was chosen by inventing a decision — each is read directly off the sixteen items above, or, where unaddressed, left exactly as open as the original reconciliation already found it. Becoming *technically easier* under Design 1 is explicitly not treated as closing a question (per instruction).
+
+| OQ | Current question | Status | Evidence | Effect of the D-07 decision | Required next action |
+|---|---|---|---|---|---|
+| **OQ-1** | May a driver hand off at all, and at which points (pre-arrival only vs. also mid-ride)? | **B** | `PIOS_TAXI_HANDOFF_OPEN_QUESTIONS.md:15-19`; original reconciliation §6/§14. | None of the sixteen items states a timing window. Design 1 (no termination/recreation) is *structurally compatible* with a mid-ride handoff more easily than Design 2 would have been (no new Trip needed for an already-`IN_PROGRESS` ride) — but compatibility is not the same as authorization, and the decision does not say so. | PO must still choose Option B (pre-arrival only) or Option C (also mid-ride) from `PIOS_TAXI_HANDOFF_OPEN_QUESTIONS.md`. |
+| **OQ-2** | Is "my driver named this substitute" itself a trust claim PIOS renders to the passenger? | **B** | `PIOS_TAXI_HANDOFF_OPEN_QUESTIONS.md:25-29`; collides with `ADR-068:166` if answered "endorsement." | Not addressed by any of the sixteen items. | PO must choose consent-screen framing (neutral fact vs. endorsement) before any consent UI is designed. |
+| **OQ-3** | After a consented handoff, whose ride-count and earnings increment (executing / committing / split)? | **B** | `PIOS_TAXI_HANDOFF_OPEN_QUESTIONS.md:35-39`; D-08(b) recommends "split by kind." | **Partially clarified, not closed.** Item 9's list ("no fee, split, credit, commission, or financial settlement") reads, in this decision, as one conjunctive list of *financial/monetary* exclusions — resolving the earlier ambiguity the original reconciliation flagged (§6, "item 9") in favor of "credit" meaning financial credit, not ride-count attribution. Item 6 ("Handoff must preserve historical attribution of the original commitment") is consistent with the *relationship-facing* half of D-08(b)'s recommended split (the committing driver keeps the relationship fact) but does **not** itself state which driver's `completedRidesCount`/`totalStatedEarnings` increments — the metric-attribution half of OQ-3 is still unaddressed. | PO must still confirm whether D-08(b)'s full split (relationship → committing driver; ride-count/earnings → executing driver) is accepted, or state a different rule. |
+| **OQ-4** | If the passenger refuses the handoff, what happens to the commitment? | **B** | `PIOS_TAXI_HANDOFF_OPEN_QUESTIONS.md:45-49`. | Not addressed by any of the sixteen items. Design 1 does not change the shape of this question — refusal simply means item 4's "executing driver may change" never triggers; the commitment's own subsequent fate is exactly as undecided as before. | PO must choose Option A (original driver stays committed, the evaluation's own default), B (no-penalty cancel also offered), or C (both). |
+| **OQ-5** | Does any fee, split, or commission attach to a handoff? | **A** | `PIOS_TAXI_HANDOFF_OPEN_QUESTIONS.md:57-59`. | **Closed.** Item 9 states, unambiguously and now more completely than the earlier instruction's separate items 7/8/9 did: "no fee, split, credit, commission, or financial settlement" — this is Option A (no commission, ever) combined with Option C (PIOS carries no financial role) from the original open-questions table. | None. |
+| **OQ-6** | May a substitute hand off again (chained handoff)? | **A** | `PIOS_TAXI_HANDOFF_OPEN_QUESTIONS.md:67-68`. | **Closed**, and reaffirmed even more explicitly than before: items 12 ("single-hop only") and 13 ("chained Handoff is prohibited") both restate Option A directly. | None. |
+| **OQ-7** | Does a handoff cap exist (per driver/day/client)? | **B** | `PIOS_TAXI_HANDOFF_OPEN_QUESTIONS.md:73-76`; D-08(a) recommends "observation is a shipping condition," not yet confirmed anywhere. | **Not closed.** Item 10 ("PIOS никогда сам не выбирает substitute driver") and item 14 ("does NOT authorize automatic redispatch") both reinforce that *PIOS itself* never selects or auto-routes a substitute, which narrows *one* of the informal-fleet-backdoor concerns D-08(a)/OQ-7-Option-A named — but neither item states a numeric cap, nor confirms an owner-facing observability requirement. The cap/monitoring question itself is untouched. | PO must confirm whether D-08(a)'s "observation before cap" is accepted as a binding shipping condition (Option C), or choose Option A (no cap, unmonitored) or B (a numeric cap) instead. |
+| **OQ-8** | Settlement: what event constitutes "settled"? | **B** *(open, but not a D-07 gate)* | `PIOS_TAXI_HANDOFF_OPEN_QUESTIONS.md:84`; D-06 ("Settlement as Evidence," closed) built `Trip.agreedAmount` but does not define "settled." | Item 7 ("Handoff does NOT change `Trip.agreedAmount`") confirms Handoff has no interaction with Settlement's own open question at all — it neither depends on nor advances OQ-8. | None required *for D-07 specifically*; OQ-8 remains its own, separately-scoped, not-yet-taken-up question. |
+| **OQ-9** | Was ADR-065's digits-only price-parsing rule ever formally confirmed? | **C** | `PIOS_TAXI_HANDOFF_OPEN_QUESTIONS.md:85`; `ADR-065`'s own Status line already records Product Owner confirmation, 2026-09-07. | Unrelated to D-07; item 7 confirms Handoff does not touch `agreedAmount`/pricing logic of any kind. | None — already answered elsewhere in the repository's own record; at most a documentation-consistency note, not a new PO decision. |
+| **OQ-10** | Does ADR-073's `invitedByDriverId` change ADR-068's Tier-2/Network candidate answer? | **B** *(open, but not a D-07 gate)* | `PIOS_TAXI_HANDOFF_OPEN_QUESTIONS.md:86`. | Entirely untouched by any of the sixteen items — confirmed still ADR-068's own reserved question. | None required *for D-07*; belongs to ADR-068's own Q2, independent of Handoff. |
+
+---
+
+## D-01 / D-06 / D-08 Compatibility (against the locked Design 1)
+
+**D-01 (Commitment Termination):**
+- `TERMINATED` remains genuinely terminal under Design 1: Handoff never calls `Trip.terminate`/`Assignment.terminate`, and never needs to — no commitment is ever ended by a handoff, only redirected. This is consistent with, and requires no change to, `Trip.terminate`'s own guard (`check(status != COMPLETED && status != TERMINATED)`, `Trip.kt:130-133`) or `Assignment.terminate`'s symmetric one (`Assignment.kt:165-167`).
+- Handoff does not revive a terminated commitment: this is item 16's own explicit requirement (see above), and Design 1 satisfies it by construction — there is no code path under Design 1 by which a `TERMINATED` Trip could ever become handoff-eligible, since Handoff only ever acts on a live (`CREATED`/`ARRIVED`/`IN_PROGRESS`) Trip, the same set `Trip.terminate` itself accepts.
+- **How Handoff fits into the commitment lifecycle**: it does not add a new state to `TripStatus`/`AssignmentStatus` at all under Design 1 — it is a fact recorded *alongside* the existing lifecycle (who is currently the executing driver for an otherwise-unchanged, still-live Trip), not a new transition within it. This is the precise sense in which item 1 of the earlier instruction ("Handoff = a kind of termination") is now superseded in its literal mechanics by this decision — the *conceptual* framing (a driver relinquishing an obligation) survives, but the *implementation* is no longer termination-shaped, contrary to what that earlier item's plain wording suggested and what §15 flagged as the resulting ambiguity.
+
+**D-06 (Settlement as Evidence):**
+- `Trip.agreedAmount` remains authoritative and untouched by Handoff — item 7 states this directly, and Design 1 makes it structurally true: since no new Trip is ever created, there is no second `agreedAmount` to reconcile against the first, and the value captured once at the original Trip's own creation (per D-06's own capture-point design) is never re-derived or re-read for any handoff-related purpose.
+- **There is one Trip, not two** — the single most direct consequence of choosing Design 1 over Design 2, and exactly the property D-06's own architecture (capture once, immutable, no later Proposal or Assignment re-read) depends on continuing to hold. Design 2 would not have disturbed `Trip.agreedAmount` on the *original* Trip either, but it would have raised the question of what a *second* Trip's own `agreedAmount` should be (presumably `null`, per D-06's own no-backfill precedent) — a question Design 1 makes moot by never creating a second Trip at all.
+
+**D-08 (Handoff's two binding conditions — decision brief `:1763-1774`):**
+- **D-08(a), observation-before-cap**: **still open.** Not confirmed or declined by any of the sixteen items in this decision (see OQ-7 row above). Items 10/14 narrow a related but distinct concern (PIOS never auto-selecting/auto-redispatching), not the cap/observability question itself.
+- **D-08(b), split attribution**: **still open**, though item 6 provides a partial, one-sided signal (original commitment's own attribution is preserved — consistent with "relationship-facing facts credit the committing driver"). The other half of D-08(b) — that ride-count/earnings credit the *executing* driver specifically — is not stated by any of the sixteen items. **No attribution is implemented, decided, or assumed by this document** — this section names the open question only, per instruction ("Do not implement attribution").
+
+---
+
+## ADR-054 — What This Decision Does and Does Not Ratify
+
+**Not rewritten, not amended by this document.** `ADR-054` itself is untouched; no line of it has been edited to produce this reconciliation update, and none of its own ratified Parts 1-4 or its Part 5 prohibition text is altered here.
+
+**What is recorded here, for the ADR that will eventually need to exist:**
+- **D-07 narrows the delegation prohibition** (`ADR-054:126`, "No Team, Fleet, crew, or delegation mechanism of any kind") — for exactly one, single-hop, driver-initiated, passenger-consented mechanism, and no broader Team/Fleet/crew concept. This restates, rather than newly decides, what the original reconciliation's §5 already found necessary.
+- **Design 1 is the selected architecture** the eventual amendment will need to describe: no new `Assignment`/`Trip` created; `Assignment.driver` continues to mean "who committed"; a new field (shape not yet decided — see "Direct technical implication," above) will record who currently executes.
+- **What is deliberately not yet ratified here, because it is still unresolved** (per §14 of the original reconciliation and the updated OQ matrix above): the exact timing window (OQ-1), consent-screen framing (OQ-2), the full attribution split (OQ-3/D-08(b)), refusal consequence (OQ-4), and the cap/observability condition (OQ-7/D-08(a)). An ADR-054 amendment written before these are resolved would either leave them silently undefined or force this seat to invent them — both forbidden by `CLAUDE.md`'s "Never Invent Business Rules."
+- **No historical ADR-054 decision is erased.** Parts 1-4 (Circle of Trust's own placement, schema, Dispatch neutrality) remain exactly as ratified; the already-exercised, narrower ADR-068 amendment at `ADR-054:128` remains exactly as it is, covering a different (pre-Assignment, Fallback-candidate-filtering) case Design 1's Handoff still never overlaps with (original reconciliation §4).
+
+The minimum documentation this repository's own convention would require once implementation is authorized is a **second, narrow, dated, in-place supersession pointer into `ADR-054:126`**, of the same shape as the existing one at line 128 — naming Design 1 specifically and citing the resolved OQs by number. That pointer is not written here; writing it now, before OQ-1/OQ-2/OQ-3/OQ-4/OQ-7 are resolved, would be premature per the same reasoning as the previous paragraph.
+
+---
+
+## Implementation Boundary After D-07 PO Lock
+
+**MUST IMPLEMENT LATER** (once the still-open PO decisions below are resolved and an ADR-054 amendment is written — none of this is built by this document):
+- Handoff representation (the aggregate/field/table that records a handoff request and its resolution).
+- A distinguishable original-committing-driver vs. current-executing-driver fact (`Assignment.driver` vs. some new field — shape undecided here).
+- Passenger consent, as a mandatory, constitutive, blocking step.
+- The single-hop invariant, enforced structurally (not merely by product convention).
+- An explicit, named substitute driver — never inferred, never defaulted.
+- Concurrency protection for the races named in the original reconciliation's §11 (termination vs. consent, two concurrent handoffs, stale handoff after termination, etc.) — all of which remain exactly as relevant under Design 1 as they were originally described, since Design 1 still requires the same `orderGuard`-style locking discipline to keep a handoff's resolution and any concurrent termination/completion from racing.
+- Authorization for the one party the original reconciliation's §9 found no existing primitive for: a named substitute who is not yet the Assignment's own driver and not a Proposal's own passenger.
+- Audit/history sufficient to satisfy item 6 (preserved historical attribution) and item 5 (original driver remains distinguishable) — i.e., the original committing driver must remain readable as a durable fact even after the executing driver changes.
+
+**MUST NOT IMPLEMENT:**
+- A second `Assignment` for the same order (items 1, 3; blocked outright by `Assignment.create`'s own invariant, and Design 1 does not need or want one).
+- A second `Trip` (item 2; D-06's "one Trip" property depends on this).
+- Automatic redispatch of any kind (item 14).
+- A PIOS-selected substitute (item 10).
+- Any `Connection`/`PrimaryConnection` reassignment or mutation as a side effect of Handoff (item 8; ADR-054 Parts 1-4 remain unamended).
+- Any fee, payment split, credit (financial sense), commission, or settlement mechanism (item 9).
+- Any ranking, priority, or scoring change of any kind — not named in the sixteen items directly, but consistent with every other ratified decision this reconciliation's evidence index cites (ADR-054 Part 5's own "no ranking, no scoring, no priority"; D-02's driver-metrics-carry-no-value boundary), and nothing in this decision authorizes reopening it.
+
+**STILL REQUIRES PO DECISION** (restated from the updated OQ matrix, listed once for this section's own completeness):
+1. OQ-1 — handoff timing window (pre-arrival only, or also mid-ride).
+2. OQ-2 — consent-screen framing.
+3. OQ-3 / D-08(b) — the ride-count/earnings half of the attribution split (the relationship-facing half is consistent with item 6, but not the metric half).
+4. OQ-4 — consequence of passenger refusal.
+5. OQ-7 / D-08(a) — whether observation-before-cap is a binding shipping condition, and if so, its exact shape.
+
 ---
 
 ## 1. Executive Summary
