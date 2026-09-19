@@ -47,17 +47,18 @@ Authorized:
 
 **The feature must not**, under any implementation: block a ride; reject a ride; auto-decline anything; create a reservation; create a hold; reserve driver capacity; change Dispatch eligibility; change Dispatch priority; change ranking; change trust; affect pricing; synchronize with any external calendar; expose a driver's schedule to any passenger; or create a paywall/monetization rule.
 
-**CRITICAL — the overlap threshold is explicitly OPEN.** No minute value, default, or rule for what counts as "overlapping" or "close together" is decided by this document. **This is a separate Product Owner decision, not yet made.** Until it is made, the only authorized behavior is displaying the driver's own future pickup times adjacently, with no computed warning. No architect and no developer may choose a number on the Product Owner's behalf (`ADR-002`, `CLAUDE.md`).
+**RATIFIED 2026-09-19 — the overlap threshold is 60 minutes, inclusive.** For a future accepted ride at pickup time T, another future accepted ride for the same authenticated driver whose pickup timestamp T' satisfies `|T - T'| ≤ 60 minutes` produces a potential-overlap warning; `> 60 minutes` produces none. This is a **potential** overlap, never a confirmed conflict — v1 has pickup timestamps only, no trip-duration model, and must not infer actual arrival/completion time. UI copy must be neutral ("Возможное пересечение по времени" or equivalent) — never "конфликт," "вы не успеете," or "заказ невозможно выполнить." The driver remains free to make the business decision. No architect or developer chose this number — it was supplied directly by the Product Owner (`ADR-002`, `CLAUDE.md`).
 
-**ADR:** `docs/ADR/ADR-084-Driver-Calendar-Read-Only-Informational-View.md` — created and accepted, 2026-09-19. It explicitly establishes that this is a read-only informational view with no Dispatch effect, and that the overlap threshold remains a separate, future Product Owner decision.
+**ADR:** `docs/ADR/ADR-084-Driver-Calendar-Read-Only-Informational-View.md` — created and accepted, 2026-09-19; amended in place, same date, to record the ratified 60-minute threshold (Status amendment and Part 3).
 
 `docs/ADR/ADR-076-Server-Authorized-Named-Driver-Offer.md` amended in place, dated 2026-09-19, at two points (its factual claim "PIOS has no driver calendar," and its own "does not authorize" list), narrowing "any driver calendar" out while leaving "hold, reservation or conflict check" fully prohibited, unchanged.
 
-**Process gates, both satisfied 2026-09-19:**
-1. Hypothesis **H16** registered in `docs/PIOS_PRODUCT_HYPOTHESES.md`.
-2. `ADR-084` accepted.
+**Process gates, all satisfied:**
+1. Hypothesis **H16** registered in `docs/PIOS_PRODUCT_HYPOTHESES.md` — 2026-09-19.
+2. `ADR-084` accepted — 2026-09-19.
+3. Overlap threshold ratified (60 minutes, inclusive) — 2026-09-19.
 
-**Implementation may not begin until a specific overlap threshold is separately decided, OR the Product Owner explicitly accepts shipping the adjacency-only view with no computed warning as the complete v1.** This document does not itself choose between those two paths — that choice is recorded at implementation-handoff time, not here.
+Implementation may now proceed.
 
 ---
 
