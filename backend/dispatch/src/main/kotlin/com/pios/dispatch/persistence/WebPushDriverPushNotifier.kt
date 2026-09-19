@@ -152,7 +152,7 @@ class WebPushDriverPushNotifier(
         if (subscriptions.isEmpty()) {
             return
         }
-        val payload = objectMapper.writeValueAsString(mapOf("kind" to kind, "tag" to tag, "url" to "/driver"))
+        val payload = objectMapper.writeValueAsString(mapOf("kind" to kind, "tag" to tag, "url" to "/"))
         subscriptions.forEach { subscription ->
             try {
                 val statusCode = activeSender.send(subscription, payload)

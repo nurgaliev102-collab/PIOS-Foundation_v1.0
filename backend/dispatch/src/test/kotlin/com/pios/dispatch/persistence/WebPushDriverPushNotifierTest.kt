@@ -1,5 +1,6 @@
 package com.pios.dispatch.persistence
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.dispatch.application.DriverPushSubscription
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.ProposalId
@@ -28,6 +29,23 @@ class WebPushDriverPushNotifierTest {
 
     private fun subscription(endpoint: String) =
         DriverPushSubscription(endpoint = endpoint, driverReference = driver, p256dh = "p256dh-value", auth = "auth-value")
+
+    @Test
+    fun `both driver notifications link to the DriverHome route`() {
+        val repository = InMemoryDriverPushSubscriptionRepository()
+        repository.upsert(subscription("endpoint-driver-home"))
+        val payloads = mutableListOf<String>()
+        val notifier = WebPushDriverPushNotifier(
+            repository, immediateExecutor, "pub", "priv", "mailto:test@example.com",
+            sender = { _, payload -> payloads += payload; 201 }
+        )
+
+        notifier.offerCreated(proposalId, driver)
+        notifier.priceConfirmed(proposalId, driver)
+
+        assertEquals(listOf("N1", "N2"), payloads.map { ObjectMapper().readTree(it)["kind"].asText() })
+        assertTrue(payloads.all { ObjectMapper().readTree(it)["url"].asText() == "/" })
+    }
 
     @Test
     fun `a driver with zero subscriptions is a silent no-op`() {
