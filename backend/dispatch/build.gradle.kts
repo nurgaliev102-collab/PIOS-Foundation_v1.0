@@ -47,6 +47,22 @@ dependencies {
     implementation("org.springframework.retry:spring-retry")
     implementation("org.springframework.boot:spring-boot-starter-aop")
 
+    // ADR-083 (D-10, Driver Web Push for Open Proposal and Price
+    // Confirmation): a maintained JVM Web Push library implementing RFC
+    // 8291 (payload encryption) and RFC 8292 (VAPID) -- ADR-011 (Security
+    // Principles) forbids hand-rolled cryptography. nl.martijndwars:web-push
+    // is the maintained Java implementation of the web-push-libs/webpush-java
+    // project. Its own published POM declares its BouncyCastle dependency
+    // "optional" (never pulled transitively) and its synchronous send
+    // response as org.apache.http.HttpResponse (from httpcore, a "runtime"-
+    // scoped transitive dependency of its own httpasyncclient dependency,
+    // not visible on this module's compile classpath by default) -- both
+    // declared explicitly below so WebPushDriverPushNotifier compiles and
+    // runs, at the exact versions web-push:5.1.2's own POM names.
+    implementation("nl.martijndwars:web-push:5.1.2")
+    implementation("org.bouncycastle:bcprov-jdk15on:1.70")
+    implementation("org.apache.httpcomponents:httpcore:4.4.16")
+
     testImplementation(kotlin("test"))
 
     // Test-scoped only, per ADR-027 (MVP Integration Mechanism): used

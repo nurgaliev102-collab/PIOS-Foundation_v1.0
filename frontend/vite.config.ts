@@ -54,6 +54,17 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // ADR-083 (D-10, Driver Web Push): imports the plain static
+      // `public/pios-push-sw.js` into the plugin's own generated service
+      // worker, purely additive to its default precache -- the documented,
+      // minimal mechanism `workbox-build`'s own `GenerateSWOptions` names
+      // for exactly this case ("include some additional code, such as a
+      // push event listener"). Does not switch to `strategies:
+      // 'injectManifest'` -- that would change precache ownership, a
+      // strictly larger change than ADR-083 Part 7 authorizes.
+      workbox: {
+        importScripts: ['pios-push-sw.js'],
+      },
       // Sprint 0: Frontend Foundation — an installable manifest only.
       // No offline caching strategy is customized beyond the plugin's own
       // default precache of the built app shell; a future task revisits

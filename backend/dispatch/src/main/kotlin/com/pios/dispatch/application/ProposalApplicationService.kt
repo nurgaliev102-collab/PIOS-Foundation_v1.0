@@ -117,6 +117,22 @@ import java.time.Instant
  * bean by type regardless of this default (Kotlin default constructor
  * values only apply when Spring cannot resolve a bean of that type), so
  * production behavior is unaffected by this default existing.
+ *
+ * ## Driver Web Push (ADR-083, D-10)
+ *
+ * [driverPushNotifier] fires N1 (a new `OPEN` proposal) at the end of
+ * [handle], and N2 (`PRICE_PROPOSED -> ACCEPTED`) at the end of
+ * [confirmPriceWithinCallerTransaction] -- both calls just register the
+ * notifier's own after-commit hook; the actual Spring transaction
+ * synchronization and the Web Push send itself happen inside
+ * [com.pios.dispatch.persistence.WebPushDriverPushNotifier], never here.
+ * Deliberately **not** called from [acceptProposalWithinCallerTransaction]
+ * (`OPEN -> ACCEPTED`, `Proposal.accept()`) -- ADR-083 names this
+ * distinction as the single most important trigger boundary in the whole
+ * design, and no other method in this class may call [driverPushNotifier]
+ * at all. Defaults to [NoOpDriverPushNotifier], mirroring every other
+ * optional collaborator in this class, so every existing direct-construction
+ * test/call site continues to compile and behave unchanged.
  */
 @Service
 class ProposalApplicationService(
@@ -124,7 +140,8 @@ class ProposalApplicationService(
     private val transactionRunner: TransactionRunner = NoOpTransactionRunner,
     private val driverAvailabilityRepository: DriverAvailabilityRepository? = null,
     private val dispatchRequestRepository: DispatchRequestRepository? = null,
-    private val orderGuard: OrderGuard = NoOpOrderGuard
+    private val orderGuard: OrderGuard = NoOpOrderGuard,
+    private val driverPushNotifier: DriverPushNotifier = NoOpDriverPushNotifier
 ) {
 
     fun handle(command: ProposeDriverCommand): ProposalCreated = transactionRunner.run {
@@ -157,6 +174,7 @@ class ProposalApplicationService(
             viaTrustedFallback = command.viaTrustedFallback
         )
         proposalRepository.save(created.proposal)
+        driverPushNotifier.offerCreated(created.proposal.id, created.proposal.driver)
         created
     }
 
@@ -270,6 +288,7 @@ class ProposalApplicationService(
         }
         val event = proposal.confirmPrice()
         proposalRepository.save(proposal)
+        driverPushNotifier.priceConfirmed(proposal.id, proposal.driver)
         return event
     }
 

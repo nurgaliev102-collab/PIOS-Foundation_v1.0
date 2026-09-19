@@ -93,3 +93,19 @@ pios:
   # never computes one.
   # session:
   #   secret: ""
+  # ADR-083 (D-10, Driver Web Push for Open Proposal and Price
+  # Confirmation): the VAPID keypair WebPushDriverPushNotifier signs every
+  # Web Push send with, plus the contact subject the push service itself
+  # requires (RFC 8292). Deliberately left unset here -- a blank
+  # pios.push.vapid.private-key (or public-key) makes
+  # WebPushDriverPushNotifier disable the whole push path (fail-closed:
+  # every send becomes a silent no-op, logged once) and makes
+  # DriverPushSubscriptionController.getPublicKey respond 404, the same
+  # fail-closed posture pios.owner.*/pios.session.secret already establish
+  # above. Generated once per deployment (a VAPID keypair, never the
+  # deployment's session or owner credential); never committed.
+  # push:
+  #   vapid:
+  #     public-key: ""
+  #     private-key: ""
+  #     subject: ""

@@ -28,6 +28,7 @@ import { DriverOnboarding } from './DriverOnboarding'
 import { hasSeenDriverOnboarding, markDriverOnboardingSeen } from '../../persistence/localOnboardingSeen'
 import { InstallPIOS, isStandalone } from '../../features/install'
 import { hasSeenInstallHelp } from '../../persistence/localInstallSeen'
+import { pushSupport, enablePush, disablePush, fetchPushPublicKey } from '../../features/push'
 import {
   NotificationBell,
   useNotificationFacts,
@@ -865,6 +866,19 @@ export function DriverHome() {
   // dismiss fired, which is true only the first time ever.
   const [showInstall, setShowInstall] = useState(false)
 
+  // ADR-083 (D-10, Driver Web Push for Open Proposal and Price
+  // Confirmation): [pushAvailable] gates whether the opt-in control below
+  // renders at all -- `false` while this browser lacks the required APIs
+  // (`pushSupport()`) or while Dispatch's own public-key endpoint 404s
+  // (VAPID not configured server-side, fail-closed). Neither this nor
+  // [pushEnabled] ever triggers `Notification.requestPermission()` on its
+  // own -- only the control's own explicit click
+  // ([handleTogglePush]) does that, per ADR-083's own "NO auto-prompt on
+  // mount, ever" rule.
+  const [pushAvailable, setPushAvailable] = useState(false)
+  const [pushEnabled, setPushEnabled] = useState(false)
+  const [pushActionPending, setPushActionPending] = useState(false)
+
   const driverId = identity?.driverId ?? null
 
   useEffect(() => {
@@ -899,6 +913,58 @@ export function DriverHome() {
       active = false
     }
   }, [])
+
+  // ADR-083 (D-10): a one-time, best-effort check -- never a poll, never
+  // repeated on an interval -- of whether the opt-in control should render
+  // at all, and (via the browser's own already-local `PushManager.getSubscription()`,
+  // not a network call) whether this device already has a live
+  // subscription, so the control's own label reflects reality instead of
+  // always defaulting to "enable".
+  useEffect(() => {
+    if (!identity || !pushSupport()) {
+      return
+    }
+    let active = true
+    fetchPushPublicKey(identity.token).then(async (publicKey) => {
+      if (!active) {
+        return
+      }
+      setPushAvailable(publicKey != null)
+      if (publicKey == null) {
+        return
+      }
+      try {
+        const registration = await navigator.serviceWorker.ready
+        const subscription = await registration.pushManager.getSubscription()
+        if (active) {
+          setPushEnabled(subscription != null)
+        }
+      } catch {
+        // Best-effort only -- the control still renders, defaulting to "enable".
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [identity])
+
+  async function handleTogglePush() {
+    if (!identity || pushActionPending) {
+      return
+    }
+    setPushActionPending(true)
+    try {
+      if (pushEnabled) {
+        await disablePush(identity.token)
+        setPushEnabled(false)
+      } else {
+        const enabled = await enablePush(identity.token)
+        setPushEnabled(enabled)
+      }
+    } finally {
+      setPushActionPending(false)
+    }
+  }
 
   useEffect(() => {
     if (!driverId) {
@@ -1607,6 +1673,12 @@ export function DriverHome() {
 
   /** Section 6 ("Final Pre-Pilot Sprint"): the account itself is untouched — only this device forgets its own session. */
   function handleLogout() {
+    // ADR-083 (D-10): fire-and-forget, before the session is cleared below
+    // -- the DELETE this makes needs a still-valid token. Fully wrapped
+    // inside disablePush itself, so any failure never blocks logout.
+    if (identity) {
+      disablePush(identity.token)
+    }
     identityProvider.logout()
     setIdentity(null)
     setAuthStep('intro')
@@ -3075,6 +3147,27 @@ export function DriverHome() {
                 <p className={styles.growthTitle}>PIOS всегда под рукой</p>
                 <p className={styles.installCardText}>Добавьте PIOS на экран телефона.</p>
                 <Button label="Установить PIOS" variant="secondary" onClick={() => setShowInstall(true)} />
+              </section>
+            )}
+            {/* ADR-083 (D-10, Driver Web Push): explicit opt-in only --
+                never rendered when this browser lacks the required APIs or
+                Dispatch's own public-key endpoint 404s (VAPID not
+                configured, fail-closed). No permission prompt happens on
+                mount; only this control's own click. */}
+            {pushAvailable && (
+              <section className={styles.installCard}>
+                <p className={styles.growthTitle}>Уведомления о заказах</p>
+                <p className={styles.installCardText}>
+                  {pushEnabled
+                    ? 'PIOS может уведомлять вас о новых заказах, даже когда приложение закрыто.'
+                    : 'Включите уведомления, чтобы не пропустить заказ, когда приложение закрыто.'}
+                </p>
+                <Button
+                  label={pushEnabled ? 'Отключить уведомления' : 'Включить уведомления'}
+                  variant="secondary"
+                  disabled={pushActionPending}
+                  onClick={handleTogglePush}
+                />
               </section>
             )}
             <button type="button" className={styles.linkAction} onClick={() => setShowOnboarding(true)}>
