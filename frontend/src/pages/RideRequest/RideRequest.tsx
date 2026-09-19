@@ -1711,6 +1711,12 @@ export function RideRequest() {
       return
     }
     setHandoffAction('submitting')
+    // D-11.C3 follow-up (QA finding): captured before the request below,
+    // since [currentHandoff] itself clears once the next poll tick sees
+    // the Handoff has left SUBSTITUTE_ACCEPTED (comment further down) --
+    // this local copy is the only way this function still knows who the
+    // substitute was once that happens.
+    const substituteDriverId = currentHandoff.substituteDriverId
     try {
       await request(`/v1/handoffs/${currentHandoff.handoffId}/consent`, {
         method: 'POST',
@@ -1724,6 +1730,34 @@ export function RideRequest() {
       // updated `driverId`-facing facts. No optimistic local update is
       // made here beyond clearing the pending action state, mirroring
       // [handleConfirmPrice]'s own restraint.
+      //
+      // D-11.C3 follow-up (QA finding): [driverName]/[driverVehicle] are
+      // this screen's own display facts, not covered by the poll above
+      // and not returned by the consent endpoint itself -- a successful
+      // consent here means the Handoff has reached `COMMITTED`
+      // (`docs/PIOS_D07_HANDOFF_IMPLEMENTATION_SPEC.md` §5/§7: consent is
+      // only ever accepted from `SUBSTITUTE_ACCEPTED`, and its one
+      // possible successful outcome is `COMMITTED` -- the substitute is
+      // now the executing driver, Invariant #17). Refreshed here with the
+      // exact same `GET /v1/drivers/:id` call the discovery path's own
+      // re-keyed fetch above already uses, best-effort on failure the
+      // same way that call already is.
+      request<DriverSummary>(`/v1/drivers/${substituteDriverId}`)
+        .then((driver) => {
+          setDriverName(driver.displayName ?? substituteDriverId)
+          setDriverVehicle({
+            make: driver.vehicleMake ?? null,
+            model: driver.vehicleModel ?? null,
+            color: driver.vehicleColor ?? null,
+          })
+        })
+        .catch(() => {
+          // Best-effort, same tolerance the discovery path's own lookup
+          // above applies -- consent has already succeeded regardless of
+          // whether this particular display refresh does, so a failure
+          // here leaves the prior (driver A's) name/vehicle showing
+          // rather than blocking or blanking the rest of the screen.
+        })
     } catch (error) {
       if (handleSessionExpiredError(error)) {
         return
@@ -2345,8 +2379,15 @@ export function RideRequest() {
                 NO-GO; [driverVehicle] has no field to render one from even
                 if the backend ever regressed and sent one). Omitted
                 entirely when the assigned driver has declared no vehicle
-                at all, rather than rendering an empty line. */}
-            {vehicleDescription(driverVehicle) && (
+                at all, rather than rendering an empty line.
+                D-11.C3 follow-up (QA finding): also gated on [rideStatus]
+                itself -- DECLINED/LAPSED/WITHDRAWN are all reached from
+                inside this same 'confirmed' step (see the priority group
+                above in the polling effect), and none of them has a real
+                assigned driver any more, so no vehicle claim belongs on
+                screen for them either, even if [driverVehicle] still holds
+                a stale value from before the status changed. */}
+            {rideStatus !== 'DECLINED' && rideStatus !== 'LAPSED' && rideStatus !== 'WITHDRAWN' && vehicleDescription(driverVehicle) && (
               <Text role="body" tone="secondary">
                 🚗 Автомобиль: {vehicleDescription(driverVehicle)}
               </Text>

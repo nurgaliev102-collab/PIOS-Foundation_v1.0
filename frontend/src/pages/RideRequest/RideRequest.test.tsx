@@ -1964,3 +1964,201 @@ describe('RideRequest (driverless discovery entry, ADR-070)', () => {
     expect(screen.queryByText(/Kia Rio/)).not.toBeInTheDocument()
   }, 8000) // waits out one real 3s poll tick (STATUS_POLL_INTERVAL_MS), same margin as the driver-linked suite's own cancellation test
 })
+
+// D-11.C3 follow-up (independent QA review of the commit above found two
+// real, non-blocking gaps): (1) the vehicle line never refreshed across a
+// D-07 Handoff, so it kept showing the *original* driver's name/car after
+// a substitute driver actually took over the ride; (2) the vehicle line
+// had no [rideStatus] gate at all, so it kept rendering through DECLINED/
+// LAPSED/WITHDRAWN -- states reached from inside this same driver-linked,
+// already-'confirmed' step, where [driverVehicle] still holds whatever it
+// was set to at [loadInvitation] time even though there is no longer a
+// real assigned driver. Reuses the exact same driver-linked mock sequence
+// (loadInvitation's own driver fetch, then proposal/assignment/orders/
+// messages/handoffs polls, in that order) the existing D-07 suite above
+// already established.
+describe('RideRequest (D-11.C3 follow-up: handoff vehicle refresh + status gate)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    mockedRequest.mockReset()
+    mockedRequest.mockResolvedValue([])
+    seedIdentity()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** Queues the same six-call driver-linked "confirmed, live SUBSTITUTE_ACCEPTED Handoff" sequence the D-07 suite above already uses, naming driver-2 (not driver-substitute) as the substitute so its own vehicle/name are trivially distinct from driver-1's. */
+  function queueSubstituteAcceptedHandoffSequence() {
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-1',
+      availability: 'AVAILABLE',
+      displayName: 'Иван',
+      vehicleMake: 'Toyota',
+      vehicleModel: 'Camry',
+      vehicleColor: 'белый',
+    }) // loadInvitation's own GET /v1/drivers/driver-1
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', statedPrice: null, statedEtaMinutes: null }]) // proposal poll
+    mockedRequest.mockResolvedValueOnce([{ status: 'ACCEPTED', assignmentId: 'a1' }]) // assignment poll
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/orders?passengerReference= (ADR-058 requestedPickupAt)
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals/:id/messages
+    mockedRequest.mockResolvedValueOnce([
+      {
+        handoffId: 'h1',
+        assignmentId: 'a1',
+        orderId: 'order-1',
+        originalDriverId: 'driver-1',
+        substituteDriverId: 'driver-2',
+        status: 'SUBSTITUTE_ACCEPTED',
+        proposedAt: '2026-09-18T12:00:00Z',
+        substituteAcceptedAt: '2026-09-18T12:01:00Z',
+        resolvedAt: null,
+      },
+    ]) // GET /v1/handoffs?assignmentId=a1
+  }
+
+  it('(A) refreshes the shown vehicle to the substitute driver\'s own car once the Handoff is consented, and the original driver\'s car is gone', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    queueSubstituteAcceptedHandoffSequence()
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('🚗 Автомобиль: Toyota Camry, белый')).toBeInTheDocument()
+    await screen.findByRole('button', { name: 'Согласен' })
+
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/handoffs/h1/consent
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-2',
+      availability: 'AVAILABLE',
+      displayName: 'Пётр',
+      vehicleMake: 'Lada',
+      vehicleModel: 'Vesta',
+      vehicleColor: 'синий',
+    }) // GET /v1/drivers/driver-2 -- the new handoff-triggered refresh
+
+    await userEvent.click(screen.getByRole('button', { name: 'Согласен' }))
+
+    expect(await screen.findByText('🚗 Автомобиль: Lada Vesta, синий')).toBeInTheDocument()
+    expect(screen.queryByText('🚗 Автомобиль: Toyota Camry, белый')).not.toBeInTheDocument()
+
+    const driverFetchCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/drivers/driver-2')
+    expect(driverFetchCall).toBeDefined()
+  })
+
+  it('(B) updates driver name and vehicle together, consistently with the same substitute driver -- never a stale mix of the two', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    queueSubstituteAcceptedHandoffSequence()
+
+    renderAt('driver-1')
+    await screen.findByRole('button', { name: 'Согласен' })
+
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/handoffs/h1/consent
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-2',
+      availability: 'AVAILABLE',
+      displayName: 'Пётр',
+      vehicleMake: 'Lada',
+      vehicleModel: 'Vesta',
+      vehicleColor: 'синий',
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Согласен' }))
+
+    // Both facts must belong to driver-2 at the same time -- this would
+    // fail if only [driverName] or only [driverVehicle] were refreshed
+    // (e.g. "Пётр" shown beside the still-stale "Toyota Camry, белый", or
+    // "Иван" shown beside the new "Lada Vesta, синий").
+    expect(await screen.findByText('Пётр')).toBeInTheDocument()
+    expect(screen.getByText('🚗 Автомобиль: Lada Vesta, синий')).toBeInTheDocument()
+    expect(screen.queryByText('Иван')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Toyota Camry/)).not.toBeInTheDocument()
+  })
+
+  it('(C) hides the vehicle line when the ride status is DECLINED', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-1',
+      availability: 'AVAILABLE',
+      displayName: 'Иван',
+      vehicleMake: 'Toyota',
+      vehicleModel: 'Camry',
+      vehicleColor: 'белый',
+    })
+    mockedRequest.mockResolvedValueOnce([{ status: 'DECLINED' }])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText(/отклонил ваш заказ/)).toBeInTheDocument()
+    expect(screen.queryByText(/Автомобиль/)).not.toBeInTheDocument()
+  })
+
+  it('(D) hides the vehicle line when the ride status is LAPSED', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-1',
+      availability: 'AVAILABLE',
+      displayName: 'Иван',
+      vehicleMake: 'Toyota',
+      vehicleModel: 'Camry',
+      vehicleColor: 'белый',
+    })
+    mockedRequest.mockResolvedValueOnce([{ status: 'LAPSED' }])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText(/больше не активен/)).toBeInTheDocument()
+    expect(screen.queryByText(/Автомобиль/)).not.toBeInTheDocument()
+  })
+
+  it('(E) hides the vehicle line when the ride status is WITHDRAWN', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-1',
+      availability: 'AVAILABLE',
+      displayName: 'Иван',
+      vehicleMake: 'Toyota',
+      vehicleModel: 'Camry',
+      vehicleColor: 'белый',
+    })
+    mockedRequest.mockResolvedValueOnce([{ status: 'WITHDRAWN' }])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('🚫 Вы отменили этот заказ.')).toBeInTheDocument()
+    expect(screen.queryByText(/Автомобиль/)).not.toBeInTheDocument()
+  })
+
+  it('(F) never renders the substitute driver\'s vehicle plate, even if the handoff-refresh fetch hypothetically included one (D-11.C2 remains NO-GO)', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    queueSubstituteAcceptedHandoffSequence()
+
+    renderAt('driver-1')
+    await screen.findByRole('button', { name: 'Согласен' })
+
+    mockedRequest.mockResolvedValueOnce({}) // POST /v1/handoffs/h1/consent
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-2',
+      availability: 'AVAILABLE',
+      displayName: 'Пётр',
+      vehicleMake: 'Lada',
+      vehicleModel: 'Vesta',
+      vehicleColor: 'синий',
+      // A hypothetical contract violation -- same construction the D-11.C3
+      // plate-leak regression test above already uses, applied here to the
+      // new handoff-refresh fetch specifically.
+      vehiclePlateNumber: 'В456ТТ702',
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Согласен' }))
+
+    expect(await screen.findByText('🚗 Автомобиль: Lada Vesta, синий')).toBeInTheDocument()
+    expect(screen.queryByText(/В456ТТ702/)).not.toBeInTheDocument()
+  })
+})
