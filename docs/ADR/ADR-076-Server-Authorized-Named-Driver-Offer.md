@@ -106,6 +106,8 @@ Three limits are deliberate and must not be read past:
 - The `record != null` fail-closed rule is unchanged: an unknown driver is never proposed.
 - **This is an offer for a future time. It is not a calendar reservation, not a hold, and not a guarantee of fulfilment.** PIOS has no driver calendar and none is created here.
 
+  > **Amendment pointer (2026-09-19, D-11.B).** Narrowly superseded: PIOS now has a **read-only, informational** driver calendar, authorized separately by `ADR-084` (Driver Calendar — Read-Only Informational View). It remains true, unamended, that this offer is not a calendar reservation, not a hold, and not a guarantee of fulfilment — `ADR-084` builds no reservation, hold, or fulfilment guarantee either. Recorded here per `ADR-015` so this sentence does not silently become false.
+
 ### 7. `isTest` classification is now a fail-closed gate on **every** offer path
 
 `ProposalApplicationService.handle` enforces `record.isTest == command.isTest` for direct and First-Refusal offers, alongside the fallback-path gate `ADR-069` already established. Unknown classification (`record == null`) fails closed. This **strengthens** `ADR-069` and contradicts nothing in it.
@@ -114,7 +116,9 @@ One gap is carried forward unresolved, and is stated here so it is not mistaken 
 
 ## What this ADR does not authorize
 
-Any matching, ranking, scoring or priority mechanism (`ADR-002`, `ADR-034`, `PIOS_TAXI_PRODUCT_DECISIONS.md` §10 — a named driver is the passenger's own explicit choice, not a computed one); any driver calendar, hold, reservation or conflict check; any broadcast or parallel offering; reinstating a passenger-callable proposal-creation endpoint; deriving `isTest` from anything; any change to `ADR-070`'s Option B passenger-confirmed relationship formation, which is untouched by this ADR.
+Any matching, ranking, scoring or priority mechanism (`ADR-002`, `ADR-034`, `PIOS_TAXI_PRODUCT_DECISIONS.md` §10 — a named driver is the passenger's own explicit choice, not a computed one); any hold, reservation or conflict check; any broadcast or parallel offering; reinstating a passenger-callable proposal-creation endpoint; deriving `isTest` from anything; any change to `ADR-070`'s Option B passenger-confirmed relationship formation, which is untouched by this ADR.
+
+> **Amendment pointer (2026-09-19, D-11.B).** "any driver calendar" is narrowed out of this list — a read-only, informational driver calendar is separately authorized by `ADR-084`. "Hold, reservation or conflict check" remain fully prohibited, here and in `ADR-084`. Recorded here per `ADR-015`; the original clause is preserved above, not deleted, and now reads as historical scope prior to this narrowing.
 
 ---
 
