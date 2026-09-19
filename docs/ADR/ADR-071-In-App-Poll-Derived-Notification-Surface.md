@@ -10,6 +10,8 @@
 
 **Proposed Date:** 2026-09-15. **Ratified Date:** 2026-09-15. **Author:** Architect role.
 
+> **Amendment pointer (2026-09-19).** **Narrowly superseded in part, by `ADR-083` (D-10, Driver Web Push for Open Proposal and Price Confirmation).** Part 6's clauses on Web Push, service-worker customization, `pushManager` subscription, VAPID key material, backend change, new endpoint, new table/migration, changes to `frontend/vite.config.ts`'s PWA configuration, and notification opt-in are superseded **only** for driver-facing Web Push of exactly two facts — N1 (a new `OPEN` Proposal for that driver) and N2 (that driver's Proposal transitioning `PRICE_PROPOSED → ACCEPTED`) — per `ADR-083` §5 (clause-by-clause). Every other Part 6 clause, and all of Parts 1–5, remain in force verbatim: no event consumption, no `notifications` module scaffolding, no additional polling or changed poll interval, no server-side record of a communication, no passenger-facing push (N3 — NO-GO), no approximation of any gap below. Part 5's Gap 3 ("anything while the app is closed") is **narrowed, not closed** — see `ADR-083` §5.5: only N1 and N2 can now reach a closed app, best-effort, with no delivery guarantee. This document's original text is not edited or deleted (`CLAUDE.md`, "Never Delete Documentation"; `ADR-015`). The Product Decision this pointer depends on is `PRODUCT_DECISION_NOTIFICATIONS.md` Section 11 (Amendment, 2026-09-19), ratified by the Product Owner, per this ADR's own line 25.
+
 ### The standing Product Decision this ADR sits under, and how it was resolved
 
 `docs/PRODUCT_DECISION_NOTIFICATIONS.md` is a **Product Owner-authority** decision (its own §3) and it is unambiguous. §6:

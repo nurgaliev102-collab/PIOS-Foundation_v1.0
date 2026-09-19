@@ -122,3 +122,29 @@ Defer Notifications entirely. If and when the Product Owner identifies a genuine
 | 6. Decision | ADR-033 | ADR-017, ADR-018, ADR-026, ADR-028–ADR-033 |
 
 Where this document finds no evidence, it states so explicitly rather than filling the gap; resolution of any Unresolved Product Question (Section 7) requires a Product Owner decision, per PROJECT_CONSTITUTION.md Section 7, before any lower-authority document may act on it.
+
+---
+
+## 11. Amendment (2026-09-19) — D-10 Driver Web Push
+
+**Nothing above this section is edited, deleted, or rewritten.** This is an append-only amendment, ratified by the Product Owner, resolving Section 7 Q1 narrowly — for exactly one recipient and exactly two facts — and nothing beyond that.
+
+**Section 7 Q1 is answered: yes, narrowly.**
+
+- **Named recipient.** The driver named on the `Proposal` (`Proposal.driver`) — driver only. No passenger-facing resolution is made here; Section 7 Q1 remains otherwise unresolved for any other recipient.
+- **Named business purpose.** Reach that driver when the application is **closed**, for exactly the two facts the in-app surface (`ADR-071` Part 3) already shows when the application is open: D1 (a new order is waiting for a decision) and D2 (the passenger confirmed the driver's price). This is the gap `ADR-071` Part 5 Gap 3 names and explicitly refuses to fake.
+- **Named triggering facts.**
+  1. **N1** — a `Proposal` is created for that driver in status `OPEN`.
+  2. **N2** — that driver's `Proposal` transitions `PRICE_PROPOSED → ACCEPTED`.
+
+**Scope, stated as hard limits, not examples:**
+
+- Driver-facing only. **No passenger-side push notification of any kind is authorized by this amendment (N3 — NO-GO).**
+- Limited to N1 and N2. No other fact — D3 through D7, or any passenger fact P1 through P7 — is authorized for push delivery by this amendment.
+- **No event-consumption architecture is authorized.** Section 6's finding — *"No event-consumption relationship is authorized by this decision. In particular, Notifications is not authorized to consume OrderSubmitted, OrderAssigned, AssignmentAccepted, DriverAvailabilityChanged, OrderCompleted, or OrderCancelled"* — is **not amended** and remains fully in force. N1 and N2 are delivered from an in-process method call inside the module that already owns both aggregates, not from any event consumer.
+- **No general Notifications module is authorized.** `ADR-033` Part A (database-technology gate) and Part B (event-consumption gate) both remain open and unresolved. This amendment scaffolds nothing.
+- **Section 6's general constraint is reaffirmed, unamended, and is the binding constraint of this amendment:** *"any future notification's delivery must never be allowed to affect the underlying business transaction's own outcome."* Push delivery, failure, or absence must never change a Proposal's, Assignment's, Trip's, or Order's state, ordering, eligibility, or any business metric.
+
+**What this amendment does not do**, stated per Section 9's own prescribed sequence: it does **not** extend `USE_CASE_CATALOG.md`, `EVENT_CATALOG.md` Section 9, or `INTERFACE_CONTRACTS.md` Sections 5/7 — the Product Owner has confirmed no new use case or cross-module contract is created, because N1/N2 create no event, no consumer, and no inter-module contract for those documents to name.
+
+**Architecture record.** The architecture satisfying this amendment is recorded in `ADR-071`'s append-only supersession pointer (dated 2026-09-19) and in `ADR-083` (Driver Web Push for Open Proposal and Price Confirmation).
