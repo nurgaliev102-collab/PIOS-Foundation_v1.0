@@ -10,6 +10,9 @@ import com.pios.identity.application.LoginApplicationService
 import com.pios.identity.application.LoginRateLimiter
 import com.pios.identity.application.OtpClientKeyRateLimiter
 import com.pios.identity.application.OutboundSmsPort
+import com.pios.identity.application.OutboundSmsDeliveryException
+import com.pios.identity.application.SmsSubmissionFailure
+import com.pios.identity.application.SmsSubmissionState
 import com.pios.identity.application.PasswordHasher
 import com.pios.identity.application.PhoneOtpRequestRateLimiter
 import com.pios.identity.application.PhoneVerificationChallengeIssuer
@@ -42,7 +45,9 @@ import kotlin.test.assertTrue
  */
 internal class RecordingOutboundSmsPort : OutboundSmsPort {
     val sentCodes = ConcurrentHashMap<String, String>()
+    var failure: OutboundSmsDeliveryException? = null
     override fun sendVerificationCode(phone: Phone, code: String) {
+        failure?.let { throw it }
         sentCodes[phone.value] = code
     }
 }
@@ -459,6 +464,27 @@ class IdentityControllerTest {
         // The only observable difference is on the test double standing in
         // for the SMS provider -- never in anything the caller receives.
         assertTrue(smsPort.sentCodes.containsKey("+79992220002"))
+    }
+
+    @Test
+    fun `provider failure for eligible phone has the same 202 empty object as unknown phone`() {
+        val registered = register("+79992220012")
+        verifyPhoneViaLegacyEnrolment(registered)
+        smsPort.failure = OutboundSmsDeliveryException(
+            SmsSubmissionState.UNKNOWN, SmsSubmissionFailure.TRANSPORT_TIMEOUT
+        )
+
+        val unknown = controller.requestRecoveryFromAddress("+79992220099", "127.0.0.1", null)
+        val failedDelivery = controller.requestRecoveryFromAddress("+79992220012", "127.0.0.1", null)
+
+        assertEquals(HttpStatus.ACCEPTED, failedDelivery.statusCode)
+        assertEquals(unknown.statusCode, failedDelivery.statusCode)
+        assertEquals(emptyMap(), unknown.body)
+        assertEquals(unknown.body, failedDelivery.body)
+        assertNotNull(challengeRepository.findLiveForUpdate(
+            com.pios.identity.domain.IdentityId(registered.identityId),
+            com.pios.identity.domain.PhoneVerificationPurpose.RECOVERY
+        ))
     }
 
     // --- D-03: legacy enrolment (phone/verify/request, phone/verify/confirm) ---

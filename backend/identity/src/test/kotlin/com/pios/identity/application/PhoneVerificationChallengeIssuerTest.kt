@@ -1,9 +1,13 @@
 package com.pios.identity.application
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.pios.identity.domain.IdentityId
 import com.pios.identity.domain.Phone
 import com.pios.identity.domain.PhoneVerificationPurpose
 import com.pios.identity.persistence.InMemoryPhoneVerificationChallengeRepository
+import org.slf4j.LoggerFactory
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -69,5 +73,39 @@ class PhoneVerificationChallengeIssuerTest {
         val stored = repository.findLiveForUpdate(identityId, PhoneVerificationPurpose.RECOVERY)!!
         val actualTtl = stored.expiresAt.epochSecond - stored.createdAt.epochSecond
         assertEquals(600L, actualTtl)
+    }
+
+    @Test
+    fun `provider failure is logged by classification only and leaves committed challenge bounded`() {
+        var codeSeenByProvider = ""
+        val failingPort = OutboundSmsPort { _, code ->
+            codeSeenByProvider = code
+            throw OutboundSmsDeliveryException(
+                SmsSubmissionState.UNKNOWN, SmsSubmissionFailure.TRANSPORT_TIMEOUT
+            )
+        }
+        val failingIssuer = PhoneVerificationChallengeIssuer(
+            repository, PasswordHasher(defaultIterations = 1000), failingPort,
+            ttlSeconds = 600, maxAttempts = 5, codeDigits = 6
+        )
+        val logger = LoggerFactory.getLogger(PhoneVerificationChallengeIssuer::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        try {
+            failingIssuer.issue(identityId, phone, PhoneVerificationPurpose.RECOVERY)
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
+        }
+
+        val stored = repository.findLiveForUpdate(identityId, PhoneVerificationPurpose.RECOVERY)!!
+        assertTrue(stored.isLive)
+        assertEquals(5, stored.maxAttempts)
+        assertEquals(600L, stored.expiresAt.epochSecond - stored.createdAt.epochSecond)
+        assertNotEquals(codeSeenByProvider, stored.codeHash)
+        val logText = appender.list.joinToString("\n") { it.formattedMessage }
+        assertTrue(logText.contains("UNKNOWN"))
+        assertFalse(logText.contains(codeSeenByProvider))
+        assertFalse(logText.contains(phone.value))
     }
 }

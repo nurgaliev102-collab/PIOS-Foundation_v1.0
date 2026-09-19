@@ -31,12 +31,18 @@ $scriptDir = $PSScriptRoot
 
 $commonSecretNames = @("PIOS_OWNER_USERNAME", "PIOS_OWNER_PASSWORD_HASH", "PIOS_OWNER_PASSWORD_SALT")
 $aiAdvisorExtraNames = @("PIOS_AI_ADVISOR_PROVIDER", "PIOS_AI_ADVISOR_QWEN_MODEL", "PIOS_AI_ADVISOR_QWEN_API_KEY")
+$identityExtraNames = @("PIOS_SMS_API_ID", "PIOS_SMS_SENDER")
+$identityOptionalDefaults = @{
+    PIOS_SMS_API_BASE_URL = "https://sms.ru"
+    PIOS_SMS_CONNECT_TIMEOUT_MS = "2000"
+    PIOS_SMS_READ_TIMEOUT_MS = "5000"
+}
 
 $services = @(
     @{ Dir = "ai-advisor"; File = "pios-ai-advisor.xml"; Names = $commonSecretNames + $aiAdvisorExtraNames },
     @{ Dir = "dispatch"; File = "pios-dispatch.xml"; Names = $commonSecretNames },
     @{ Dir = "driver-management"; File = "pios-driver-management.xml"; Names = $commonSecretNames },
-    @{ Dir = "identity"; File = "pios-identity.xml"; Names = $commonSecretNames },
+    @{ Dir = "identity"; File = "pios-identity.xml"; Names = $commonSecretNames + $identityExtraNames + @($identityOptionalDefaults.Keys) },
     @{ Dir = "order-management"; File = "pios-order-management.xml"; Names = $commonSecretNames },
     @{ Dir = "passenger-experience"; File = "pios-passenger-experience.xml"; Names = $commonSecretNames }
 )
@@ -49,7 +55,7 @@ function Fail([string]$message) {
 }
 
 # --- Step 1: read every required value from Machine-scope, once -----------
-$allRequiredNames = ($services | ForEach-Object { $_.Names } | Select-Object -Unique)
+$allRequiredNames = ($services | ForEach-Object { $_.Names } | Select-Object -Unique | Where-Object { -not $identityOptionalDefaults.ContainsKey($_) })
 $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
 try {
     $envProps = Get-ItemProperty -Path $regPath -ErrorAction Stop
@@ -71,6 +77,11 @@ foreach ($name in $allRequiredNames) {
 if ($missing.Count -gt 0) {
     # Names only -- never values -- even in this failure path.
     Fail "missing required Machine-scope environment variable(s): $($missing -join ', '). No XML files were generated."
+}
+
+foreach ($name in $identityOptionalDefaults.Keys) {
+    $v = $envProps.$name
+    $values[$name] = if ([string]::IsNullOrEmpty($v)) { $identityOptionalDefaults[$name] } else { $v }
 }
 
 # --- Step 2: validate every template exists before writing anything -------
@@ -96,7 +107,9 @@ try {
             if ($content.IndexOf($token) -lt 0) {
                 Fail "template $templatePath does not contain expected placeholder $token."
             }
-            $content = $content.Replace($token, $values[$name])
+            # Values are inserted into XML attributes, including the SMS
+            # credential. Escape XML metacharacters without printing values.
+            $content = $content.Replace($token, [System.Security.SecurityElement]::Escape($values[$name]))
         }
 
         # Any remaining __UPPER_SNAKE__ token means a placeholder was missed

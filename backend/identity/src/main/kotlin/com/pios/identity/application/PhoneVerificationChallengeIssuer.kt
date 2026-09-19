@@ -4,6 +4,7 @@ import com.pios.identity.domain.IdentityId
 import com.pios.identity.domain.Phone
 import com.pios.identity.domain.PhoneVerificationChallenge
 import com.pios.identity.domain.PhoneVerificationPurpose
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import java.security.SecureRandom
@@ -47,6 +48,7 @@ class PhoneVerificationChallengeIssuer(
     private val challengeGuard: PhoneVerificationChallengeGuard = NoOpPhoneVerificationChallengeGuard
 ) {
     private val secureRandom = SecureRandom()
+    private val logger = LoggerFactory.getLogger(PhoneVerificationChallengeIssuer::class.java)
 
     fun issue(identityId: IdentityId, phone: Phone, purpose: PhoneVerificationPurpose) {
         val code = generateCode()
@@ -75,7 +77,21 @@ class PhoneVerificationChallengeIssuer(
         }
         // Never logged (D-03.7); code exists in memory only as long as this
         // call, and only as a plain numeric string handed to the port below.
-        outboundSmsPort.sendVerificationCode(phone, code)
+        // The challenge is already committed. A definite provider refusal
+        // leaves an unusable but bounded challenge; a timeout may have sent
+        // the SMS, so the same challenge must remain valid. In either case
+        // an automatic retry could duplicate an OTP. A later user request
+        // supersedes this challenge through the normal guarded path.
+        try {
+            outboundSmsPort.sendVerificationCode(phone, code)
+        } catch (ex: OutboundSmsDeliveryException) {
+            logger.warn("SMS submission {} reason={} httpStatus={}", ex.state, ex.failure, ex.httpStatus)
+        } catch (ex: RuntimeException) {
+            // Keep the anonymous recovery response generic even if a future
+            // adapter fails unexpectedly. Never log the exception or cause:
+            // an HTTP client exception may contain request/response secrets.
+            logger.warn("SMS submission UNKNOWN reason=UNEXPECTED")
+        }
     }
 
     private fun generateCode(): String {
