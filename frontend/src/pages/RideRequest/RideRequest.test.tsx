@@ -1635,6 +1635,86 @@ describe('RideRequest', () => {
   })
 })
 
+// D-11.C3 (docs/PIOS_D11_DECISION_LOCK.md; docs/ADR/ADR-085-Driver-Vehicle-Plate-Visibility.md
+// Part 4; H17, docs/PIOS_PRODUCT_HYPOTHESES.md): the assigned driver's own
+// vehicle make/model/colour on the confirmed-ride screen, driver-linked
+// path (`/i/:driverCode/request`) -- the driver-linked entry resumes
+// straight to 'confirmed' via `saveCurrentOrderId`/`getCurrentOrderId`,
+// same precedent the existing cancellation suite above already uses, so
+// these tests do not need to also exercise the order-submission form.
+describe('RideRequest (D-11.C3: vehicle on assigned-ride screen, driver-linked path)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    mockedRequest.mockReset()
+    mockedRequest.mockResolvedValue([])
+    seedIdentity()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('shows the assigned driver\'s vehicle make, model, and colour when present on the driver record', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-1',
+      availability: 'AVAILABLE',
+      displayName: 'Иван',
+      vehicleMake: 'Toyota',
+      vehicleModel: 'Camry',
+      vehicleColor: 'белый',
+    })
+    mockedRequest.mockResolvedValueOnce([{ status: 'OPEN' }])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
+    expect(screen.getByText('🚗 Автомобиль: Toyota Camry, белый')).toBeInTheDocument()
+  })
+
+  it('renders safely when the assigned driver has declared no vehicle -- no crash, no "undefined"/"null" text, no vehicle line at all', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    // No vehicleMake/vehicleModel/vehicleColor at all -- same shape
+    // `DriverResponse.kt` returns for a driver who has never declared one.
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([{ status: 'OPEN' }])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
+    expect(screen.queryByText(/Автомобиль/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/undefined/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\bnull\b/i)).not.toBeInTheDocument()
+  })
+
+  it('never renders the vehicle plate on this screen, even if the mocked backend response hypothetically included one (D-11.C2 remains NO-GO)', async () => {
+    saveCurrentOrderId('driver-1', 'order-1')
+    mockMeResponse()
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-1',
+      availability: 'AVAILABLE',
+      displayName: 'Иван',
+      vehicleMake: 'Lada',
+      vehicleModel: 'Vesta',
+      vehicleColor: 'синий',
+      // A hypothetical contract violation -- ADR-085/D-11.C1 already
+      // removes this field for this exact unauthenticated caller context,
+      // but this test proves the frontend itself never renders it even if
+      // that backend guarantee were ever broken.
+      vehiclePlateNumber: 'А123ВС799',
+    })
+    mockedRequest.mockResolvedValueOnce([{ status: 'OPEN' }])
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('✅ Заказ оформлен.')).toBeInTheDocument()
+    expect(screen.getByText('🚗 Автомобиль: Lada Vesta, синий')).toBeInTheDocument()
+    expect(screen.queryByText(/А123ВС799/)).not.toBeInTheDocument()
+  })
+})
+
 // ADR-070 (Channel 1 Discovery Matching), Part 1/2: the driverless
 // (`/request`) entry point -- an identified passenger with no specific
 // driver in mind. Same component (`RideRequest`), reached with no
@@ -1828,4 +1908,59 @@ describe('RideRequest (driverless discovery entry, ADR-070)', () => {
     const createBody = JSON.parse((createCall?.[1] as RequestInit).body as string)
     expect(createBody).toEqual({ driverId: 'driver-matched', passengerReference: TEST_IDENTITY.identityId })
   })
+
+  // D-11.C3 (docs/PIOS_D11_DECISION_LOCK.md, H17): the discovery path's own
+  // "not a stale driver" requirement. No driver is known at mount; the
+  // vehicle shown must belong to whichever real driver the current
+  // Proposal actually names, and must re-key -- not stay stuck on the
+  // first driver ever seen -- when ADR-078 Decision B resumes the same
+  // order to a *different* driver after the first one declines within the
+  // order's own routing window. Uses real timers (this suite's existing
+  // convention, see the driver-linked suite's own cancellation test above)
+  // to let the second, real 3s poll tick actually run.
+  it('shows the actual matched driver\'s vehicle, fetched for that specific driver id, and re-keys away from a driver who has since declined (ADR-078 Decision B) -- never a stale previous driver\'s vehicle', async () => {
+    mockMeResponse()
+
+    renderAtDiscovery()
+
+    await userEvent.type(await screen.findByLabelText('Откуда'), 'Агидель')
+    await userEvent.type(screen.getByLabelText('Куда'), 'Международный аэропорт Уфа')
+
+    mockedRequest.mockResolvedValueOnce({ orderId: 'order-discovery-vehicle' }) // POST /v1/orders
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', status: 'OPEN', driverId: 'driver-A', statedPrice: null, statedEtaMinutes: null },
+    ]) // status poll, tick 1: matched to driver-A
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-A',
+      availability: 'AVAILABLE',
+      displayName: 'Марат',
+      vehicleMake: 'Kia',
+      vehicleModel: 'Rio',
+      vehicleColor: 'чёрный',
+    }) // GET /v1/drivers/driver-A
+
+    await userEvent.click(screen.getByRole('button', { name: 'Заказать поездку' }))
+
+    expect(await screen.findByText('🚗 Автомобиль: Kia Rio, чёрный')).toBeInTheDocument()
+
+    // driver-A declines; ADR-078 Decision B resumes the same order within
+    // its own window, offering driver-B next -- the same order id, a
+    // genuinely different driver, not a new order.
+    mockedRequest.mockResolvedValueOnce([
+      { proposalId: 'p1', status: 'DECLINED', driverId: 'driver-A', statedPrice: null, statedEtaMinutes: null },
+      { proposalId: 'p2', status: 'OPEN', driverId: 'driver-B', statedPrice: null, statedEtaMinutes: null },
+    ]) // status poll, tick 2 (the next real 3s interval tick)
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-B',
+      availability: 'AVAILABLE',
+      displayName: 'Тимур',
+      vehicleMake: 'Hyundai',
+      vehicleModel: 'Solaris',
+      vehicleColor: 'серый',
+    }) // GET /v1/drivers/driver-B
+
+    expect(await screen.findByText('🚗 Автомобиль: Hyundai Solaris, серый', {}, { timeout: 4000 })).toBeInTheDocument()
+    // The stale driver-A vehicle must be gone, not merely joined by a second line.
+    expect(screen.queryByText(/Kia Rio/)).not.toBeInTheDocument()
+  }, 8000) // waits out one real 3s poll tick (STATUS_POLL_INTERVAL_MS), same margin as the driver-linked suite's own cancellation test
 })

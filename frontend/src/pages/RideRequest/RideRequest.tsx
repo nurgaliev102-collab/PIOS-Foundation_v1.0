@@ -98,11 +98,58 @@ interface CircleMember {
   isPrimary: boolean
 }
 
-/** `GET /v1/drivers/:id`'s own response shape (Driver Management) — same fields `invitationSource.ts` already reads. */
+/**
+ * `GET /v1/drivers/:id`'s own response shape (Driver Management) — same
+ * fields `invitationSource.ts` already reads.
+ *
+ * `vehicleMake`/`vehicleModel`/`vehicleColor` (D-11.C3, `docs/PIOS_D11_DECISION_LOCK.md`,
+ * `docs/ADR/ADR-085-Driver-Vehicle-Plate-Visibility.md` Part 4): the same
+ * public fields `DriverResponse.kt` already returns on this exact
+ * unauthenticated path -- optional/nullable for a driver who has not
+ * declared a vehicle yet. Deliberately no `vehiclePlateNumber` field here
+ * at all: D-11.C2 (passenger plate visibility) remains NO-GO, and this
+ * screen must have nothing to read a plate from even if a future backend
+ * regression ever put one back on this response (ADR-085's own remediation
+ * removed it for this exact caller context, but this type-level omission
+ * is a second, independent guard on the frontend).
+ */
 interface DriverSummary {
   id: string
   availability: 'AVAILABLE' | 'UNAVAILABLE'
   displayName: string | null
+  vehicleMake?: string | null
+  vehicleModel?: string | null
+  vehicleColor?: string | null
+}
+
+/**
+ * D-11.C3: the currently assigned/matched driver's own vehicle
+ * make/model/colour, shown on the confirmed-ride screen -- see
+ * [driverVehicle]'s own KDoc for how this is kept in sync with whichever
+ * driver id is actually assigned, on both entry paths.
+ */
+interface DriverVehicleInfo {
+  make: string | null
+  model: string | null
+  color: string | null
+}
+
+/**
+ * D-11.C3: renders "марка модель, цвет" from whatever subset of
+ * [DriverVehicleInfo] is actually present -- a driver who declared only
+ * some fields (or none) never renders "undefined"/"null" text; `null` when
+ * there is nothing at all to show, so the call site can omit the line
+ * entirely rather than render an empty one.
+ */
+function vehicleDescription(vehicle: DriverVehicleInfo | null): string | null {
+  if (!vehicle) {
+    return null
+  }
+  const makeModel = [vehicle.make, vehicle.model].filter((part): part is string => Boolean(part)).join(' ')
+  if (makeModel && vehicle.color) {
+    return `${makeModel}, ${vehicle.color}`
+  }
+  return makeModel || vehicle.color || null
 }
 
 /**
@@ -511,6 +558,18 @@ export function RideRequest() {
   // circle step skipped entirely) can finally show it before submission,
   // not only after.
   const [driverAvailability, setDriverAvailability] = useState<'AVAILABLE' | 'UNAVAILABLE' | null>(null)
+  // D-11.C3 (docs/PIOS_D11_DECISION_LOCK.md, H17): the currently assigned/
+  // matched driver's own vehicle make/model/colour, shown on the confirmed
+  // ride screen only (never the 'form'/'circle' steps -- this is an
+  // "assigned driver" fact, not a pre-order one). Kept in sync with
+  // [driverName]/[driverAvailability] exactly -- set from the same
+  // [loadInvitation] call on the driver-linked path (fixed for this
+  // screen's whole lifetime, since a named-driver order is never
+  // substituted with a different driver, ADR-076/ADR-078 Decision B), and
+  // re-fetched/re-keyed off [matchedDriverId] on the discovery path (see
+  // the polling effect below), never left stale across a decline-and-retry
+  // to a different driver (ADR-078 Decision B).
+  const [driverVehicle, setDriverVehicle] = useState<DriverVehicleInfo | null>(null)
   const [circle, setCircle] = useState<EnrichedCircleMember[]>([])
   const [circleError, setCircleError] = useState(false)
   // P1 UX audit (2026-09-12): session expiry, centrally classified by
@@ -680,6 +739,15 @@ export function RideRequest() {
       }
       setDriverName(result.invitation.driverName)
       setDriverAvailability(result.invitation.availability)
+      // D-11.C3: `InvitationInfo` already carries these three fields
+      // (`invitationSource.ts`, same public `GET /v1/drivers/:id` response
+      // [driverName]/[driverAvailability] above just came from) -- never
+      // its own `vehiclePlateNumber` field, which this screen never reads.
+      setDriverVehicle({
+        make: result.invitation.vehicleMake,
+        model: result.invitation.vehicleModel,
+        color: result.invitation.vehicleColor,
+      })
       // First-pilot feedback: a passenger who reloads this page must land
       // back on their current order, not a blank form — same driver, same
       // browser, an order already placed through `localCurrentOrder.ts`.
@@ -913,6 +981,15 @@ export function RideRequest() {
                   }
                   setDriverName(driver.displayName ?? pickedDriverId)
                   setDriverAvailability(driver.availability)
+                  // D-11.C3: re-fetched every time [pickedDriverId] itself
+                  // changes (the `if` guard just above) -- never left
+                  // showing an earlier driver's car after a decline-and-
+                  // retry to a different one (ADR-078 Decision B).
+                  setDriverVehicle({
+                    make: driver.vehicleMake ?? null,
+                    model: driver.vehicleModel ?? null,
+                    color: driver.vehicleColor ?? null,
+                  })
                 })
                 .catch(() => {
                   // Best-effort, same tolerance [enrichCircle] already
@@ -922,6 +999,10 @@ export function RideRequest() {
                   }
                   setDriverName(pickedDriverId)
                   setDriverAvailability('UNAVAILABLE')
+                  // D-11.C3: an unreachable driver record has no vehicle to
+                  // show either -- never carries over whatever the
+                  // previously-matched driver's own vehicle happened to be.
+                  setDriverVehicle(null)
                 })
             }
           }
@@ -1740,6 +1821,11 @@ export function RideRequest() {
       setHasProposal(false)
       setDriverName(null)
       setDriverAvailability(null)
+      // D-11.C3: same reasoning as [driverName]/[driverAvailability] just
+      // above -- the repeat order's own discovery match may name a
+      // different driver (or none yet), so the previous driver's vehicle
+      // must not carry over.
+      setDriverVehicle(null)
     }
     setStep('form')
   }
@@ -2253,6 +2339,17 @@ export function RideRequest() {
                 availability={driverAvailability ?? undefined}
                 emphasis="prominent"
               />
+            )}
+            {/* D-11.C3 (docs/PIOS_D11_DECISION_LOCK.md, H17): make/model/
+                colour only -- deliberately never the plate (D-11.C2 remains
+                NO-GO; [driverVehicle] has no field to render one from even
+                if the backend ever regressed and sent one). Omitted
+                entirely when the assigned driver has declared no vehicle
+                at all, rather than rendering an empty line. */}
+            {vehicleDescription(driverVehicle) && (
+              <Text role="body" tone="secondary">
+                🚗 Автомобиль: {vehicleDescription(driverVehicle)}
+              </Text>
             )}
             {/* UI/UX redesign, Stage 2 (2026-09-12): used to be a
                 `StatusMessage tone="success"` -- a second, permanently-
