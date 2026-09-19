@@ -46,6 +46,27 @@ package com.pios.dispatch.api
  * Part 5 freezes that contract (D-09 Architect Review); this is the one,
  * additive, already-precedented (`agreedAmount`, `executingDriverId`)
  * contract this fact is exposed through instead.
+ *
+ * [requestedPickupAt] and [hasPotentialOverlap] (D-11.B, Driver Calendar
+ * — read-only, informational view; `ADR-084`) are appended last, both
+ * additive and nullable/defaulted, following the exact same precedent as
+ * [agreedAmount]/[executingDriverId]/[viaTrustedFallback] above — every
+ * existing caller of this response (`arrive`/`start`/`complete`,
+ * `?orderId=`/`?orderIds=`) keeps compiling and behaving unchanged,
+ * since neither field is populated on those paths.
+ * [requestedPickupAt] surfaces `dispatch_requests.requested_pickup_at`
+ * (`PostgreSQLDispatchRequestRepository`) for the same order — a plain
+ * ISO-8601 instant, `null` when Dispatch has no such fact for this order
+ * (either genuinely absent, e.g. this row predates
+ * `V19__dispatch_requests.sql`, or simply not looked up on this
+ * particular read path). [hasPotentialOverlap] is only ever computed by
+ * `AssignmentController.driverCalendarHttp` — Part 3's own
+ * ratified-60-minutes-inclusive comparison against this driver's other
+ * future accepted rides in the same response — and defaults to `false`
+ * (meaning "not computed", never "confirmed no overlap") on every other
+ * path. Neither field affects, or is read by, any other part of the
+ * system (ADR-084 Part 4): both are purely informational projections of
+ * facts Dispatch already owns.
  */
 data class AssignmentResponse(
     val assignmentId: String,
@@ -63,5 +84,7 @@ data class AssignmentResponse(
     val terminationNote: String? = null,
     val agreedAmount: String? = null,
     val executingDriverId: String? = null,
-    val viaTrustedFallback: Boolean = false
+    val viaTrustedFallback: Boolean = false,
+    val requestedPickupAt: String? = null,
+    val hasPotentialOverlap: Boolean = false
 )

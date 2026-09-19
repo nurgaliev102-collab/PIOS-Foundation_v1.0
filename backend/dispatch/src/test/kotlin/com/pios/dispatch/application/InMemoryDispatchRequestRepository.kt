@@ -42,4 +42,12 @@ internal class InMemoryDispatchRequestRepository : DispatchRequestRepository {
     private fun update(orderId: String, state: DispatchRequestState) {
         records.computeIfPresent(orderId) { _, value -> value.copy(state = state) }
     }
+
+    override fun findPickupTimesForOrders(orderIds: List<String>): Map<String, Instant> {
+        if (orderIds.isEmpty()) return emptyMap()
+        val idSet = orderIds.toSet()
+        return records.values
+            .filter { it.orderId in idSet && it.requestedPickupAt != null }
+            .associate { it.orderId to it.requestedPickupAt!! }
+    }
 }

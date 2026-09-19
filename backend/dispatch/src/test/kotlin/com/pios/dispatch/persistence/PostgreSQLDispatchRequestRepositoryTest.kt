@@ -58,6 +58,31 @@ class PostgreSQLDispatchRequestRepositoryTest {
         assertNull(transactionRunner.run { repository.findForUpdate(orderId) })
     }
 
+    // --- D-11.B (Driver Calendar, `ADR-084` Part 2): findPickupTimesForOrders ---
+
+    @Test
+    fun `findPickupTimesForOrders returns only orders with a known, non-null pickup instant`() {
+        val withPickup = "cal-pickup-${UUID.randomUUID()}"
+        val withoutPickup = "cal-no-pickup-${UUID.randomUUID()}"
+        val unknown = "cal-unknown-${UUID.randomUUID()}"
+        val pickupAt = now.plusSeconds(3600)
+        transactionRunner.run {
+            repository.insertIfAbsent(record(withPickup).copy(requestedPickupAt = pickupAt))
+            repository.insertIfAbsent(record(withoutPickup))
+        }
+
+        val result = repository.findPickupTimesForOrders(listOf(withPickup, withoutPickup, unknown))
+
+        assertEquals(pickupAt, result[withPickup])
+        assertTrue(withoutPickup !in result)
+        assertTrue(unknown !in result)
+    }
+
+    @Test
+    fun `findPickupTimesForOrders returns an empty map for an empty order id list`() {
+        assertTrue(repository.findPickupTimesForOrders(emptyList()).isEmpty())
+    }
+
     private fun record(orderId: String) = DispatchRequestRecord(
         orderId = orderId,
         passengerReference = "passenger-qa",

@@ -89,6 +89,28 @@ class PostgreSQLDispatchRequestRepository(private val jdbcTemplate: JdbcTemplate
         )
     }
 
+    /**
+     * D-11.B (Driver Calendar, `ADR-084` Part 2): the same `IN (...)`
+     * batching technique [com.pios.dispatch.persistence.PostgreSQLAssignmentRepository.findByOrders]
+     * already uses, applied here to read only [requested_pickup_at]
+     * instead of a full row. `requested_pickup_at IS NOT NULL` in the
+     * `WHERE` clause is what makes "absent from the map" the one signal
+     * for "no known pickup time", per this method's own KDoc on
+     * [DispatchRequestRepository].
+     */
+    override fun findPickupTimesForOrders(orderIds: List<String>): Map<String, Instant> {
+        if (orderIds.isEmpty()) return emptyMap()
+        val placeholders = orderIds.joinToString(", ") { "?" }
+        return jdbcTemplate.query(
+            """
+            SELECT order_id, requested_pickup_at FROM dispatch_requests
+            WHERE order_id IN ($placeholders) AND requested_pickup_at IS NOT NULL
+            """.trimIndent(),
+            { rs, _ -> rs.getString("order_id") to rs.getTimestamp("requested_pickup_at").toInstant() },
+            *orderIds.toTypedArray()
+        ).toMap()
+    }
+
     private fun updateState(orderId: String, state: String) {
         jdbcTemplate.update(
             "UPDATE dispatch_requests SET state = ?, next_attempt_at = NULL WHERE order_id = ? AND state = 'PENDING'",

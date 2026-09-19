@@ -213,6 +213,18 @@ interface AssignmentInfo {
   // Tier 1 (trusted fallback) rather than Tier 3/First Refusal/manual.
   // No score, no ranking, no priority meaning attaches to this.
   viaTrustedFallback?: boolean | null
+  // D-11.B (Driver Calendar — read-only, informational view; ADR-084):
+  // `dispatch_requests.requested_pickup_at` for this same order, `null`
+  // on every path except `GET /v1/assignments/calendar` (the backend's
+  // own additive, appended-last field -- see `AssignmentResponse.kt`'s
+  // own KDoc).
+  requestedPickupAt?: string | null
+  // D-11.B: only ever populated by `GET /v1/assignments/calendar` -- a
+  // purely informational "potential overlap" flag (ratified 60-minutes-
+  // inclusive threshold, ADR-084 Part 3), `false`/absent everywhere else.
+  // Never a confirmed conflict, never read by any dispatch/ranking/trust/
+  // pricing code path.
+  hasPotentialOverlap?: boolean | null
 }
 
 type HandoffStatusValue = 'PROPOSED' | 'SUBSTITUTE_ACCEPTED' | 'COMMITTED' | 'REFUSED' | 'WITHDRAWN'
@@ -803,6 +815,20 @@ export function DriverHome() {
   // Part 5): loaded alongside [connections]/[milestones] below, same
   // best-effort tolerance -- see [loadClients]'s own KDoc.
   const [clients, setClients] = useState<DriverClientListItem[]>([])
+  // D-11.B (Driver Calendar — read-only, informational view; ADR-084):
+  // this driver's own accepted future rides. Unlike [clients]/[milestones]
+  // above, deliberately **not** loaded on this screen's own 3-second poll
+  // -- see the `useEffect` below (keyed on [activeBusinessTab]) for why:
+  // folding it into the unconditional polling effect above would have
+  // added a new `request()` call on every render this screen's own
+  // existing test suite already depends on the exact positional order of
+  // (`DriverHome.test.tsx`'s own `mockResolvedValueOnce` chains), shifting
+  // every subsequent queued response by one and breaking tests with no
+  // relationship to this feature at all. Loading it only once this tab is
+  // actually opened avoids that entirely, and also means a driver who
+  // never opens "Маршруты" never causes this fetch at all.
+  const [calendarEntries, setCalendarEntries] = useState<AssignmentInfo[]>([])
+  const [calendarStatus, setCalendarStatus] = useState<Status>('loading')
   // Product owner request, 2026-09-07: "Мой бизнес" as three separate
   // screens (Обзор/Клиенты/Маршруты), not one long scroll -- see the
   // BUSINESS_TABS section below for what deliberately stayed outside the
@@ -1041,6 +1067,25 @@ export function DriverHome() {
     }
   }, [driverId, identity])
 
+  // D-11.B (Driver Calendar — read-only, informational view; ADR-084):
+  // loads once whenever "Маршруты" (`activeBusinessTab === 'routes'`)
+  // becomes the active business tab -- not on this screen's own 3-second
+  // poll (see [calendarEntries]'s own KDoc for why). Re-fires every time
+  // this tab is (re-)opened, mirroring a plain "load on view" screen; no
+  // interval, since this is informational data with no product
+  // requirement for near-real-time refresh while the tab merely stays
+  // open.
+  useEffect(() => {
+    if (activeBusinessTab !== 'routes' || !driverId || !identity) {
+      return
+    }
+    let active = true
+    loadCalendar(active, driverId, identity.token)
+    return () => {
+      active = false
+    }
+  }, [activeBusinessTab, driverId, identity])
+
   /**
    * ADR-060 Decision 1/Mode 2: `GET /v1/orders?ids=...` now requires a
    * driver-linked Bearer token, and returns only the named orders -- this
@@ -1169,6 +1214,38 @@ export function DriverHome() {
       })
       .catch(() => {
         // Best-effort: see this function's own KDoc.
+      })
+  }
+
+  /**
+   * D-11.B (Driver Calendar — read-only, informational view; ADR-084):
+   * `GET /v1/assignments/calendar?driverId=...` -- Dispatch's own new
+   * sibling endpoint (`AssignmentController.driverCalendarHttp`),
+   * `Bearer`-locked to this driver's own token exactly like
+   * [loadProposals]'s own `?driverId=` call (ADR-060 Decision 4). Unlike
+   * [loadConnections]/[loadMilestones]/[loadClients]'s own best-effort
+   * tolerance, a load failure here surfaces [calendarStatus] `'error'`
+   * with a retry action -- this is the one screen whose entire content
+   * is this fetch, so a silently-empty calendar would read as "no
+   * upcoming rides" rather than as the load failure it actually is.
+   */
+  function loadCalendar(active: boolean, forDriverId: string, token: string) {
+    setCalendarStatus('loading')
+    request<AssignmentInfo[]>(`/v1/assignments/calendar?driverId=${forDriverId}`, {
+      baseUrl: DISPATCH_BASE_URL,
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((result) => {
+        if (!active) {
+          return
+        }
+        setCalendarEntries(result)
+        setCalendarStatus('ready')
+      })
+      .catch(() => {
+        if (active) {
+          setCalendarStatus('error')
+        }
       })
   }
 
@@ -2951,7 +3028,71 @@ export function DriverHome() {
             )}
 
             {activeBusinessTab === 'routes' && (
-            /**
+            <>
+            {/**
+             * D-11.B (Driver Calendar — read-only, informational view;
+             * ADR-084). Placed above "История поездок" inside this same
+             * existing "Маршруты" tab, not as a new fourth business tab --
+             * the Product Owner's own 2026-09-07 instruction fixed "Мой
+             * бизнес" at three screens (Обзор/Клиенты/Маршруты, see the
+             * tab bar's own KDoc above), and this tab's own name already
+             * covers both a driver's past routes (history, below) and
+             * upcoming ones (this section), so no tab-bar change was
+             * needed or made. [calendarEntries]/[calendarStatus] are a
+             * genuinely separate fetch from [completedRides]'s own
+             * ([proposals]/[assignments]/[orderDetails]-derived) data --
+             * seeing this driver's *other* future accepted rides is not
+             * something any of those three already loaded facts can
+             * derive.
+             *
+             * Part 5's own binding screen-copy constraint (ADR-084): the
+             * hint line below states plainly that PIOS holds, reserves,
+             * and blocks nothing on the strength of this list -- the
+             * driver decides.
+             */}
+            <section className={styles.growthCard} role="tabpanel">
+              <p className={styles.growthTitle}>Ваши предстоящие поездки</p>
+              <p className={styles.hint}>
+                Это справочный список уже принятых вами поездок. PIOS ничего не резервирует, не бронирует и не
+                блокирует на основании этого списка — решение всегда остаётся за вами.
+              </p>
+              {calendarStatus === 'loading' && <Spinner label="Загружаем расписание…" />}
+              {calendarStatus === 'error' && (
+                <div className={styles.errorBlock}>
+                  <p className={styles.error}>Не удалось загрузить расписание. Проверьте соединение.</p>
+                  <Button
+                    label="Повторить"
+                    variant="secondary"
+                    onClick={() => loadCalendar(true, identity.driverId!, identity.token)}
+                  />
+                </div>
+              )}
+              {calendarStatus === 'ready' && calendarEntries.length === 0 && (
+                <p className={styles.hint}>Пока нет предстоящих принятых поездок.</p>
+              )}
+              {calendarStatus === 'ready' && calendarEntries.length > 0 && (
+                <div className={styles.historyList}>
+                  {calendarEntries.map((entry) => (
+                    <Card key={entry.assignmentId} tone="muted">
+                      <Text role="body" strong>
+                        {formatRequestedPickupAt(entry.requestedPickupAt ?? null) ?? 'Время не указано'} · Заказ{' '}
+                        {shortOrderCode(entry.orderId)}
+                      </Text>
+                      {/* Part 3/5 (ADR-084): neutral, non-blocking language
+                          only -- never "конфликт"/"вы не успеете"/"заказ
+                          невозможно выполнить". */}
+                      {entry.hasPotentialOverlap && (
+                        <Text role="caption" tone="secondary">
+                          Возможное пересечение по времени с другой вашей поездкой
+                        </Text>
+                      )}
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/**
              * History (MVP completion, §1): real completed rides, built
              * from [completedRides] above -- the same [proposals]/
              * [assignments]/[orderDetails] state this screen already loads
@@ -2961,7 +3102,7 @@ export function DriverHome() {
              * already tracks, so a second, independent loading/error state
              * for the identical underlying data would only be able to
              * drift from it, never add real information.
-             */
+             */}
             <section className={styles.growthCard} role="tabpanel">
               <p className={styles.growthTitle}>История поездок</p>
               {proposalsStatus === 'loading' && <Spinner label="Загружаем историю…" />}
@@ -3004,6 +3145,7 @@ export function DriverHome() {
                 </div>
               )}
             </section>
+            </>
             )}
           </>
         )}

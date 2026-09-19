@@ -41,4 +41,20 @@ interface DispatchRequestRepository {
      * original `OrderSubmitted.occurredAt`").
      */
     fun reopenIfOffered(orderId: String, nextAttemptAt: Instant)
+
+    /**
+     * Batch-reads [DispatchRequestRecord.requestedPickupAt] for [orderIds],
+     * keyed by order id (D-11.B, Driver Calendar — read-only,
+     * informational view; `ADR-084` Part 2: "a read joining `assignments`
+     * to `dispatch_requests.requested_pickup_at`"). An order with no row,
+     * or a row whose `requested_pickup_at` is `null`, is simply absent
+     * from the returned map — never a `null` value — so a caller can
+     * treat "absent" as one condition throughout. A plain, unlocked read
+     * (unlike [findForUpdate]): the driver calendar only displays this
+     * fact, it never acts on it, so no row lock is needed or taken.
+     * [orderIds] empty returns an empty map, mirroring
+     * [com.pios.dispatch.application.AssignmentRepository.findByOrders]'s
+     * own "empty in, empty out" convention.
+     */
+    fun findPickupTimesForOrders(orderIds: List<String>): Map<String, Instant>
 }

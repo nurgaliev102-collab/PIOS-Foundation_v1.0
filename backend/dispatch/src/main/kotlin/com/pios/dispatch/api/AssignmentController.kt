@@ -6,12 +6,14 @@ import com.pios.dispatch.application.AssignmentNotFoundException
 import com.pios.dispatch.application.AssignmentRepository
 import com.pios.dispatch.application.CompleteAssignmentCommand
 import com.pios.dispatch.application.DispatchAssignmentApplicationService
+import com.pios.dispatch.application.DispatchRequestRepository
 import com.pios.dispatch.application.NoOpTripRepository
 import com.pios.dispatch.application.ProposalRepository
 import com.pios.dispatch.application.StartAssignmentCommand
 import com.pios.dispatch.application.TripRepository
 import com.pios.dispatch.domain.Assignment
 import com.pios.dispatch.domain.AssignmentId
+import com.pios.dispatch.domain.AssignmentStatus
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
 import com.pios.dispatch.domain.Trip
@@ -26,6 +28,8 @@ import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import java.time.Duration
+import java.time.Instant
 
 /**
  * Dispatch's Assign Order REST entry point (Sprint FR-004, Manual
@@ -153,7 +157,15 @@ class AssignmentController(
     private val tripRepository: TripRepository = NoOpTripRepository,
     private val sessionTokenVerifier: SessionTokenVerifier,
     private val ownerCredentialGate: OwnerCredentialGate? = null,
-    private val proposalRepository: ProposalRepository? = null
+    private val proposalRepository: ProposalRepository? = null,
+    // D-11.B (Driver Calendar, `ADR-084`): optional, defaulting to `null`
+    // for the identical reason every other optional collaborator in this
+    // module does (e.g. [proposalRepository] above) -- existing tests that
+    // construct this controller directly, without this repository, keep
+    // compiling and behaving unchanged. A real, Spring-wired instance
+    // always receives the real [com.pios.dispatch.persistence.PostgreSQLDispatchRequestRepository]
+    // bean.
+    private val dispatchRequestRepository: DispatchRequestRepository? = null
 ) {
 
     @Deprecated(
@@ -243,6 +255,118 @@ class AssignmentController(
         }
     } catch (ex: IllegalArgumentException) {
         ResponseEntity.badRequest().build()
+    }
+
+    /**
+     * D-11.B (Driver Calendar — read-only, informational view; `ADR-084`).
+     * A sibling endpoint, not a new branch on [listAssignmentsHttp]: that
+     * endpoint's own `orderId`/`orderIds` parameters are mutually
+     * exclusive and required (neither present is already a 400), and its
+     * authorization is a post-hoc per-row filter across whichever orders
+     * the caller already named -- a fundamentally different shape from
+     * this endpoint's own single, `Bearer`-locked `?driverId=` gate
+     * (identical to [ProposalController.listProposalsForDriver], ADR-060
+     * Decision 4). Folding this in as a third mutually-exclusive parameter
+     * would have forced that endpoint's own exclusivity check and its own
+     * owner-credential bypass branch to somehow also apply to a
+     * fundamentally different authorization rule; a sibling endpoint
+     * keeps both simple and keeps this endpoint's own authorization
+     * impossible to accidentally widen by a future, unrelated change to
+     * [listAssignmentsHttp].
+     *
+     * `?driverId=` is required (missing -- 400, mirroring
+     * [ProposalController.listProposals]'s own "neither parameter" case);
+     * present but no valid `Bearer` token -- 401; present with a valid
+     * token naming a *different* driver (`verified.drv != driverId`,
+     * including a passenger-only token with `drv == null`) -- 403. No
+     * owner/coordinator `Basic` branch exists here (unlike
+     * [listProposalsForDriver]) -- ADR-084 authorizes only a driver's own
+     * read of their own calendar, and no owner-console caller of this
+     * endpoint exists today. The named `driverId` is never itself treated
+     * as authorization -- it is only ever compared against the verified
+     * token's own `drv` claim, which is what actually decides access.
+     */
+    @GetMapping("/calendar")
+    fun driverCalendarHttp(
+        @RequestHeader("Authorization", required = false) authorization: String? = null,
+        @RequestParam(required = false) driverId: String? = null
+    ): ResponseEntity<List<AssignmentResponse>> {
+        if (driverId == null) {
+            return ResponseEntity.badRequest().build()
+        }
+        val verified = sessionTokenVerifier.verify(authorization)
+            ?: return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+        if (verified.drv != driverId) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
+        }
+        return try {
+            ResponseEntity.ok(driverCalendar(driverId))
+        } catch (ex: IllegalArgumentException) {
+            ResponseEntity.badRequest().build()
+        }
+    }
+
+    /**
+     * The read model itself (ADR-084 Part 1/2/3), a pure computation over
+     * one already-fetched set -- no second query per ride, no new table or
+     * index. "Accepted" here means every [Assignment] this driver holds
+     * that has not been [AssignmentStatus.TERMINATED] (this module's own
+     * business meaning for "cancelled" -- see [Assignment]'s own KDoc:
+     * "every Assignment that exists, regardless of status, is treated as
+     * active" until terminated). Deliberately **not** filtered to the
+     * literal [AssignmentStatus.ACCEPTED] enum value alone: the one real
+     * path that creates an Assignment
+     * ([com.pios.dispatch.application.ProposalAssignmentOrchestrationService])
+     * leaves it at [AssignmentStatus.CREATED] and never calls
+     * [Assignment.accept] (see that method's own KDoc), so a literal-
+     * `ACCEPTED`-only filter would show a real driver's real accepted
+     * rides on no calendar at all -- the conservative, non-invented
+     * reading of "already-accepted" is therefore "committed to this
+     * driver and not cancelled", which also already excludes every
+     * declined/lapsed/withdrawn Proposal for free (none of those ever
+     * produces an Assignment in the first place).
+     *
+     * "Future" means [DispatchRequestRepository.findPickupTimesForOrders]
+     * returned a pickup instant for this order, strictly after `now`. An
+     * Assignment with no known pickup time (a row that predates
+     * `V19__dispatch_requests.sql`, or a manually-assigned order with no
+     * `requestedPickupAt` at all) is silently omitted -- there is no
+     * "unknown" state this calendar can meaningfully show.
+     *
+     * The overlap flag (Part 3, ratified 60-minutes-inclusive) is computed
+     * only against the other rides in this same already-fetched, already-
+     * future-filtered set -- every one of them is already known to belong
+     * to this same driver ([AssignmentRepository.findByDriver]), so no
+     * further same-driver check is needed.
+     */
+    internal fun driverCalendar(driverId: String): List<AssignmentResponse> {
+        val requests = dispatchRequestRepository ?: return emptyList()
+        val committed = assignmentRepository.findByDriver(DriverReference(driverId))
+            .filter { it.status != AssignmentStatus.TERMINATED }
+        if (committed.isEmpty()) {
+            return emptyList()
+        }
+        val pickupTimes = requests.findPickupTimesForOrders(committed.map { it.order.orderId })
+        val now = Instant.now()
+        val futureRides = committed.mapNotNull { assignment ->
+            val pickupAt = pickupTimes[assignment.order.orderId] ?: return@mapNotNull null
+            if (!pickupAt.isAfter(now)) return@mapNotNull null
+            assignment to pickupAt
+        }
+        return futureRides.map { (assignment, pickupAt) ->
+            val hasOverlap = futureRides.any { (other, otherPickupAt) ->
+                other.id != assignment.id && Duration.between(pickupAt, otherPickupAt).abs() <= OVERLAP_THRESHOLD
+            }
+            AssignmentResponse(
+                assignmentId = assignment.id.value,
+                orderId = assignment.order.orderId,
+                driverId = assignment.driver.driverId,
+                status = assignment.status.name,
+                statusChangedAt = assignment.statusChangedAt?.toString(),
+                requestedPickupAt = pickupAt.toString(),
+                hasPotentialOverlap = hasOverlap
+            )
+        }
     }
 
     /**
@@ -385,5 +509,14 @@ class AssignmentController(
         // Same shape guard as OrderQueryController.MAX_IDS, applied to the
         // same 100-id bound -- no business meaning attaches to the number.
         private const val MAX_ORDER_IDS = 100
+
+        // D-11.B (Driver Calendar, `ADR-084` Part 3): the Product Owner's
+        // own ratified 60-minutes-inclusive overlap threshold -- a fixed
+        // business rule, not a deployment-tunable value (unlike, e.g., the
+        // proposal-lapse timeout elsewhere in this codebase), so this is a
+        // plain constant, never a `@Value`-injected one. A future change to
+        // this number is itself a new Product Owner decision (ADR-084 Part
+        // 4), not an implementation choice.
+        private val OVERLAP_THRESHOLD: Duration = Duration.ofMinutes(60)
     }
 }

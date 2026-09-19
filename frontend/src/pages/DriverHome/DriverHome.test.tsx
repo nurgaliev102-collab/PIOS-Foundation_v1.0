@@ -1007,6 +1007,142 @@ describe('DriverHome', () => {
     expect(await screen.findByText(/Здесь появятся ваши завершённые поездки/)).toBeInTheDocument()
   })
 
+  // --- D-11.B (Driver Calendar — read-only, informational view; ADR-084) ---
+
+  it('shows an upcoming accepted ride from the calendar endpoint, with its pickup time and order reference', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/proposals?driverId= -- no open/accepted proposal needed for this test
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/connections
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 }) // GET /v1/drivers/driver-1/milestones
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/drivers/driver-1/clients
+
+    renderDriverHome()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Бизнес' }))
+
+    mockedRequest.mockResolvedValueOnce([
+      {
+        assignmentId: 'a1',
+        orderId: 'order-abc123',
+        driverId: 'driver-1',
+        status: 'CREATED',
+        statusChangedAt: null,
+        requestedPickupAt: '2026-08-25T06:30:00Z',
+        hasPotentialOverlap: false,
+      },
+    ]) // GET /v1/assignments/calendar?driverId=driver-1 -- fires only once this tab opens
+    await userEvent.click(await screen.findByRole('tab', { name: 'Маршруты' }))
+
+    expect(await screen.findByText('Ваши предстоящие поездки')).toBeInTheDocument()
+    expect(await screen.findByText(/ORDERABC/)).toBeInTheDocument()
+    expect(screen.queryByText(/Возможное пересечение/)).not.toBeInTheDocument()
+  })
+
+  it('shows the neutral overlap warning when the calendar reports a potential overlap, never blocking language', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderDriverHome()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Бизнес' }))
+
+    mockedRequest.mockResolvedValueOnce([
+      {
+        assignmentId: 'a1',
+        orderId: 'order-one11',
+        driverId: 'driver-1',
+        status: 'CREATED',
+        statusChangedAt: null,
+        requestedPickupAt: '2026-08-25T06:30:00Z',
+        hasPotentialOverlap: true,
+      },
+    ])
+    await userEvent.click(await screen.findByRole('tab', { name: 'Маршруты' }))
+
+    expect(await screen.findByText('Возможное пересечение по времени с другой вашей поездкой')).toBeInTheDocument()
+    // ADR-084 Part 3/5: neutral, non-blocking language only.
+    expect(screen.queryByText(/конфликт/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/не успеете/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/невозможно выполнить/i)).not.toBeInTheDocument()
+  })
+
+  it('shows an honest empty state when there are no upcoming accepted rides', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderDriverHome()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Бизнес' }))
+
+    mockedRequest.mockResolvedValueOnce([]) // GET /v1/assignments/calendar?driverId=driver-1
+    await userEvent.click(await screen.findByRole('tab', { name: 'Маршруты' }))
+
+    expect(await screen.findByText('Пока нет предстоящих принятых поездок.')).toBeInTheDocument()
+  })
+
+  it('shows an error state with a working retry when the calendar request fails', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderDriverHome()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Бизнес' }))
+
+    mockedRequest.mockRejectedValueOnce(new Error('network error'))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Маршруты' }))
+
+    expect(await screen.findByText('Не удалось загрузить расписание. Проверьте соединение.')).toBeInTheDocument()
+
+    mockedRequest.mockResolvedValueOnce([])
+    await userEvent.click(screen.getByRole('button', { name: 'Повторить' }))
+
+    expect(await screen.findByText('Пока нет предстоящих принятых поездок.')).toBeInTheDocument()
+  })
+
+  it("sends this driver's own Bearer token on GET /v1/assignments/calendar", async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderDriverHome()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Бизнес' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Маршруты' }))
+
+    await screen.findByText('Ваши предстоящие поездки')
+    const calendarCall = mockedRequest.mock.calls.find(([path]) => path === '/v1/assignments/calendar?driverId=driver-1')
+    expect(calendarCall).toBeDefined()
+    expect((calendarCall?.[1] as RequestInit).headers as Record<string, string>).toMatchObject({
+      Authorization: `Bearer ${TEST_IDENTITY.token}`,
+    })
+  })
+
+  it('does not fetch the calendar until the Маршруты tab is actually opened', async () => {
+    mockedRequest.mockResolvedValueOnce({ id: 'identity-1', phone: '+70000000000', driverId: 'driver-1' })
+    mockedRequest.mockResolvedValueOnce({ id: 'driver-1', availability: 'AVAILABLE', displayName: 'Иван' })
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce([])
+    mockedRequest.mockResolvedValueOnce({ completedRidesCount: 0, currentStreakWeeks: 0 })
+    mockedRequest.mockResolvedValueOnce([])
+
+    renderDriverHome()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Бизнес' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Клиенты' }))
+
+    expect(mockedRequest.mock.calls.some(([path]) => String(path).startsWith('/v1/assignments/calendar'))).toBe(false)
+  })
+
   // --- Referral visibility (ADR-064): lifetime clients via the driver's own link ---
 
   it("shows the lifetime count of clients who connected through this driver's own link, not just today's", async () => {
