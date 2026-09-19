@@ -455,6 +455,147 @@ class DriverControllerTest {
         assertTrue(listResponse.body?.any { it.id == "driver-vehicle-public" && it.vehiclePlateNumber == "В456ГД102" } == true)
     }
 
+    // --- ADR-085 (D-11.C1): plate visibility on the unauthenticated getDriver read ---
+
+    @Test
+    fun `getDriver -- unauthenticated read omits the plate, keeps make, model and colour`() {
+        controller.createDriver(CreateDriverRequest("driver-plate-anon"))
+        controller.updateVehicle(
+            "driver-plate-anon",
+            UpdateVehicleRequest(make = "Lada", model = "Vesta", color = "белый", plateNumber = "А123БВ102", seatCount = 4),
+            authorization = driverToken("driver-plate-anon")
+        )
+
+        val response = controller.getDriver("driver-plate-anon")
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        val body = assertNotNull(response.body)
+        assertNull(body.vehiclePlateNumber)
+        assertEquals("Lada", body.vehicleMake)
+        assertEquals("Vesta", body.vehicleModel)
+        assertEquals("белый", body.vehicleColor)
+    }
+
+    @Test
+    fun `getDriver -- the driver's own valid Bearer token still returns the plate`() {
+        controller.createDriver(CreateDriverRequest("driver-plate-own"))
+        controller.updateVehicle(
+            "driver-plate-own",
+            UpdateVehicleRequest(make = "Lada", model = "Vesta", color = "белый", plateNumber = "А123БВ102", seatCount = 4),
+            authorization = driverToken("driver-plate-own")
+        )
+
+        val response = controller.getDriver("driver-plate-own", authorization = driverToken("driver-plate-own"))
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertEquals("А123БВ102", assertNotNull(response.body).vehiclePlateNumber)
+    }
+
+    @Test
+    fun `getDriver -- another driver's Bearer token does not yield this driver's plate -- IDOR`() {
+        controller.createDriver(CreateDriverRequest("driver-plate-victim"))
+        controller.updateVehicle(
+            "driver-plate-victim",
+            UpdateVehicleRequest(make = "Lada", model = "Vesta", color = "белый", plateNumber = "А123БВ102", seatCount = 4),
+            authorization = driverToken("driver-plate-victim")
+        )
+
+        val response = controller.getDriver("driver-plate-victim", authorization = driverToken("driver-plate-attacker"))
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertNull(assertNotNull(response.body).vehiclePlateNumber)
+    }
+
+    @Test
+    fun `getDriver -- a passenger-only token (drv null) does not yield the plate`() {
+        controller.createDriver(CreateDriverRequest("driver-plate-passenger-token"))
+        controller.updateVehicle(
+            "driver-plate-passenger-token",
+            UpdateVehicleRequest(make = "Lada", plateNumber = "А123БВ102"),
+            authorization = driverToken("driver-plate-passenger-token")
+        )
+
+        val response = controller.getDriver(
+            "driver-plate-passenger-token",
+            authorization = "Bearer " + issueToken(sub = "some-passenger")
+        )
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertNull(assertNotNull(response.body).vehiclePlateNumber)
+    }
+
+    @Test
+    fun `getDriver -- a malformed Authorization header on the public read is treated like no header, not an error`() {
+        controller.createDriver(CreateDriverRequest("driver-plate-malformed"))
+        controller.updateVehicle(
+            "driver-plate-malformed",
+            UpdateVehicleRequest(make = "Lada", plateNumber = "А123БВ102"),
+            authorization = driverToken("driver-plate-malformed")
+        )
+
+        val response = controller.getDriver("driver-plate-malformed", authorization = "not-a-real-scheme")
+
+        assertEquals(HttpStatus.OK, response.statusCode)
+        assertNull(assertNotNull(response.body).vehiclePlateNumber)
+    }
+
+    @Test
+    fun `getDriver -- listDrivers still returns the plate to the owner, unaffected by this change`() {
+        controller.createDriver(CreateDriverRequest("driver-plate-owner-list"))
+        controller.updateVehicle(
+            "driver-plate-owner-list",
+            UpdateVehicleRequest(make = "Lada", plateNumber = "А123БВ102"),
+            authorization = driverToken("driver-plate-owner-list")
+        )
+
+        val listResponse = controller.listDrivers()
+
+        assertTrue(
+            listResponse.body?.any { it.id == "driver-plate-owner-list" && it.vehiclePlateNumber == "А123БВ102" } == true
+        )
+    }
+
+    @Test
+    fun `getDriver -- editing only make, model, colour or seat count through the real save path does not erase a previously-stored plate`() {
+        // The exact binding acceptance criterion ADR-085 Part 3 and
+        // docs/PIOS_D11_DECISION_LOCK.md D-11.C1 name: a driver's own
+        // vehicle-edit screen (`DriverHome.tsx`) seeds its form from
+        // `getDriver` (now caller-aware) and saves all five vehicle fields
+        // together through `POST /v1/drivers/:id/vehicle`
+        // (`UpdateVehicleApplicationService`, `Driver.updateVehicle`, which
+        // unconditionally replaces every field on every call). This test
+        // proves that round trip end to end: seed a plate, read it back the
+        // way the edit screen does (the driver's own Bearer token against
+        // getDriver), then save only the other fields using exactly that
+        // read-back plate, and confirm the plate survives.
+        controller.createDriver(CreateDriverRequest("driver-plate-roundtrip"))
+        controller.updateVehicle(
+            "driver-plate-roundtrip",
+            UpdateVehicleRequest(make = "Lada", model = "Vesta", color = "белый", plateNumber = "А123БВ102", seatCount = 4),
+            authorization = driverToken("driver-plate-roundtrip")
+        )
+
+        // What DriverHome.tsx's own seeding effect reads from, once fixed to
+        // send its own Bearer token on this same endpoint.
+        val seeded = controller.getDriver("driver-plate-roundtrip", authorization = driverToken("driver-plate-roundtrip"))
+        val seededPlate = assertNotNull(seeded.body).vehiclePlateNumber
+        assertEquals("А123БВ102", seededPlate)
+
+        // The driver edits only the colour; the save action still sends
+        // every field, using the value the edit form was seeded with for
+        // the ones the driver did not touch -- exactly DriverHome.tsx's own
+        // handleUpdateVehicle behavior.
+        controller.updateVehicle(
+            "driver-plate-roundtrip",
+            UpdateVehicleRequest(make = "Lada", model = "Vesta", color = "синий", plateNumber = seededPlate, seatCount = 4),
+            authorization = driverToken("driver-plate-roundtrip")
+        )
+
+        val afterEdit = controller.getDriver("driver-plate-roundtrip", authorization = driverToken("driver-plate-roundtrip"))
+        assertEquals("А123БВ102", assertNotNull(afterEdit.body).vehiclePlateNumber)
+        assertEquals("синий", afterEdit.body?.vehicleColor)
+    }
+
     // --- Long-distance preference (PIOS Group and Long-Distance Rides Roadmap, Stage 3) ---
 
     @Test

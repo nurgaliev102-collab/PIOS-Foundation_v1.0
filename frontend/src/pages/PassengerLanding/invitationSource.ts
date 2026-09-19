@@ -26,13 +26,23 @@ import { ApiError, request } from '../../api/apiClient'
  */
 
 /**
- * [vehicleMake]/[vehicleModel]/[vehicleColor]/[vehiclePlateNumber]
- * (PIOS Group and Long-Distance Rides Roadmap, Stage 1): the same public
- * `GET /v1/drivers/:driverId` fields `DriverHome.tsx`'s own "Моя машина"
- * card writes -- shown here so a passenger knows which car to look for
- * from the very first screen, the same trust-building role [driverName]
- * already plays. `null`/absent for a driver who has not declared one yet
- * -- not required for an invitation to resolve, unlike [driverName].
+ * [vehicleMake]/[vehicleModel]/[vehicleColor] (PIOS Group and Long-Distance
+ * Rides Roadmap, Stage 1): the same public `GET /v1/drivers/:driverId`
+ * fields `DriverHome.tsx`'s own "Моя машина" card writes -- shown here so a
+ * passenger knows which car to look for from the very first screen, the
+ * same trust-building role [driverName] already plays. `null`/absent for a
+ * driver who has not declared one yet -- not required for an invitation to
+ * resolve, unlike [driverName].
+ *
+ * [vehiclePlateNumber] (ADR-085, D-11.C1, Driver Vehicle Plate Visibility)
+ * is kept as a field here only for backward-compatible typing of whatever
+ * the backend response happens to carry -- since this ADR, the backend's
+ * own unauthenticated `GET /v1/drivers/:driverId` response never includes
+ * it, so this is always `null` on this screen in practice, and the render
+ * side (`PassengerLanding.tsx`) already omits it whenever falsy. D-11.C2
+ * (passenger plate visibility generally) remains NO-GO -- no future rule
+ * for when a passenger may see a plate is implied by this field's mere
+ * presence in the type.
  *
  * [acceptsLongDistanceTrips] (PIOS Group and Long-Distance Rides Roadmap,
  * Stage 3): the same public `GET /v1/drivers/:driverId` field

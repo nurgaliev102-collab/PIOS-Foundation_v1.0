@@ -966,16 +966,27 @@ export function DriverHome() {
     }
   }
 
+  // ADR-085 (D-11.C1): `driverId` is only ever derived from
+  // `identity?.driverId` (above), so `driverId` truthy already implies
+  // `identity` truthy at runtime -- the same reasoning the proposals-poll
+  // effect below already documents. This driver's own read of their own
+  // record now carries their own Bearer token (see [loadDriver]'s own
+  // KDoc for why). Depends on `identity.token` specifically, not the whole
+  // `identity` object -- [identity] gets a new object reference on every
+  // unrelated update (e.g. phone verification flipping `phoneVerified`),
+  // which must not re-trigger a driver reload and clobber the already-
+  // loaded [driver] state with a fresh fetch mid-edit.
+  const identityToken = identity?.token ?? null
   useEffect(() => {
-    if (!driverId) {
+    if (!driverId || !identityToken) {
       return
     }
     let active = true
-    loadDriver(active, driverId)
+    loadDriver(active, driverId, identityToken)
     return () => {
       active = false
     }
-  }, [driverId])
+  }, [driverId, identityToken])
 
 
   // PIOS Group and Long-Distance Rides Roadmap, Stage 1: seed the vehicle
@@ -1161,9 +1172,25 @@ export function DriverHome() {
       })
   }
 
-  function loadDriver(active: boolean, forDriverId: string) {
+  /**
+   * ADR-085 (D-11.C1, Driver Vehicle Plate Visibility): now sends this
+   * driver's own `Bearer` token on `GET /v1/drivers/:id` -- the same
+   * endpoint the public invite-preview flow (`invitationSource.ts`) still
+   * calls with no credential at all. `DriverController.getDriver` is
+   * caller-aware as of this change: a token naming this exact `driverId`
+   * still gets `vehiclePlateNumber` back; an anonymous or non-matching
+   * caller does not. Without this, this screen's own vehicle-edit form
+   * (seeded from [driver] below) would load an empty plate and the next
+   * unrelated vehicle edit would silently erase this driver's own stored
+   * plate (`Driver.updateVehicle` replaces all five fields together) --
+   * see ADR-085's own "defect this ADR's implementation must not
+   * introduce" section.
+   */
+  function loadDriver(active: boolean, forDriverId: string, token: string) {
     setStatus('loading')
-    request<DriverInfo>(`/v1/drivers/${forDriverId}`)
+    request<DriverInfo>(`/v1/drivers/${forDriverId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
       .then((result) => {
         if (!active) {
           return
@@ -2272,7 +2299,7 @@ export function DriverHome() {
             <Button
               label="Попробовать снова"
               variant="secondary"
-              onClick={() => loadDriver(true, identity.driverId!)}
+              onClick={() => loadDriver(true, identity.driverId!, identity.token)}
             />
           </div>
         )}

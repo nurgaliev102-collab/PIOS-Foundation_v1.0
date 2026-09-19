@@ -23,11 +23,20 @@ package com.pios.drivermanagement.api
  * [vehicleSeatCount] (PIOS Group and Long-Distance Rides Roadmap, Stage 1)
  * surface [com.pios.drivermanagement.domain.Driver]'s own same-named
  * properties, appended last, `null` for every driver who has not declared
- * a vehicle. Deliberately on the same public, unauthenticated
- * `GET /v1/drivers`/`GET /v1/drivers/{id}` response [displayName] already
- * rides on: a passenger needs to see which car to look for from the same
- * invite-preview screen that already shows the driver's name, before any
- * login exists to gate behind.
+ * a vehicle. [vehicleMake]/[vehicleModel]/[vehicleColor]/[vehicleSeatCount]
+ * remain on the same public, unauthenticated `GET /v1/drivers`/
+ * `GET /v1/drivers/{id}` response [displayName] already rides on: a
+ * passenger needs to see which car to look for from the same invite-preview
+ * screen that already shows the driver's name, before any login exists to
+ * gate behind.
+ *
+ * [vehiclePlateNumber] is the one exception (ADR-085, D-11.C1): it is
+ * `null` on `GET /v1/drivers/{id}`'s response for any caller who is not
+ * the driver themselves (no credential, or a `Bearer` token not naming
+ * this exact driver) -- see `DriverController.getDriver`'s own KDoc for
+ * the caller-aware mapping. It remains present, unchanged, on the owner-
+ * `Basic`-gated `GET /v1/drivers` list and every `Bearer`-gated
+ * self-write response (`POST /v1/drivers/{id}/vehicle` and similar).
  *
  * [acceptsLongDistanceTrips] (PIOS Group and Long-Distance Rides Roadmap,
  * Stage 3) surfaces [com.pios.drivermanagement.domain.Driver]'s own

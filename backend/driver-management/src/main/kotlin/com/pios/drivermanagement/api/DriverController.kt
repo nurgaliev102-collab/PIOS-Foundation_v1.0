@@ -164,6 +164,30 @@ import org.springframework.web.bind.annotation.RestController
  * order), since only the driver identified by the path may change their
  * own preference. Public on `getDriver`/`listDrivers`, the same reasoning
  * as `updateVehicle`.
+ *
+ * ## ADR-085 (D-11.C1): `getDriver` no longer discloses the plate to an
+ * anonymous or non-matching caller
+ *
+ * `getDriver` remains reachable with **no credential at all** -- the
+ * public invite-preview flow (`invitationSource.ts`) structurally depends
+ * on that staying true, and this change does not add any general
+ * authentication requirement to this endpoint (ADR-085 Part 5). It now
+ * optionally inspects an `Authorization` header, if present, purely to
+ * decide whether [DriverResponse.vehiclePlateNumber] is included: a
+ * `Bearer` token whose own verified `drv` equals the requested
+ * [driverId] gets the plate, exactly as the `Bearer`-gated write paths
+ * already do; anyone else (no header, an invalid/expired token, a guest
+ * token, or a token naming a *different* driver) gets every other field
+ * unchanged but `vehiclePlateNumber` as `null`. Make/model/colour/
+ * `acceptsLongDistanceTrips`/`displayName`/`availability` are unaffected --
+ * only the plate is caller-aware. This closes a live, credential-free
+ * disclosure of a real person's vehicle registration number without
+ * breaking the driver's own vehicle-edit screen (`DriverHome.tsx`), which
+ * reads its current vehicle fields from this same endpoint and would
+ * otherwise silently erase its own stored plate on the next unrelated
+ * vehicle edit (`Driver.updateVehicle` replaces all five fields together)
+ * -- see ADR-085's own "defect this ADR's implementation must not
+ * introduce" section.
  */
 @RestController
 @RequestMapping("/v1/drivers")
@@ -246,10 +270,15 @@ class DriverController(
     }
 
     @GetMapping("/{driverId}")
-    fun getDriver(@PathVariable driverId: String): ResponseEntity<DriverResponse> =
+    fun getDriver(
+        @PathVariable driverId: String,
+        @RequestHeader("Authorization", required = false) authorization: String? = null
+    ): ResponseEntity<DriverResponse> =
         try {
             val driver = retrieveDriverAvailabilityHandler.handle(DriverId(driverId))
-            ResponseEntity.ok(driver.toResponse())
+            val verified = sessionTokenVerifier.verify(authorization)
+            val isOwnRecord = verified != null && verified.drv == driverId
+            ResponseEntity.ok(driver.toResponse(includePlate = isOwnRecord))
         } catch (ex: DriverNotFoundException) {
             ResponseEntity.notFound().build()
         } catch (ex: IllegalArgumentException) {
@@ -330,7 +359,17 @@ class DriverController(
         }
     }
 
-    private fun Driver.toResponse(): DriverResponse = DriverResponse(
+    /**
+     * ADR-085 (D-11.C1, Driver Vehicle Plate Visibility): [includePlate]
+     * defaults to `true` -- every call site except [getDriver]'s
+     * unauthenticated/public path always wants the full record (the owner-
+     * `Basic` list, every `Bearer`-gated self-write response, and
+     * `getDriver` itself when the caller's own verified session names this
+     * exact driver). Only [getDriver] passes `false`, for a caller that is
+     * either anonymous or presenting a token that does not name this
+     * `driverId` -- see that method's own KDoc.
+     */
+    private fun Driver.toResponse(includePlate: Boolean = true): DriverResponse = DriverResponse(
         id.value,
         availability.name,
         displayName,
@@ -339,7 +378,7 @@ class DriverController(
         vehicleMake,
         vehicleModel,
         vehicleColor,
-        vehiclePlateNumber,
+        if (includePlate) vehiclePlateNumber else null,
         vehicleSeatCount,
         acceptsLongDistanceTrips
     )

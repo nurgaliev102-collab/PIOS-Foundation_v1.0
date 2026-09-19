@@ -81,12 +81,35 @@ describe('PassengerLanding', () => {
       vehicleMake: 'Lada',
       vehicleModel: 'Vesta',
       vehicleColor: 'белый',
-      vehiclePlateNumber: 'А123БВ102',
     })
 
     renderAt('driver-1')
 
-    expect(await screen.findByText('Машина: Lada Vesta, белый · А123БВ102')).toBeInTheDocument()
+    expect(await screen.findByText('Машина: Lada Vesta, белый')).toBeInTheDocument()
+  })
+
+  // ADR-085 (D-11.C1, Driver Vehicle Plate Visibility): the unauthenticated
+  // `GET /v1/drivers/:driverId` this screen calls no longer includes
+  // `vehiclePlateNumber` at all -- `driver.vehiclePlateNumber ?? null` in
+  // `invitationSource.ts` already degrades an absent field to `null`, and
+  // this line's own rendering already omits the ` · <plate>` suffix
+  // whenever it is falsy, so this proves the real backend contract (the
+  // field simply never arrives here) renders no plate, with no frontend
+  // production code change required for this specific case.
+  it('never shows a plate on the public invite-preview screen, even if make/model/colour are present', async () => {
+    mockedRequest.mockResolvedValueOnce({
+      id: 'driver-1',
+      availability: 'AVAILABLE',
+      displayName: 'Иван',
+      vehicleMake: 'Lada',
+      vehicleModel: 'Vesta',
+      vehicleColor: 'белый',
+    })
+
+    renderAt('driver-1')
+
+    expect(await screen.findByText('Машина: Lada Vesta, белый')).toBeInTheDocument()
+    expect(screen.queryByText(/·/)).not.toBeInTheDocument()
   })
 
   it('shows no vehicle line when the driver has not declared one', async () => {
