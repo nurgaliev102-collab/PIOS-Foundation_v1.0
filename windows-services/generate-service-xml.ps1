@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
     Renders the six PIOS WinSW service XML files from their .xml.template
-    counterparts, substituting the shared ADR-044 owner credential (and, for
-    ai-advisor, the Qwen provider config) read from Machine-scope environment
-    variables.
+    counterparts, substituting the shared ADR-044 owner credential, the
+    ai-advisor Qwen config, and identity SMS Aero config read from
+    Machine-scope environment variables.
 
 .DESCRIPTION
     Git tracks only the *.xml.template files (no secrets). The real
@@ -31,9 +31,9 @@ $scriptDir = $PSScriptRoot
 
 $commonSecretNames = @("PIOS_OWNER_USERNAME", "PIOS_OWNER_PASSWORD_HASH", "PIOS_OWNER_PASSWORD_SALT")
 $aiAdvisorExtraNames = @("PIOS_AI_ADVISOR_PROVIDER", "PIOS_AI_ADVISOR_QWEN_MODEL", "PIOS_AI_ADVISOR_QWEN_API_KEY")
-$identityExtraNames = @("PIOS_SMS_API_ID", "PIOS_SMS_SENDER")
+$identityExtraNames = @("PIOS_SMS_LOGIN", "PIOS_SMS_API_KEY", "PIOS_SMS_SENDER")
 $identityOptionalDefaults = @{
-    PIOS_SMS_API_BASE_URL = "https://sms.ru"
+    PIOS_SMS_API_BASE_URL = "https://gate.smsaero.ru"
     PIOS_SMS_CONNECT_TIMEOUT_MS = "2000"
     PIOS_SMS_READ_TIMEOUT_MS = "5000"
 }

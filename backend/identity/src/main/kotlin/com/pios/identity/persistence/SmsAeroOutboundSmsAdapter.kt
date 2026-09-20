@@ -12,27 +12,25 @@ import org.springframework.web.client.RestClient
 import org.springframework.web.client.RestClientResponseException
 import java.net.SocketTimeoutException
 
-/** SMS.RU transport. A successful API response means accepted for delivery, not delivered. */
-class SmsRuOutboundSmsAdapter(
+/** SMS Aero normal send. A successful response means accepted, not delivered. */
+class SmsAeroOutboundSmsAdapter(
     private val client: RestClient,
     private val objectMapper: ObjectMapper,
-    private val apiId: String,
     private val sender: String
 ) : OutboundSmsPort {
     override fun sendVerificationCode(phone: Phone, code: String) {
         val recipient = phone.value.removePrefix("+")
         val form = LinkedMultiValueMap<String, String>().apply {
-            add("api_id", apiId)
-            add("to", recipient)
-            add("msg", "$code — код подтверждения телефона в PIOS")
-            add("from", sender)
-            add("json", "1")
+            add("number", recipient)
+            add("sign", sender)
+            add("text", "$code — код подтверждения телефона в PIOS")
         }
 
         val response = try {
             client.post()
-                .uri("/sms/send")
+                .uri("/v2/sms/send")
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .accept(MediaType.APPLICATION_JSON)
                 .body(form)
                 .retrieve()
                 .toEntity(String::class.java)
@@ -52,8 +50,9 @@ class SmsRuOutboundSmsAdapter(
         }
 
         if (!response.statusCode.is2xxSuccessful) {
-            throw OutboundSmsDeliveryException(SmsSubmissionState.UNKNOWN, SmsSubmissionFailure.SERVER_ERROR,
-                response.statusCode.value())
+            throw OutboundSmsDeliveryException(
+                SmsSubmissionState.UNKNOWN, SmsSubmissionFailure.SERVER_ERROR, response.statusCode.value()
+            )
         }
 
         val root = try {
@@ -61,21 +60,30 @@ class SmsRuOutboundSmsAdapter(
         } catch (ex: Exception) {
             throw OutboundSmsDeliveryException(SmsSubmissionState.UNKNOWN, SmsSubmissionFailure.MALFORMED_RESPONSE)
         }
-        if (root == null || !root.isObject) {
+        if (root == null || !root.isObject || !root.path("success").isBoolean) {
             throw OutboundSmsDeliveryException(SmsSubmissionState.UNKNOWN, SmsSubmissionFailure.MALFORMED_RESPONSE)
         }
-        if (root.path("status").asText() == "ERROR") {
+        if (!root.path("success").booleanValue()) {
             throw OutboundSmsDeliveryException(SmsSubmissionState.FAILED, SmsSubmissionFailure.PROVIDER_REJECTED)
         }
-        val addressed = root.path("sms").path(recipient)
-        if (addressed.path("status").asText() == "ERROR") {
-            throw OutboundSmsDeliveryException(SmsSubmissionState.FAILED, SmsSubmissionFailure.PROVIDER_REJECTED)
+
+        // The normal send endpoint returns an array, even for one recipient.
+        // Require exactly that recipient and a provider message id before
+        // treating the submission as accepted. Never log the echoed data.
+        val data = root.path("data")
+        if (!data.isArray || data.size() != 1) {
+            throw OutboundSmsDeliveryException(SmsSubmissionState.UNKNOWN, SmsSubmissionFailure.MALFORMED_RESPONSE)
         }
-        if (root.path("status").asText() != "OK" || root.path("status_code").asInt(-1) != 100 ||
-            addressed.path("status").asText() != "OK" || addressed.path("status_code").asInt(-1) != 100 ||
-            addressed.path("sms_id").asText().isBlank()
+        val message = data[0]
+        if (message.path("id").asLong(-1) <= 0 || message.path("number").asText() != recipient ||
+            !message.path("status").isIntegralNumber
         ) {
             throw OutboundSmsDeliveryException(SmsSubmissionState.UNKNOWN, SmsSubmissionFailure.MALFORMED_RESPONSE)
+        }
+        when (message.path("status").intValue()) {
+            0, 1, 3, 4, 8 -> return // queued, delivered, sent, waiting, or moderation
+            2, 6 -> throw OutboundSmsDeliveryException(SmsSubmissionState.FAILED, SmsSubmissionFailure.PROVIDER_REJECTED)
+            else -> throw OutboundSmsDeliveryException(SmsSubmissionState.UNKNOWN, SmsSubmissionFailure.MALFORMED_RESPONSE)
         }
     }
 }

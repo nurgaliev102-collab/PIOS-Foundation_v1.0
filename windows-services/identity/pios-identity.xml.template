@@ -11,7 +11,8 @@
   <env name="PIOS_OWNER_USERNAME" value="__PIOS_OWNER_USERNAME__"/>
   <env name="PIOS_OWNER_PASSWORD_HASH" value="__PIOS_OWNER_PASSWORD_HASH__"/>
   <env name="PIOS_OWNER_PASSWORD_SALT" value="__PIOS_OWNER_PASSWORD_SALT__"/>
-  <env name="PIOS_SMS_API_ID" value="__PIOS_SMS_API_ID__"/>
+  <env name="PIOS_SMS_LOGIN" value="__PIOS_SMS_LOGIN__"/>
+  <env name="PIOS_SMS_API_KEY" value="__PIOS_SMS_API_KEY__"/>
   <env name="PIOS_SMS_SENDER" value="__PIOS_SMS_SENDER__"/>
   <env name="PIOS_SMS_API_BASE_URL" value="__PIOS_SMS_API_BASE_URL__"/>
   <env name="PIOS_SMS_CONNECT_TIMEOUT_MS" value="__PIOS_SMS_CONNECT_TIMEOUT_MS__"/>

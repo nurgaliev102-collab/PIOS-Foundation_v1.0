@@ -10,7 +10,7 @@ import com.pios.identity.domain.Phone
  * service beyond this one interface. [PhoneVerificationChallengeIssuer] is
  * this port's only caller.
  *
- * The production implementation is supplied by identity's SMS.RU adapter.
+ * The production implementation is supplied by identity's SMS Aero adapter.
  * This interface remains provider-independent.
  */
 fun interface OutboundSmsPort {

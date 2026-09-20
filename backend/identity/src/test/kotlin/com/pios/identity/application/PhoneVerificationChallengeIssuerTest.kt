@@ -108,4 +108,35 @@ class PhoneVerificationChallengeIssuerTest {
         assertFalse(logText.contains(codeSeenByProvider))
         assertFalse(logText.contains(phone.value))
     }
+
+    @Test
+    fun `unexpected transport exception cannot put credentials or Authorization in logs`() {
+        val fakeKey = "fixture-only-key"
+        val fakeAuthorization = "Basic Zml4dHVyZQ=="
+        var codeSeenByProvider = ""
+        val failingPort = OutboundSmsPort { recipient, code ->
+            codeSeenByProvider = code
+            throw IllegalStateException("$fakeKey $fakeAuthorization ${recipient.value} $code")
+        }
+        val failingIssuer = PhoneVerificationChallengeIssuer(
+            repository, PasswordHasher(defaultIterations = 1000), failingPort,
+            ttlSeconds = 600, maxAttempts = 5, codeDigits = 6
+        )
+        val logger = LoggerFactory.getLogger(PhoneVerificationChallengeIssuer::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        try {
+            failingIssuer.issue(identityId, phone, PhoneVerificationPurpose.RECOVERY)
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
+        }
+
+        val logText = appender.list.joinToString("\n") { it.formattedMessage }
+        assertTrue(logText.contains("UNKNOWN reason=UNEXPECTED"))
+        assertFalse(logText.contains(fakeKey))
+        assertFalse(logText.contains(fakeAuthorization))
+        assertFalse(logText.contains(phone.value))
+        assertFalse(logText.contains(codeSeenByProvider))
+    }
 }
