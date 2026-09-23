@@ -8,24 +8,32 @@ import java.util.UUID
 
 /**
  * Application-layer coordination for Create Person (Sprint 7A: PIOS
- * Network Foundation). Unlike Driver Management's `CreateDriverApplicationService`,
- * no existence check is needed before saving: [PersonId] is generated
- * here, fresh, on every call (see [PersonId]'s own KDoc for why it is
- * never caller-supplied), so no id collision is possible in practice.
+ * Network Foundation). D-12 creation is idempotent by authenticated
+ * [CreatePersonCommand.identityId]. The database-enforced unique binding
+ * resolves concurrent requests; the losing request returns the winner's row.
  */
 @Service
 class CreatePersonApplicationService(
     private val personRepository: PersonRepository,
     private val transactionRunner: TransactionRunner = NoOpTransactionRunner
 ) {
-    fun handle(command: CreatePersonCommand): Person = transactionRunner.run {
+    data class Outcome(val person: Person, val created: Boolean)
+
+    fun handle(command: CreatePersonCommand): Person = createOrGet(command).person
+
+    fun createOrGet(command: CreatePersonCommand): Outcome = transactionRunner.run {
+        require(command.identityId.isNotBlank())
+        personRepository.findByIdentityId(command.identityId)?.let { return@run Outcome(it, false) }
+        val now = Instant.now()
         val person = Person(
             id = PersonId(UUID.randomUUID().toString()),
             name = command.name,
             phone = command.phone,
-            createdAt = Instant.now()
+            createdAt = now,
+            identityId = command.identityId,
+            identityBoundAt = now
         )
-        personRepository.save(person)
-        person
+        if (personRepository.insertBoundIfAbsent(person)) Outcome(person, true)
+        else Outcome(requireNotNull(personRepository.findByIdentityId(command.identityId)), false)
     }
 }

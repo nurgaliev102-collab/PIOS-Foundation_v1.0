@@ -13,21 +13,23 @@ import org.springframework.web.bind.annotation.RestController
 
 /**
  * Network Management's Profile REST entry point (Sprint 7A: PIOS Network
- * Foundation). An unrecognized `personId` surfaces as
- * [PersonNotFoundException], mapped to HTTP 404; a blank id or
- * unrecognized `type` surfaces as [IllegalArgumentException], mapped to
- * HTTP 400.
+ * Foundation). D-12 derives the owner from the verified token. The optional
+ * legacy `personId` is only a consistency assertion: mismatch is 403 and it
+ * is never passed downstream as caller identity.
  */
 @RestController
 @RequestMapping("/v1/profiles")
 class ProfileController(
-    private val createPersonProfileApplicationService: CreatePersonProfileApplicationService
+    private val createPersonProfileApplicationService: CreatePersonProfileApplicationService,
+    private val currentPerson: CurrentPerson
 ) {
 
     @PostMapping
     fun createProfile(@RequestBody request: CreateProfileRequest): ResponseEntity<ProfileResponse> =
         try {
-            val command = CreatePersonProfileCommand(PersonId(request.personId), ProfileType.valueOf(request.type))
+            val caller = currentPerson.requireBound()
+            currentPerson.assertCaller(request.personId)
+            val command = CreatePersonProfileCommand(caller.id, ProfileType.valueOf(request.type))
             val profile = createPersonProfileApplicationService.handle(command)
             ResponseEntity.status(201).body(ProfileResponse(profile.id.value, profile.personId.value, profile.type.name))
         } catch (ex: PersonNotFoundException) {

@@ -2,12 +2,14 @@ import { useState } from 'react'
 import { Header } from '../../components/Header'
 import { ActionButton } from '../../components/ActionButton'
 import { ApiError, request } from '../../api/apiClient'
+import { BackendIdentityProvider } from '../../identity/BackendIdentityProvider'
 import styles from './NetworkTest.module.css'
 
 // Network Management's own local port (INTERFACE_CONTRACTS.md-equivalent
 // convention: driver-management 8081, passenger-experience 8082,
 // order-management 8083, dispatch 8084 -- network-management is 8085).
 const NETWORK_MANAGEMENT_BASE_URL = import.meta.env.VITE_NETWORK_MANAGEMENT_BASE_URL ?? 'http://localhost:8085'
+const identityProvider = new BackendIdentityProvider()
 
 interface PersonRecord {
   id: string
@@ -29,8 +31,8 @@ type Status = 'idle' | 'submitting' | 'error'
  * Connection, view a person's connections), per this sprint's own scope
  * ("проверить работу backend", not a polished user interface). Every
  * person created this session is kept in local component state only, so
- * this page can offer a person picker without requiring a
- * `GET /v1/persons` list endpoint that was never asked for.
+ * this page can show the current session's Person without requiring a
+ * `GET /v1/persons` list endpoint. D-12 permits one Person per Identity.
  */
 export function NetworkTest() {
   const [people, setPeople] = useState<PersonRecord[]>([])
@@ -57,13 +59,15 @@ export function NetworkTest() {
     setCreatePersonStatus('submitting')
     setCreatePersonError(null)
     try {
+      const token = identityProvider.getStoredIdentity()?.token
+      if (!token) throw new Error('A session is required')
       const person = await request<{ id: string; name: string }>('/v1/persons', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ name: trimmed }),
         baseUrl: NETWORK_MANAGEMENT_BASE_URL,
       })
-      setPeople((current) => [...current, { id: person.id, name: person.name }])
+      setPeople([{ id: person.id, name: person.name }])
       setName('')
       setCreatePersonStatus('idle')
     } catch {
@@ -79,9 +83,11 @@ export function NetworkTest() {
     setCreateConnectionStatus('submitting')
     setCreateConnectionError(null)
     try {
+      const token = identityProvider.getStoredIdentity()?.token
+      if (!token) throw new Error('A session is required')
       await request('/v1/connections', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ fromPersonId, toPersonId, type: 'CONNECTED' }),
         baseUrl: NETWORK_MANAGEMENT_BASE_URL,
       })
@@ -103,8 +109,11 @@ export function NetworkTest() {
     setViewStatus('submitting')
     setViewError(null)
     try {
+      const token = identityProvider.getStoredIdentity()?.token
+      if (!token) throw new Error('A session is required')
       const result = await request<ConnectionListItem[]>(`/v1/persons/${viewPersonId}/connections`, {
         baseUrl: NETWORK_MANAGEMENT_BASE_URL,
+        headers: { Authorization: `Bearer ${token}` },
       })
       setConnections(result)
       setViewStatus('idle')
@@ -164,19 +173,13 @@ export function NetworkTest() {
               </option>
             ))}
           </select>
-          <select
-            className={styles.select}
+          <input
+            className={styles.input}
             value={toPersonId}
-            aria-label="To person"
+            placeholder="Target Person ID"
+            aria-label="To person ID"
             onChange={(event) => setToPersonId(event.target.value)}
-          >
-            <option value="">To…</option>
-            {people.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.name}
-              </option>
-            ))}
-          </select>
+          />
           <ActionButton
             label={createConnectionStatus === 'submitting' ? 'Connecting…' : 'Create Connection'}
             variant="primary"

@@ -37,6 +37,7 @@ dependencies {
     implementation("org.flywaydb:flyway-database-postgresql")
 
     testImplementation(kotlin("test"))
+    testImplementation("org.springframework:spring-test")
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {

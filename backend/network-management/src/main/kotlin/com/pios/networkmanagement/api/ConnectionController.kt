@@ -15,23 +15,27 @@ import org.springframework.web.bind.annotation.RestController
  * Network Management's Connection REST entry point (Sprint 7A: PIOS
  * Network Foundation) — the direct creation path; `GET /v1/persons/{id}/connections`
  * lives on [PersonController] instead, per the founder's own specified URL
- * shape (see that controller's own KDoc). An unrecognized `fromPersonId`/
- * `toPersonId` surfaces as [PersonNotFoundException], mapped to HTTP 404;
- * a blank id, unrecognized `type`, or a `fromPersonId` equal to
- * `toPersonId` surfaces as [IllegalArgumentException], mapped to HTTP 400.
+ * shape (see that controller's own KDoc). D-12 always derives
+ * `fromPersonId` from the verified token. The optional legacy value is only
+ * a consistency assertion; `toPersonId` remains a target selector.
  */
 @RestController
 @RequestMapping("/v1/connections")
 class ConnectionController(
-    private val createConnectionApplicationService: CreateConnectionApplicationService
+    private val createConnectionApplicationService: CreateConnectionApplicationService,
+    private val currentPerson: CurrentPerson
 ) {
 
     @PostMapping
     fun createConnection(@RequestBody request: CreateConnectionRequest): ResponseEntity<ConnectionResponse> =
         try {
+            val caller = currentPerson.requireBound()
+            currentPerson.assertCaller(request.fromPersonId)
+            val target = PersonId(request.toPersonId)
+            currentPerson.requireBoundTarget(target)
             val command = CreateConnectionCommand(
-                fromPersonId = PersonId(request.fromPersonId),
-                toPersonId = PersonId(request.toPersonId),
+                fromPersonId = caller.id,
+                toPersonId = target,
                 type = ConnectionType.valueOf(request.type)
             )
             val connection = createConnectionApplicationService.handle(command)

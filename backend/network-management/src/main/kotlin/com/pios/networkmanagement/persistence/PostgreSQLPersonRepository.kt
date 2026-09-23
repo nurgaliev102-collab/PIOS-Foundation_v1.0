@@ -21,31 +21,58 @@ class PostgreSQLPersonRepository(
 ) : PersonRepository {
 
     override fun save(person: Person) {
-        jdbcTemplate.update(
+        val changed = jdbcTemplate.update(
             """
-            INSERT INTO persons (id, name, phone, created_at) VALUES (?, ?, ?, ?)
+            INSERT INTO persons (id, name, phone, created_at, identity_id, identity_bound_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone
+            WHERE persons.identity_id IS NOT DISTINCT FROM EXCLUDED.identity_id
+              AND persons.identity_bound_at IS NOT DISTINCT FROM EXCLUDED.identity_bound_at
             """.trimIndent(),
             person.id.value,
             person.name,
             person.phone,
-            java.sql.Timestamp.from(person.createdAt)
+            java.sql.Timestamp.from(person.createdAt),
+            person.identityId,
+            person.identityBoundAt?.let(java.sql.Timestamp::from)
         )
+        check(changed == 1) { "Person identity binding is immutable" }
+    }
+
+    override fun insertBoundIfAbsent(person: Person): Boolean {
+        requireNotNull(person.identityId)
+        return jdbcTemplate.update(
+            """
+            INSERT INTO persons (id, name, phone, created_at, identity_id, identity_bound_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (identity_id) WHERE identity_id IS NOT NULL DO NOTHING
+            """.trimIndent(),
+            person.id.value, person.name, person.phone,
+            java.sql.Timestamp.from(person.createdAt), person.identityId,
+            java.sql.Timestamp.from(requireNotNull(person.identityBoundAt))
+        ) == 1
     }
 
     override fun findById(id: PersonId): Person? {
         val rows = jdbcTemplate.query(
-            "SELECT id, name, phone, created_at FROM persons WHERE id = ?",
-            { rs, _ ->
-                Person(
-                    id = PersonId(rs.getString("id")),
-                    name = rs.getString("name"),
-                    phone = rs.getString("phone"),
-                    createdAt = rs.getTimestamp("created_at").toInstant()
-                )
-            },
+            "SELECT id, name, phone, created_at, identity_id, identity_bound_at FROM persons WHERE id = ?",
+            { rs, _ -> mapRow(rs) },
             id.value
         )
         return rows.firstOrNull()
     }
+
+    override fun findByIdentityId(identityId: String): Person? = jdbcTemplate.query(
+        "SELECT id, name, phone, created_at, identity_id, identity_bound_at FROM persons WHERE identity_id = ?",
+        { rs, _ -> mapRow(rs) }, identityId
+    ).firstOrNull()
+
+    private fun mapRow(rs: java.sql.ResultSet): Person = Person(
+        id = PersonId(rs.getString("id")),
+        name = rs.getString("name"),
+        phone = rs.getString("phone"),
+        createdAt = rs.getTimestamp("created_at").toInstant(),
+        identityId = rs.getString("identity_id"),
+        identityBoundAt = rs.getTimestamp("identity_bound_at")?.toInstant()
+    )
 }

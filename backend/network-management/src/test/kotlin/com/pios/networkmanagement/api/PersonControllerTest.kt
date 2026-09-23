@@ -1,5 +1,6 @@
 package com.pios.networkmanagement.api
 
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.pios.networkmanagement.application.CreateConnectionApplicationService
 import com.pios.networkmanagement.application.CreateConnectionCommand
 import com.pios.networkmanagement.application.CreatePersonApplicationService
@@ -12,10 +13,15 @@ import com.pios.networkmanagement.persistence.InMemoryConnectionRepository
 import com.pios.networkmanagement.persistence.InMemoryPersonProfileRepository
 import com.pios.networkmanagement.persistence.InMemoryPersonRepository
 import org.springframework.http.HttpStatus
+import org.springframework.web.server.ResponseStatusException
+import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
 
 /**
  * Constructs [PersonController] directly, with real, in-memory-backed
@@ -32,8 +38,12 @@ class PersonControllerTest {
         createPersonService,
         RetrievePersonHandler(personRepository),
         RetrievePersonProfilesHandler(profileRepository),
-        RetrievePersonConnectionsHandler(connectionRepository)
+        RetrievePersonConnectionsHandler(connectionRepository),
+        CurrentPerson(personRepository)
     )
+
+    @BeforeTest fun authenticate() { NetworkSecurityContext.setIdentityId("identity-test") }
+    @AfterTest fun clearAuthentication() { NetworkSecurityContext.clear() }
 
     @Test
     fun `creating a person returns 201 with their id and name`() {
@@ -42,7 +52,16 @@ class PersonControllerTest {
         assertEquals(HttpStatus.CREATED, response.statusCode)
         val body = assertNotNull(response.body)
         assertEquals("Артур", body.name)
-        assertEquals("+7900", body.phone)
+    }
+
+    @Test
+    fun `person response never serializes phone PII`() {
+        val response = controller.createPerson(CreatePersonRequest("Artur", "+7900"))
+
+        val body = assertNotNull(response.body)
+        val json = jacksonObjectMapper().writeValueAsString(body)
+        assertFalse(json.contains("phone"))
+        assertFalse(json.contains("+7900"))
     }
 
     @Test
@@ -54,7 +73,8 @@ class PersonControllerTest {
 
     @Test
     fun `getting a known person returns 200`() {
-        val created = createPersonService.handle(CreatePersonCommand("Регина", null))
+        val created = createPersonService.handle(CreatePersonCommand("Регина", null, "test-" + java.util.UUID.randomUUID()))
+        NetworkSecurityContext.setIdentityId(requireNotNull(created.identityId))
 
         val response = controller.getPerson(created.id.value)
 
@@ -64,16 +84,17 @@ class PersonControllerTest {
 
     @Test
     fun `getting an unknown person returns 404`() {
-        val response = controller.getPerson("unknown-person")
-
-        assertEquals(HttpStatus.NOT_FOUND, response.statusCode)
+        createPersonService.handle(CreatePersonCommand("caller", null, "identity-test"))
+        assertEquals(HttpStatus.FORBIDDEN,
+            assertFailsWith<ResponseStatusException> { controller.getPerson("unknown-person") }.statusCode)
     }
 
     @Test
     fun `getting connections for Artur includes Regina after a connection is created`() {
-        val artur = createPersonService.handle(CreatePersonCommand("Артур", null))
-        val regina = createPersonService.handle(CreatePersonCommand("Регина", null))
+        val artur = createPersonService.handle(CreatePersonCommand("Артур", null, "test-" + java.util.UUID.randomUUID()))
+        val regina = createPersonService.handle(CreatePersonCommand("Регина", null, "test-" + java.util.UUID.randomUUID()))
         createConnectionService.handle(CreateConnectionCommand(artur.id, regina.id, ConnectionType.CONNECTED))
+        NetworkSecurityContext.setIdentityId(requireNotNull(artur.identityId))
 
         val response = controller.getPersonConnections(artur.id.value)
 

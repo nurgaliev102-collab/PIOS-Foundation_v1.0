@@ -12,5 +12,7 @@ import com.pios.networkmanagement.domain.PersonId
  */
 interface PersonRepository {
     fun save(person: Person)
+    fun insertBoundIfAbsent(person: Person): Boolean
     fun findById(id: PersonId): Person?
+    fun findByIdentityId(identityId: String): Person?
 }

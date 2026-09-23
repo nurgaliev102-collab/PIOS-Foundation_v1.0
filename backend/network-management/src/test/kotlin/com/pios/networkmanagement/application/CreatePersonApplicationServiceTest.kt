@@ -12,7 +12,7 @@ class CreatePersonApplicationServiceTest {
 
     @Test
     fun `creating a person saves it and returns it with a generated id`() {
-        val person = service.handle(CreatePersonCommand("Артур", "+79999999999"))
+        val person = service.handle(CreatePersonCommand("Артур", "+79999999999", "test-" + java.util.UUID.randomUUID()))
 
         assertNotNull(person.id.value)
         assertEquals("Артур", person.name)
@@ -22,8 +22,8 @@ class CreatePersonApplicationServiceTest {
 
     @Test
     fun `two people created with the same name get different ids`() {
-        val first = service.handle(CreatePersonCommand("Регина", null))
-        val second = service.handle(CreatePersonCommand("Регина", null))
+        val first = service.handle(CreatePersonCommand("Регина", null, "test-" + java.util.UUID.randomUUID()))
+        val second = service.handle(CreatePersonCommand("Регина", null, "test-" + java.util.UUID.randomUUID()))
 
         assertEquals(false, first.id == second.id)
     }
@@ -31,7 +31,7 @@ class CreatePersonApplicationServiceTest {
     @Test
     fun `creating a person with a blank name fails`() {
         assertFailsWith<IllegalArgumentException> {
-            service.handle(CreatePersonCommand("", null))
+            service.handle(CreatePersonCommand("", null, "test-" + java.util.UUID.randomUUID()))
         }
     }
 }

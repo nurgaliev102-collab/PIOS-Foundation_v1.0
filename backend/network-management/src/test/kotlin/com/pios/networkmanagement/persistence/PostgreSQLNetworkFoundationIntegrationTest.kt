@@ -39,8 +39,8 @@ class PostgreSQLNetworkFoundationIntegrationTest {
 
     @Test
     fun `Artur connects to Regina through PostgreSQL, and Artur's own connections include Regina`() {
-        val artur = createPersonService.handle(CreatePersonCommand("Артур", null))
-        val regina = createPersonService.handle(CreatePersonCommand("Регина", null))
+        val artur = createPersonService.handle(CreatePersonCommand("Артур", null, "test-" + java.util.UUID.randomUUID()))
+        val regina = createPersonService.handle(CreatePersonCommand("Регина", null, "test-" + java.util.UUID.randomUUID()))
 
         createConnectionService.handle(CreateConnectionCommand(artur.id, regina.id, ConnectionType.CONNECTED))
 
@@ -50,8 +50,8 @@ class PostgreSQLNetworkFoundationIntegrationTest {
 
     @Test
     fun `Artur invites Regina through PostgreSQL, and accepting produces the same connection`() {
-        val artur = createPersonService.handle(CreatePersonCommand("Артур", null))
-        val regina = createPersonService.handle(CreatePersonCommand("Регина", null))
+        val artur = createPersonService.handle(CreatePersonCommand("Артур", null, "test-" + java.util.UUID.randomUUID()))
+        val regina = createPersonService.handle(CreatePersonCommand("Регина", null, "test-" + java.util.UUID.randomUUID()))
 
         val invitation = createInvitationService.handle(CreateInvitationCommand(artur.id))
         val connection = acceptInvitationService.handle(AcceptInvitationCommand(invitation.code, regina.id))

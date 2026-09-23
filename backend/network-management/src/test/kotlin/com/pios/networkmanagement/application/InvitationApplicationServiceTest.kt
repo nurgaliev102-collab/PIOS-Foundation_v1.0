@@ -25,7 +25,7 @@ class InvitationApplicationServiceTest {
 
     @Test
     fun `Artur creates an invitation`() {
-        val artur = createPersonService.handle(CreatePersonCommand("Артур", null))
+        val artur = createPersonService.handle(CreatePersonCommand("Артур", null, "test-" + java.util.UUID.randomUUID()))
 
         val invitation = createInvitationService.handle(CreateInvitationCommand(artur.id))
 
@@ -43,8 +43,8 @@ class InvitationApplicationServiceTest {
 
     @Test
     fun `Regina accepting Artur's invitation creates a CONNECTED connection from Artur to Regina`() {
-        val artur = createPersonService.handle(CreatePersonCommand("Артур", null))
-        val regina = createPersonService.handle(CreatePersonCommand("Регина", null))
+        val artur = createPersonService.handle(CreatePersonCommand("Артур", null, "test-" + java.util.UUID.randomUUID()))
+        val regina = createPersonService.handle(CreatePersonCommand("Регина", null, "test-" + java.util.UUID.randomUUID()))
         val invitation = createInvitationService.handle(CreateInvitationCommand(artur.id))
 
         val connection = acceptInvitationService.handle(AcceptInvitationCommand(invitation.code, regina.id))
@@ -57,7 +57,7 @@ class InvitationApplicationServiceTest {
 
     @Test
     fun `accepting an unknown invitation code fails`() {
-        val regina = createPersonService.handle(CreatePersonCommand("Регина", null))
+        val regina = createPersonService.handle(CreatePersonCommand("Регина", null, "test-" + java.util.UUID.randomUUID()))
 
         assertFailsWith<InvitationNotFoundException> {
             acceptInvitationService.handle(AcceptInvitationCommand("NOPE0000", regina.id))
@@ -66,8 +66,8 @@ class InvitationApplicationServiceTest {
 
     @Test
     fun `accepting an already-used invitation fails`() {
-        val artur = createPersonService.handle(CreatePersonCommand("Артур", null))
-        val regina = createPersonService.handle(CreatePersonCommand("Регина", null))
+        val artur = createPersonService.handle(CreatePersonCommand("Артур", null, "test-" + java.util.UUID.randomUUID()))
+        val regina = createPersonService.handle(CreatePersonCommand("Регина", null, "test-" + java.util.UUID.randomUUID()))
         val invitation = createInvitationService.handle(CreateInvitationCommand(artur.id))
         acceptInvitationService.handle(AcceptInvitationCommand(invitation.code, regina.id))
 

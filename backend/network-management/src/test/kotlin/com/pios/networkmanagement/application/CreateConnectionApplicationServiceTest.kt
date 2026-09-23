@@ -21,8 +21,8 @@ class CreateConnectionApplicationServiceTest {
 
     @Test
     fun `Artur connects to Regina, and the connection is retrievable from Artur's own side`() {
-        val artur = createPersonService.handle(CreatePersonCommand("Артур", null))
-        val regina = createPersonService.handle(CreatePersonCommand("Регина", null))
+        val artur = createPersonService.handle(CreatePersonCommand("Артур", null, "test-" + java.util.UUID.randomUUID()))
+        val regina = createPersonService.handle(CreatePersonCommand("Регина", null, "test-" + java.util.UUID.randomUUID()))
 
         val connection = createConnectionService.handle(
             CreateConnectionCommand(artur.id, regina.id, ConnectionType.CONNECTED)
@@ -38,7 +38,7 @@ class CreateConnectionApplicationServiceTest {
 
     @Test
     fun `creating a connection from an unknown person fails`() {
-        val regina = createPersonService.handle(CreatePersonCommand("Регина", null))
+        val regina = createPersonService.handle(CreatePersonCommand("Регина", null, "test-" + java.util.UUID.randomUUID()))
 
         assertFailsWith<PersonNotFoundException> {
             createConnectionService.handle(
@@ -49,7 +49,7 @@ class CreateConnectionApplicationServiceTest {
 
     @Test
     fun `creating a connection to an unknown person fails`() {
-        val artur = createPersonService.handle(CreatePersonCommand("Артур", null))
+        val artur = createPersonService.handle(CreatePersonCommand("Артур", null, "test-" + java.util.UUID.randomUUID()))
 
         assertFailsWith<PersonNotFoundException> {
             createConnectionService.handle(

@@ -8,6 +8,8 @@ import com.pios.networkmanagement.application.RetrievePersonHandler
 import com.pios.networkmanagement.application.RetrievePersonProfilesHandler
 import com.pios.networkmanagement.domain.PersonId
 import org.springframework.http.ResponseEntity
+import org.springframework.http.HttpStatus
+import org.springframework.web.server.ResponseStatusException
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -26,24 +28,26 @@ import org.springframework.web.bind.annotation.RestController
  * specification names them as nested under `/v1/persons/{id}` — the same
  * literal URL shape is preserved here.
  *
- * A blank/malformed id surfaces as [PersonId]'s own `require` check,
- * mapped to HTTP 400. An unrecognized person id surfaces as
- * [PersonNotFoundException], mapped to HTTP 404.
+ * D-12 resolves the caller from the verified token subject. A supplied path
+ * id is only a self-resource selector and never establishes caller identity.
  */
 @RestController
 @RequestMapping("/v1/persons")
 class PersonController(
     private val createPersonApplicationService: CreatePersonApplicationService,
-    private val retrievePersonHandler: RetrievePersonHandler,
+    @Suppress("unused") private val retrievePersonHandler: RetrievePersonHandler,
     private val retrievePersonProfilesHandler: RetrievePersonProfilesHandler,
-    private val retrievePersonConnectionsHandler: RetrievePersonConnectionsHandler
+    private val retrievePersonConnectionsHandler: RetrievePersonConnectionsHandler,
+    private val currentPerson: CurrentPerson
 ) {
 
     @PostMapping
     fun createPerson(@RequestBody request: CreatePersonRequest): ResponseEntity<PersonResponse> =
         try {
-            val person = createPersonApplicationService.handle(CreatePersonCommand(request.name, request.phone))
-            ResponseEntity.status(201).body(PersonResponse(person.id.value, person.name, person.phone))
+            if (request.identityId != null) throw ResponseStatusException(HttpStatus.FORBIDDEN)
+            val outcome = createPersonApplicationService.createOrGet(CreatePersonCommand(request.name, request.phone, currentPerson.identityId()))
+            ResponseEntity.status(if (outcome.created) 201 else 200)
+                .body(PersonResponse(outcome.person.id.value, outcome.person.name))
         } catch (ex: IllegalArgumentException) {
             ResponseEntity.badRequest().build()
         }
@@ -51,8 +55,8 @@ class PersonController(
     @GetMapping("/{id}")
     fun getPerson(@PathVariable id: String): ResponseEntity<PersonResponse> =
         try {
-            val person = retrievePersonHandler.handle(PersonId(id))
-            ResponseEntity.ok(PersonResponse(person.id.value, person.name, person.phone))
+            val person = currentPerson.requireSelf(id)
+            ResponseEntity.ok(PersonResponse(person.id.value, person.name))
         } catch (ex: PersonNotFoundException) {
             ResponseEntity.notFound().build()
         } catch (ex: IllegalArgumentException) {
@@ -62,7 +66,7 @@ class PersonController(
     @GetMapping("/{id}/profiles")
     fun getPersonProfiles(@PathVariable id: String): ResponseEntity<List<ProfileResponse>> =
         try {
-            val personId = PersonId(id)
+            val personId = currentPerson.requireSelf(id).id
             ResponseEntity.ok(
                 retrievePersonProfilesHandler.handle(personId)
                     .map { ProfileResponse(it.id.value, it.personId.value, it.type.name) }
@@ -74,15 +78,11 @@ class PersonController(
     @GetMapping("/{id}/connections")
     fun getPersonConnections(@PathVariable id: String): ResponseEntity<List<PersonConnectionResponse>> =
         try {
-            val personId = PersonId(id)
+            val personId = currentPerson.requireSelf(id).id
             val connections = retrievePersonConnectionsHandler.handle(personId).map { connection ->
-                val toPerson = try {
-                    retrievePersonHandler.handle(connection.toPersonId)
-                } catch (ex: PersonNotFoundException) {
-                    null
-                }
-                PersonConnectionResponse(person = toPerson?.name ?: connection.toPersonId.value, type = connection.type.name)
-            }
+                val toPerson = runCatching { currentPerson.requireBoundTarget(connection.toPersonId) }.getOrNull()
+                toPerson?.let { PersonConnectionResponse(person = it.name, type = connection.type.name) }
+            }.filterNotNull()
             ResponseEntity.ok(connections)
         } catch (ex: IllegalArgumentException) {
             ResponseEntity.badRequest().build()

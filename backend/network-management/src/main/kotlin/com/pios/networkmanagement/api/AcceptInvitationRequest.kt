@@ -6,4 +6,4 @@ package com.pios.networkmanagement.api
  * [com.pios.networkmanagement.application.AcceptInvitationCommand]'s own
  * KDoc for why [personId], identifying who is accepting, is required here.
  */
-data class AcceptInvitationRequest(val personId: String)
+data class AcceptInvitationRequest(val personId: String? = null)

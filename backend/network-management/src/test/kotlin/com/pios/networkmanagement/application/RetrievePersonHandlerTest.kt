@@ -13,7 +13,7 @@ class RetrievePersonHandlerTest {
 
     @Test
     fun `retrieving a known person returns it`() {
-        val created = createService.handle(CreatePersonCommand("Артур", null))
+        val created = createService.handle(CreatePersonCommand("Артур", null, "test-" + java.util.UUID.randomUUID()))
 
         val retrieved = handler.handle(created.id)
 
