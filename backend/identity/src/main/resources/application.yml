@@ -9,6 +9,15 @@ spring:
     enabled: true
     locations: classpath:db/migration/identity
 
+# C-2 timing-oracle mitigation. PROVISIONAL: before production enablement,
+# recalibrate from eligible-path P99.9 under nominal and representative DB
+# contention, then set ceil_to_10ms(P99.9 * 1.25).
+pios:
+  identity:
+    recovery:
+      timing:
+        floor-ms: 1000
+
 server:
   port: 8086
 

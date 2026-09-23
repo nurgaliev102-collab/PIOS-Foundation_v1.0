@@ -7,10 +7,10 @@ import com.pios.identity.domain.PhoneVerificationPurpose
 import com.pios.identity.persistence.InMemoryIdentityRepository
 import com.pios.identity.persistence.InMemoryPhoneVerificationChallengeRepository
 import java.time.Instant
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -26,10 +26,10 @@ import kotlin.test.assertTrue
 class RequestRecoveryApplicationServiceTest {
     private val identityRepository = InMemoryIdentityRepository()
     private val challengeRepository = InMemoryPhoneVerificationChallengeRepository()
-    private val sentCodes = ConcurrentHashMap<String, String>()
+    private val outbox = testSmsOutbox(challengeRepository)
     private val challengeIssuer = PhoneVerificationChallengeIssuer(
         challengeRepository, PasswordHasher(defaultIterations = 1000),
-        OutboundSmsPort { phone, code -> sentCodes[phone.value] = code },
+        testOtpCipher(), outbox,
         ttlSeconds = 600, maxAttempts = 5, codeDigits = 6
     )
     private val defaultClientKey = "198.51.100.1"
@@ -43,7 +43,7 @@ class RequestRecoveryApplicationServiceTest {
     @Test
     fun `an unknown phone never throws and sends nothing`() {
         service().handle("+79995550001", defaultClientKey)
-        assertTrue(sentCodes.isEmpty())
+        assertTrue(outbox.allRecords().isEmpty())
     }
 
     @Test
@@ -53,7 +53,7 @@ class RequestRecoveryApplicationServiceTest {
         // beyond confirming a guest row does not interfere with lookup.
         identityRepository.save(Identity(IdentityId("guest-1"), null, null, Instant.EPOCH))
         service().handle("+79995550002", defaultClientKey)
-        assertTrue(sentCodes.isEmpty())
+        assertTrue(outbox.allRecords().isEmpty())
     }
 
     @Test
@@ -63,7 +63,7 @@ class RequestRecoveryApplicationServiceTest {
 
         service().handle(phone.value, defaultClientKey)
 
-        assertFalse(sentCodes.containsKey(phone.value))
+        assertTrue(outbox.allRecords().isEmpty())
         assertNull(challengeRepository.findLiveForUpdate(IdentityId("legacy-1"), PhoneVerificationPurpose.RECOVERY))
     }
 
@@ -75,14 +75,15 @@ class RequestRecoveryApplicationServiceTest {
 
         service().handle(phone.value, defaultClientKey)
 
-        assertTrue(sentCodes.containsKey(phone.value))
-        assertTrue(challengeRepository.findLiveForUpdate(identity.id, PhoneVerificationPurpose.RECOVERY)!!.isLive)
+        val challenge = assertNotNull(challengeRepository.findLiveForUpdate(identity.id, PhoneVerificationPurpose.RECOVERY))
+        assertTrue(challenge.isLive)
+        assertEquals(SmsOutboxStatus.PENDING, outbox.findByChallengeId(challenge.id)?.status)
     }
 
     @Test
     fun `a malformed phone never throws`() {
         service().handle("not-a-phone", defaultClientKey)
-        assertTrue(sentCodes.isEmpty())
+        assertTrue(outbox.allRecords().isEmpty())
     }
 
     @Test
@@ -110,11 +111,12 @@ class RequestRecoveryApplicationServiceTest {
         val limited = service(clientKeyMaxPerWindow = 1)
 
         limited.handle(phone.value, defaultClientKey)
-        assertTrue(sentCodes.containsKey(phone.value))
-        sentCodes.clear()
+        val firstChallenge = assertNotNull(challengeRepository.findLiveForUpdate(identity.id, PhoneVerificationPurpose.RECOVERY))
+        assertEquals(SmsOutboxStatus.PENDING, outbox.findByChallengeId(firstChallenge.id)?.status)
 
         limited.handle(phone.value, defaultClientKey) // same client key, budget already spent
-        assertFalse(sentCodes.containsKey(phone.value), "a second request from the same client key must send nothing")
+        assertEquals(firstChallenge.id, challengeRepository.findLiveForUpdate(identity.id, PhoneVerificationPurpose.RECOVERY)?.id,
+            "a second request from the same client key must not create a replacement challenge")
     }
 
     @Test
@@ -125,13 +127,14 @@ class RequestRecoveryApplicationServiceTest {
         val limited = service(clientKeyMaxPerWindow = 1)
 
         limited.handle(phone.value, "198.51.100.10")
-        assertTrue(sentCodes.containsKey(phone.value))
-        sentCodes.clear()
+        val firstChallenge = assertNotNull(challengeRepository.findLiveForUpdate(identity.id, PhoneVerificationPurpose.RECOVERY))
 
         // A different client key, well under its own budget -- the earlier
         // client's exhaustion must not leak into this one's own window.
         limited.handle(phone.value, "198.51.100.20")
-        assertTrue(sentCodes.containsKey(phone.value))
+        val secondChallenge = assertNotNull(challengeRepository.findLiveForUpdate(identity.id, PhoneVerificationPurpose.RECOVERY))
+        assertNotEquals(firstChallenge.id, secondChallenge.id)
+        assertEquals(SmsOutboxStatus.PENDING, outbox.findByChallengeId(secondChallenge.id)?.status)
     }
 
     @Test
@@ -143,10 +146,11 @@ class RequestRecoveryApplicationServiceTest {
         val limited = service(phoneMaxPerWindow = 1000, clientKeyMaxPerWindow = 1)
 
         limited.handle(phone.value, defaultClientKey)
-        sentCodes.clear()
+        val firstChallenge = assertNotNull(challengeRepository.findLiveForUpdate(identity.id, PhoneVerificationPurpose.RECOVERY))
 
         limited.handle(phone.value, defaultClientKey)
-        assertFalse(sentCodes.containsKey(phone.value), "the client-key budget alone must be enough to block sending")
+        assertEquals(firstChallenge.id, challengeRepository.findLiveForUpdate(identity.id, PhoneVerificationPurpose.RECOVERY)?.id,
+            "the client-key budget alone must be enough to block replacement issuance")
     }
 
     @Test
@@ -158,11 +162,12 @@ class RequestRecoveryApplicationServiceTest {
         val limited = service(phoneMaxPerWindow = 1, clientKeyMaxPerWindow = 1000)
 
         limited.handle(phone.value, defaultClientKey)
-        sentCodes.clear()
+        val firstChallenge = assertNotNull(challengeRepository.findLiveForUpdate(identity.id, PhoneVerificationPurpose.RECOVERY))
 
         // A fresh client key too -- proves it is specifically the phone
         // budget, not the client-key one, doing the blocking here.
         limited.handle(phone.value, "203.0.113.99")
-        assertFalse(sentCodes.containsKey(phone.value), "the phone budget alone must be enough to block sending")
+        assertEquals(firstChallenge.id, challengeRepository.findLiveForUpdate(identity.id, PhoneVerificationPurpose.RECOVERY)?.id,
+            "the phone budget alone must be enough to block replacement issuance")
     }
 }

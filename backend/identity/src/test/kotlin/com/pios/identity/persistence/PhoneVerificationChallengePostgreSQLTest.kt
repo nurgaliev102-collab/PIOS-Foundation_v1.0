@@ -14,6 +14,7 @@ import com.pios.identity.application.OutboundSmsPort
 import com.pios.identity.application.PasswordHasher
 import com.pios.identity.application.PhoneVerificationChallengeIssuer
 import com.pios.identity.application.SessionTokenIssuer
+import com.pios.identity.application.testOtpCipher
 import com.pios.identity.application.StaleSessionException
 import com.pios.identity.domain.Identity
 import com.pios.identity.domain.IdentityId
@@ -52,6 +53,7 @@ class PhoneVerificationChallengePostgreSQLTest {
     private val identities = PostgreSQLIdentityRepository(jdbc)
     private val credentials = PostgreSQLCredentialRepository(jdbc)
     private val challenges = PostgreSQLPhoneVerificationChallengeRepository(jdbc)
+    private val smsOutbox = PostgreSQLSmsOutboxRepository(jdbc)
     private val guard = PostgreSQLPhoneVerificationChallengeGuard(jdbc)
     private val passwordHasher = PasswordHasher(defaultIterations = 1000)
     private val secret = Base64.getEncoder().encodeToString("phone-verification-postgres-test-secret".toByteArray())
@@ -70,13 +72,18 @@ class PhoneVerificationChallengePostgreSQLTest {
     }
 
     private fun issueAndCapture(identityId: IdentityId, phone: Phone, purpose: PhoneVerificationPurpose): String {
-        val sent = ConcurrentHashMap<String, String>()
         val issuer = PhoneVerificationChallengeIssuer(
-            challenges, passwordHasher, OutboundSmsPort { p, code -> sent[p.value] = code },
+            challenges, passwordHasher, testOtpCipher(), smsOutbox,
             transactions, ttlSeconds = 600, maxAttempts = 5, codeDigits = 6, challengeGuard = guard
         )
         issuer.issue(identityId, phone, purpose)
-        return sent.getValue(phone.value)
+        val challenge = challenges.findById(
+            jdbc.queryForObject(
+                "SELECT id FROM phone_verification_challenges WHERE identity_id = ? AND purpose = ? AND superseded_at IS NULL",
+                String::class.java, identityId.value, purpose.name
+            )!!
+        )!!
+        return testOtpCipher().decrypt(challenge.otpCiphertext!!, challenge.otpNonce!!)
     }
 
     private fun <A, B> race(first: () -> A, second: () -> B): Pair<Result<A>, Result<B>> {
@@ -142,9 +149,8 @@ class PhoneVerificationChallengePostgreSQLTest {
     fun `two concurrent recovery requests for the same identity leave exactly one live challenge, repeated`() {
         repeat(5) {
             val (identity, phone) = registerVerifiedIdentity()
-            val sent = ConcurrentHashMap<String, String>()
             val issuer = PhoneVerificationChallengeIssuer(
-                challenges, passwordHasher, OutboundSmsPort { p, code -> sent[p.value] = code },
+                challenges, passwordHasher, testOtpCipher(), smsOutbox,
                 transactions, ttlSeconds = 600, maxAttempts = 5, codeDigits = 6, challengeGuard = guard
             )
 

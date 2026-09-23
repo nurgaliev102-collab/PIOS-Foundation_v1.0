@@ -35,7 +35,22 @@ data class PhoneVerificationChallenge(
     val createdAt: Instant,
     val expiresAt: Instant,
     val consumedAt: Instant?,
-    val supersededAt: Instant?
+    val supersededAt: Instant?,
+    /**
+     * AES-256-GCM ciphertext of the OTP plaintext, Base64-encoded.
+     * Non-null when first persisted; nulled atomically with the PENDING→SENT
+     * outbox transition (Decision Lock item 11: ciphertext destruction).
+     * Also nulled on a definitive FAILED transition. Never re-populated.
+     * The relay decrypts this to obtain the OTP it sends to SMS Aero —
+     * the only path through which plaintext ever exists after initial
+     * issuance (always in memory, never in any column after nulling).
+     */
+    val otpCiphertext: String? = null,
+    /**
+     * AES-256-GCM nonce (96-bit / 12-byte), Base64-encoded.
+     * Nulled together with [otpCiphertext].
+     */
+    val otpNonce: String? = null
 ) {
     init {
         require(id.isNotBlank()) { "PhoneVerificationChallenge id must not be blank" }

@@ -1,49 +1,42 @@
 package com.pios.identity.application
 
-import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import com.pios.identity.domain.IdentityId
 import com.pios.identity.domain.Phone
 import com.pios.identity.domain.PhoneVerificationPurpose
 import com.pios.identity.persistence.InMemoryPhoneVerificationChallengeRepository
-import org.slf4j.LoggerFactory
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-
-private class RecordingOutboundSmsPort : OutboundSmsPort {
-    val sentCodes = ConcurrentHashMap<String, String>()
-    override fun sendVerificationCode(phone: Phone, code: String) {
-        sentCodes[phone.value] = code
-    }
-}
 
 /** ADR-082 (D-03.7) — issuance-side security properties, in isolation. */
 class PhoneVerificationChallengeIssuerTest {
     private val repository = InMemoryPhoneVerificationChallengeRepository()
-    private val smsPort = RecordingOutboundSmsPort()
+    private val otpCipher = testOtpCipher()
+    private val outbox = testSmsOutbox(repository)
     private val issuer = PhoneVerificationChallengeIssuer(
-        repository, PasswordHasher(defaultIterations = 1000), smsPort,
+        repository, PasswordHasher(defaultIterations = 1000), otpCipher, outbox,
         ttlSeconds = 600, maxAttempts = 5, codeDigits = 6
     )
     private val identityId = IdentityId("issuer-test-identity")
     private val phone = Phone("+79990000001")
 
     @Test
-    fun `issuing sends a plaintext code but persists only a hash that does not equal it`() {
+    fun `issuing encrypts the OTP and creates a pending outbox record without sending`() {
         issuer.issue(identityId, phone, PhoneVerificationPurpose.RECOVERY)
 
-        val sentCode = smsPort.sentCodes.getValue(phone.value)
-        assertEquals(6, sentCode.length)
-        assertTrue(sentCode.all { it.isDigit() })
-
         val stored = repository.findLiveForUpdate(identityId, PhoneVerificationPurpose.RECOVERY)!!
-        assertNotEquals(sentCode, stored.codeHash)
-        assertFalse(stored.codeHash.contains(sentCode))
+        val generatedCode = otpCipher.decrypt(assertNotNull(stored.otpCiphertext), assertNotNull(stored.otpNonce))
+        assertEquals(6, generatedCode.length)
+        assertTrue(generatedCode.all { it.isDigit() })
+        assertNotEquals(generatedCode, stored.codeHash)
+        assertFalse(stored.codeHash.contains(generatedCode))
+        val record = assertNotNull(outbox.findByChallengeId(stored.id))
+        assertEquals(SmsOutboxStatus.PENDING, record.status)
+        assertFalse(record.toString().contains(generatedCode))
+        assertFalse(record.toString().contains(phone.value))
     }
 
     @Test
@@ -76,67 +69,25 @@ class PhoneVerificationChallengeIssuerTest {
     }
 
     @Test
-    fun `provider failure is logged by classification only and leaves committed challenge bounded`() {
-        var codeSeenByProvider = ""
-        val failingPort = OutboundSmsPort { _, code ->
-            codeSeenByProvider = code
-            throw OutboundSmsDeliveryException(
-                SmsSubmissionState.UNKNOWN, SmsSubmissionFailure.TRANSPORT_TIMEOUT
-            )
-        }
-        val failingIssuer = PhoneVerificationChallengeIssuer(
-            repository, PasswordHasher(defaultIterations = 1000), failingPort,
-            ttlSeconds = 600, maxAttempts = 5, codeDigits = 6
-        )
-        val logger = LoggerFactory.getLogger(PhoneVerificationChallengeIssuer::class.java) as Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        logger.addAppender(appender)
-        try {
-            failingIssuer.issue(identityId, phone, PhoneVerificationPurpose.RECOVERY)
-        } finally {
-            logger.detachAppender(appender)
-            appender.stop()
-        }
-
+    fun `issuance atomically leaves a bounded live challenge and pending outbox record`() {
+        issuer.issue(identityId, phone, PhoneVerificationPurpose.RECOVERY)
         val stored = repository.findLiveForUpdate(identityId, PhoneVerificationPurpose.RECOVERY)!!
         assertTrue(stored.isLive)
         assertEquals(5, stored.maxAttempts)
         assertEquals(600L, stored.expiresAt.epochSecond - stored.createdAt.epochSecond)
-        assertNotEquals(codeSeenByProvider, stored.codeHash)
-        val logText = appender.list.joinToString("\n") { it.formattedMessage }
-        assertTrue(logText.contains("UNKNOWN"))
-        assertFalse(logText.contains(codeSeenByProvider))
-        assertFalse(logText.contains(phone.value))
+        assertEquals(SmsOutboxStatus.PENDING, outbox.findByChallengeId(stored.id)?.status)
     }
 
     @Test
-    fun `unexpected transport exception cannot put credentials or Authorization in logs`() {
-        val fakeKey = "fixture-only-key"
-        val fakeAuthorization = "Basic Zml4dHVyZQ=="
-        var codeSeenByProvider = ""
-        val failingPort = OutboundSmsPort { recipient, code ->
-            codeSeenByProvider = code
-            throw IllegalStateException("$fakeKey $fakeAuthorization ${recipient.value} $code")
-        }
-        val failingIssuer = PhoneVerificationChallengeIssuer(
-            repository, PasswordHasher(defaultIterations = 1000), failingPort,
-            ttlSeconds = 600, maxAttempts = 5, codeDigits = 6
-        )
-        val logger = LoggerFactory.getLogger(PhoneVerificationChallengeIssuer::class.java) as Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        logger.addAppender(appender)
-        try {
-            failingIssuer.issue(identityId, phone, PhoneVerificationPurpose.RECOVERY)
-        } finally {
-            logger.detachAppender(appender)
-            appender.stop()
-        }
+    fun `superseding a challenge cancels its unclaimed outbox record`() {
+        issuer.issue(identityId, phone, PhoneVerificationPurpose.RECOVERY)
+        val first = repository.findLiveForUpdate(identityId, PhoneVerificationPurpose.RECOVERY)!!
+        issuer.issue(identityId, phone, PhoneVerificationPurpose.RECOVERY)
+        val second = repository.findLiveForUpdate(identityId, PhoneVerificationPurpose.RECOVERY)!!
 
-        val logText = appender.list.joinToString("\n") { it.formattedMessage }
-        assertTrue(logText.contains("UNKNOWN reason=UNEXPECTED"))
-        assertFalse(logText.contains(fakeKey))
-        assertFalse(logText.contains(fakeAuthorization))
-        assertFalse(logText.contains(phone.value))
-        assertFalse(logText.contains(codeSeenByProvider))
+        val supersededRecord = assertNotNull(outbox.findByChallengeId(first.id))
+        assertEquals(SmsOutboxStatus.FAILED, supersededRecord.status)
+        assertEquals("SUPERSEDED", supersededRecord.failureReason)
+        assertEquals(SmsOutboxStatus.PENDING, outbox.findByChallengeId(second.id)?.status)
     }
 }

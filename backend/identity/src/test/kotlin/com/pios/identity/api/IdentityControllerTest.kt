@@ -16,6 +16,11 @@ import com.pios.identity.application.SmsSubmissionState
 import com.pios.identity.application.PasswordHasher
 import com.pios.identity.application.PhoneOtpRequestRateLimiter
 import com.pios.identity.application.PhoneVerificationChallengeIssuer
+import com.pios.identity.application.SmsOutboxRelay
+import com.pios.identity.application.SmsOutboxStatus
+import com.pios.identity.application.SmsRetryJitter
+import com.pios.identity.application.testOtpCipher
+import com.pios.identity.application.testSmsOutbox
 import com.pios.identity.application.PhoneVerificationChallengeRepository
 import com.pios.identity.application.RegisterIdentityApplicationService
 import com.pios.identity.application.RequestPhoneVerificationApplicationService
@@ -28,6 +33,7 @@ import com.pios.identity.persistence.InMemoryCredentialRepository
 import com.pios.identity.persistence.InMemoryIdentityRepository
 import com.pios.identity.persistence.InMemoryPhoneVerificationChallengeRepository
 import org.springframework.http.HttpStatus
+import java.time.Clock
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.test.Test
@@ -46,9 +52,10 @@ import kotlin.test.assertTrue
 internal class RecordingOutboundSmsPort : OutboundSmsPort {
     val sentCodes = ConcurrentHashMap<String, String>()
     var failure: OutboundSmsDeliveryException? = null
-    override fun sendVerificationCode(phone: Phone, code: String) {
+    override fun sendVerificationCode(phone: Phone, code: String): Long {
         failure?.let { throw it }
         sentCodes[phone.value] = code
+        return 1L
     }
 }
 
@@ -86,10 +93,17 @@ class IdentityControllerTest {
         passwordHasher,
         sessionTokenIssuer
     )
-    private val challengeRepository: PhoneVerificationChallengeRepository = InMemoryPhoneVerificationChallengeRepository()
+    private val challengeRepository = InMemoryPhoneVerificationChallengeRepository()
     internal val smsPort = RecordingOutboundSmsPort()
+    private val otpCipher = testOtpCipher()
+    private val smsOutbox = testSmsOutbox(challengeRepository)
     private val challengeIssuer = PhoneVerificationChallengeIssuer(
-        challengeRepository, passwordHasher, smsPort, maxAttempts = 5, ttlSeconds = 600, codeDigits = 6
+        challengeRepository, passwordHasher, otpCipher, smsOutbox, maxAttempts = 5, ttlSeconds = 600, codeDigits = 6
+    )
+    private val smsRelay = SmsOutboxRelay(
+        smsOutbox, smsPort, otpCipher, Clock.systemUTC(), SmsRetryJitter { 0L },
+        batchSize = 50, leaseSeconds = 60, initialBackoffMs = 30_000,
+        maxBackoffMs = 120_000, maxRetryWindowMs = 300_000
     )
     private val phoneOtpRequestRateLimiter = PhoneOtpRequestRateLimiter(maxPerWindow = 1000, windowMillis = 3_600_000)
     private val otpClientKeyRateLimiter = OtpClientKeyRateLimiter(maxPerWindow = 1000, windowMillis = 3_600_000)
@@ -457,19 +471,24 @@ class IdentityControllerTest {
     fun `recovery request for an eligible phone sends no observable difference in the HTTP response either`() {
         val registered = register("+79992220002")
         verifyPhoneViaLegacyEnrolment(registered)
+        smsPort.sentCodes.clear()
 
         val response = controller.requestRecoveryFromAddress("+79992220002", "127.0.0.1", null)
 
         assertEquals(HttpStatus.ACCEPTED, response.statusCode)
-        // The only observable difference is on the test double standing in
-        // for the SMS provider -- never in anything the caller receives.
-        assertTrue(smsPort.sentCodes.containsKey("+79992220002"))
+        assertTrue(smsPort.sentCodes.isEmpty(), "request handling must not call the SMS provider")
+        val challenge = assertNotNull(challengeRepository.findLiveForUpdate(
+            com.pios.identity.domain.IdentityId(registered.identityId),
+            com.pios.identity.domain.PhoneVerificationPurpose.RECOVERY
+        ))
+        assertEquals(SmsOutboxStatus.PENDING, smsOutbox.findByChallengeId(challenge.id)?.status)
     }
 
     @Test
     fun `provider failure for eligible phone has the same 202 empty object as unknown phone`() {
         val registered = register("+79992220012")
         verifyPhoneViaLegacyEnrolment(registered)
+        smsPort.sentCodes.clear()
         smsPort.failure = OutboundSmsDeliveryException(
             SmsSubmissionState.UNKNOWN, SmsSubmissionFailure.TRANSPORT_TIMEOUT
         )
@@ -485,6 +504,8 @@ class IdentityControllerTest {
             com.pios.identity.domain.IdentityId(registered.identityId),
             com.pios.identity.domain.PhoneVerificationPurpose.RECOVERY
         ))
+        assertTrue(smsPort.sentCodes.isEmpty(), "provider failure must not occur in the request path")
+        smsRelay.relay()
     }
 
     // --- D-03: legacy enrolment (phone/verify/request, phone/verify/confirm) ---
@@ -515,8 +536,13 @@ class IdentityControllerTest {
 
         verifyPhoneViaLegacyEnrolment(registered)
 
-        controller.requestRecoveryFromAddress("+79992220003", "127.0.0.1", null)
-        assertTrue(smsPort.sentCodes.containsKey("+79992220003"))
+        smsPort.sentCodes.clear()
+        val recovery = controller.requestRecoveryFromAddress("+79992220003", "127.0.0.1", null)
+        assertEquals(HttpStatus.ACCEPTED, recovery.statusCode)
+        assertFalse(smsPort.sentCodes.containsKey("+79992220003"), "recovery request must not synchronously call the provider")
+
+        smsRelay.relay()
+        assertTrue(smsPort.sentCodes.containsKey("+79992220003"), "the separately invoked relay must deliver the recovery OTP")
     }
 
     @Test
@@ -538,6 +564,7 @@ class IdentityControllerTest {
         val registered = register("+79992220005")
         verifyPhoneViaLegacyEnrolment(registered)
         controller.requestRecoveryFromAddress("+79992220005", "127.0.0.1", null)
+        smsRelay.relay()
         val code = smsPort.sentCodes.getValue("+79992220005")
 
         val confirmed = controller.confirmRecovery(RecoveryConfirmRequest("+79992220005", code, "brand-new-password-xyz"))
@@ -554,6 +581,7 @@ class IdentityControllerTest {
         val registered = register("+79992220006")
         verifyPhoneViaLegacyEnrolment(registered)
         controller.requestRecoveryFromAddress("+79992220006", "127.0.0.1", null)
+        smsRelay.relay()
         val code = smsPort.sentCodes.getValue("+79992220006")
         controller.confirmRecovery(RecoveryConfirmRequest("+79992220006", code, "brand-new-password-abc"))
 
@@ -572,6 +600,7 @@ class IdentityControllerTest {
         val registered = register("+79992220007")
         verifyPhoneViaLegacyEnrolment(registered)
         controller.requestRecoveryFromAddress("+79992220007", "127.0.0.1", null)
+        smsRelay.relay()
         val code = smsPort.sentCodes.getValue("+79992220007")
         val recovered = assertNotNull(
             controller.confirmRecovery(RecoveryConfirmRequest("+79992220007", code, "brand-new-password-def")).body
@@ -589,6 +618,7 @@ class IdentityControllerTest {
         verifyPhoneViaAuthResponse(reLoggedIn)
 
         controller.requestRecoveryFromAddress("+79992220008", "127.0.0.1", null)
+        smsRelay.relay()
         val code = smsPort.sentCodes.getValue("+79992220008")
         val recovered = assertNotNull(
             controller.confirmRecovery(RecoveryConfirmRequest("+79992220008", code, "brand-new-password-ghi")).body
@@ -619,6 +649,7 @@ class IdentityControllerTest {
         val registered = register("+79992220010")
         verifyPhoneViaLegacyEnrolment(registered)
         controller.requestRecoveryFromAddress("+79992220010", "127.0.0.1", null)
+        smsRelay.relay()
         val code = smsPort.sentCodes.getValue("+79992220010")
 
         val response = controller.confirmRecovery(RecoveryConfirmRequest("+79992220010", code, "short"))
@@ -647,6 +678,7 @@ class IdentityControllerTest {
         val registered = register("+79992220011")
         verifyPhoneViaLegacyEnrolment(registered)
         controller.requestRecoveryFromAddress("+79992220011", "127.0.0.1", null)
+        smsRelay.relay()
         val code = smsPort.sentCodes.getValue("+79992220011")
         controller.confirmRecovery(RecoveryConfirmRequest("+79992220011", code, "brand-new-password-pqr"))
 
@@ -750,6 +782,7 @@ class IdentityControllerTest {
     private fun verifyPhoneViaLegacyEnrolment(registered: AuthResponse): IdentityResponse {
         controller.requestPhoneVerificationFromAddress("127.0.0.1", null, bearer(registered.token))
         val phone = identityRepository.findById(com.pios.identity.domain.IdentityId(registered.identityId))!!.phone!!.value
+        smsRelay.relay()
         val code = smsPort.sentCodes.getValue(phone)
         return assertNotNull(
             controller.confirmPhoneVerification(PhoneVerifyConfirmRequest(code), bearer(registered.token)).body
@@ -759,6 +792,7 @@ class IdentityControllerTest {
     private fun verifyPhoneViaAuthResponse(auth: AuthResponse): IdentityResponse {
         controller.requestPhoneVerificationFromAddress("127.0.0.1", null, bearer(auth.token))
         val phone = identityRepository.findById(com.pios.identity.domain.IdentityId(auth.identityId))!!.phone!!.value
+        smsRelay.relay()
         val code = smsPort.sentCodes.getValue(phone)
         return assertNotNull(
             controller.confirmPhoneVerification(PhoneVerifyConfirmRequest(code), bearer(auth.token)).body

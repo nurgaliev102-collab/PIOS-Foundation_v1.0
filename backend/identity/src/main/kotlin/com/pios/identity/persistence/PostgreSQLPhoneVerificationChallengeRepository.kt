@@ -16,6 +16,12 @@ import java.time.Instant
  * JDBC via [JdbcTemplate] only, no ORM, mirroring
  * [PostgreSQLIdentityRepository]'s own style.
  *
+ * C-2: [save] now persists [PhoneVerificationChallenge.otpCiphertext] and
+ * [PhoneVerificationChallenge.otpNonce] in the V6 columns. [findLiveForUpdate]
+ * and [findById] read them back so the relay can decrypt the OTP.
+ * [update] does NOT change ciphertext/nonce — those are nulled separately
+ * by [PostgreSQLSmsOutboxRepository.markSent] in the same atomic transition.
+ *
  * [findLiveForUpdate] issues a real `SELECT ... FOR UPDATE`, the exact
  * per-row lock discipline `ADR-080`'s `PostgreSQLOrderGuard` already
  * proved in this codebase — it must be called inside the same
@@ -33,8 +39,9 @@ class PostgreSQLPhoneVerificationChallengeRepository(
             """
             INSERT INTO phone_verification_challenges
                 (id, identity_id, phone, purpose, code_hash, code_salt, iterations,
-                 attempt_count, max_attempts, created_at, expires_at, consumed_at, superseded_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 attempt_count, max_attempts, created_at, expires_at, consumed_at,
+                 superseded_at, otp_ciphertext, otp_nonce)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
             challenge.id,
             challenge.identityId.value,
@@ -48,7 +55,9 @@ class PostgreSQLPhoneVerificationChallengeRepository(
             Timestamp.from(challenge.createdAt),
             Timestamp.from(challenge.expiresAt),
             challenge.consumedAt?.let(Timestamp::from),
-            challenge.supersededAt?.let(Timestamp::from)
+            challenge.supersededAt?.let(Timestamp::from),
+            challenge.otpCiphertext,
+            challenge.otpNonce
         )
     }
 
@@ -69,7 +78,8 @@ class PostgreSQLPhoneVerificationChallengeRepository(
         val rows = jdbcTemplate.query(
             """
             SELECT id, identity_id, phone, purpose, code_hash, code_salt, iterations,
-                   attempt_count, max_attempts, created_at, expires_at, consumed_at, superseded_at
+                   attempt_count, max_attempts, created_at, expires_at, consumed_at,
+                   superseded_at, otp_ciphertext, otp_nonce
             FROM phone_verification_challenges
             WHERE identity_id = ? AND purpose = ? AND consumed_at IS NULL AND superseded_at IS NULL
             FOR UPDATE
@@ -79,6 +89,37 @@ class PostgreSQLPhoneVerificationChallengeRepository(
             purpose.name
         )
         return rows.firstOrNull()
+    }
+
+    /**
+     * Finds a challenge by its primary key. Used by [PostgreSQLSmsOutboxRepository]
+     * to read the OTP ciphertext for relay decryption and the phone for SMS delivery.
+     */
+    fun findById(id: String): PhoneVerificationChallenge? {
+        val rows = jdbcTemplate.query(
+            """
+            SELECT id, identity_id, phone, purpose, code_hash, code_salt, iterations,
+                   attempt_count, max_attempts, created_at, expires_at, consumed_at,
+                   superseded_at, otp_ciphertext, otp_nonce
+            FROM phone_verification_challenges
+            WHERE id = ?
+            """.trimIndent(),
+            { rs, _ -> mapRow(rs) },
+            id
+        )
+        return rows.firstOrNull()
+    }
+
+    /**
+     * Nulls otp_ciphertext and otp_nonce on the challenge row with [id].
+     * Called atomically with the SENT transition in [PostgreSQLSmsOutboxRepository.markSent]
+     * (Decision Lock item 11: ciphertext destruction).
+     */
+    fun nullCiphertext(id: String) {
+        jdbcTemplate.update(
+            "UPDATE phone_verification_challenges SET otp_ciphertext = NULL, otp_nonce = NULL WHERE id = ?",
+            id
+        )
     }
 
     override fun update(challenge: PhoneVerificationChallenge) {
@@ -93,6 +134,9 @@ class PostgreSQLPhoneVerificationChallengeRepository(
             challenge.supersededAt?.let(Timestamp::from),
             challenge.id
         )
+        // otp_ciphertext and otp_nonce are NOT updated here — they are
+        // nulled only by nullCiphertext(), called from markSent() and
+        // markFailed() in PostgreSQLSmsOutboxRepository (Decision Lock item 11).
     }
 
     private fun mapRow(rs: ResultSet): PhoneVerificationChallenge = PhoneVerificationChallenge(
@@ -108,6 +152,8 @@ class PostgreSQLPhoneVerificationChallengeRepository(
         createdAt = rs.getTimestamp("created_at").toInstant(),
         expiresAt = rs.getTimestamp("expires_at").toInstant(),
         consumedAt = rs.getTimestamp("consumed_at")?.toInstant(),
-        supersededAt = rs.getTimestamp("superseded_at")?.toInstant()
+        supersededAt = rs.getTimestamp("superseded_at")?.toInstant(),
+        otpCiphertext = rs.getString("otp_ciphertext"),
+        otpNonce = rs.getString("otp_nonce")
     )
 }

@@ -97,9 +97,18 @@ class IdentityController(
     private val confirmRecoveryApplicationService: ConfirmRecoveryApplicationService,
     private val requestPhoneVerificationApplicationService: RequestPhoneVerificationApplicationService,
     private val confirmPhoneVerificationApplicationService: ConfirmPhoneVerificationApplicationService,
-    private val otpClientKeyRateLimiter: OtpClientKeyRateLimiter
+    private val otpClientKeyRateLimiter: OtpClientKeyRateLimiter,
+    private val recoveryRequestTiming: RecoveryRequestTiming = NoOpRecoveryRequestTiming,
+    @org.springframework.beans.factory.annotation.Value("\${pios.identity.recovery.timing.floor-ms:1000}")
+    private val recoveryTimingFloorMillis: Long = 1000
 ) {
     private val logger = LoggerFactory.getLogger(IdentityController::class.java)
+
+    init {
+        require(recoveryTimingFloorMillis >= 0) {
+            "pios.identity.recovery.timing.floor-ms must not be negative"
+        }
+    }
 
     @PostMapping("/guest")
     fun createGuest(
@@ -285,8 +294,15 @@ class IdentityController(
 
     /** Transport-independent seam for the socket/proxy trust decision, mirroring [createGuestFromAddress]'s own shape. */
     internal fun requestRecoveryFromAddress(phone: String, remoteAddress: String, proxiedClientIp: String?): ResponseEntity<Map<String, Nothing>> {
+        // Monotonic timing starts before client-key derivation and every
+        // account-dependent branch. Padding is deferred until handle() has
+        // returned, therefore after any issuance transaction has completed.
+        val startedAtNanos = recoveryRequestTiming.startedAtNanos()
         val clientKey = clientKeyFrom(remoteAddress, proxiedClientIp)
-        requestRecoveryApplicationService.handle(phone, clientKey)
+        val timingScope = requestRecoveryApplicationService.handle(phone, clientKey)
+        if (timingScope == com.pios.identity.application.RecoveryRequestTimingScope.PAD_TO_FLOOR) {
+            recoveryRequestTiming.padToFloor(startedAtNanos, recoveryTimingFloorMillis)
+        }
         // A real, empty JSON object, not a bodiless 202: apiClient.ts's
         // shared `request()` helper only special-cases 204 for a body-less
         // response and otherwise always attempts `response.json()` -- a

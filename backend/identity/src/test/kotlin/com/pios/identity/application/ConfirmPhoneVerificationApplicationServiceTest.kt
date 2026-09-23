@@ -27,12 +27,12 @@ class ConfirmPhoneVerificationApplicationServiceTest {
     private val service = ConfirmPhoneVerificationApplicationService(identityRepository, challengeRepository, passwordHasher)
 
     private fun issueAndCapture(id: IdentityId, phone: Phone): String {
-        var captured = ""
         PhoneVerificationChallengeIssuer(
-            challengeRepository, passwordHasher, OutboundSmsPort { _, code -> captured = code },
+            challengeRepository, passwordHasher, testOtpCipher(), testSmsOutbox(challengeRepository),
             ttlSeconds = 600, maxAttempts = 5, codeDigits = 6
         ).issue(id, phone, PhoneVerificationPurpose.LEGACY_ENROLLMENT)
-        return captured
+        val challenge = challengeRepository.findLiveForUpdate(id, PhoneVerificationPurpose.LEGACY_ENROLLMENT)!!
+        return testOtpCipher().decrypt(challenge.otpCiphertext!!, challenge.otpNonce!!)
     }
 
     @Test

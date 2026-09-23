@@ -2,6 +2,7 @@ package com.pios.identity
 
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
+import org.springframework.scheduling.annotation.EnableScheduling
 
 /**
  * Structural boundary for the Identity module (ADR-038). Exposes
@@ -11,6 +12,7 @@ import org.springframework.boot.runApplication
  * mirroring `network-management`'s own Sprint 7A posture).
  */
 @SpringBootApplication
+@EnableScheduling
 class IdentityApplication
 
 fun main(args: Array<String>) {

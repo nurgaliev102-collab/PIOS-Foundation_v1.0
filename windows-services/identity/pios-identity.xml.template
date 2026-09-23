@@ -14,6 +14,7 @@
   <env name="PIOS_SMS_LOGIN" value="__PIOS_SMS_LOGIN__"/>
   <env name="PIOS_SMS_API_KEY" value="__PIOS_SMS_API_KEY__"/>
   <env name="PIOS_SMS_SENDER" value="__PIOS_SMS_SENDER__"/>
+  <env name="PIOS_OTP_RELAY_KEY" value="__PIOS_OTP_RELAY_KEY__"/>
   <env name="PIOS_SMS_API_BASE_URL" value="__PIOS_SMS_API_BASE_URL__"/>
   <env name="PIOS_SMS_CONNECT_TIMEOUT_MS" value="__PIOS_SMS_CONNECT_TIMEOUT_MS__"/>
   <env name="PIOS_SMS_READ_TIMEOUT_MS" value="__PIOS_SMS_READ_TIMEOUT_MS__"/>

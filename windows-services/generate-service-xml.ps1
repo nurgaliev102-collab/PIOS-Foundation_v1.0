@@ -26,12 +26,20 @@
     steps.
 #>
 
+param(
+    # Defaults to the production Machine-scope store. The parameter exists
+    # only to let the repository's isolated verification use a temporary
+    # per-user registry key; it does not introduce an alternate deployment
+    # secret source.
+    [string]$EnvironmentRegistryPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
+)
+
 $ErrorActionPreference = "Stop"
 $scriptDir = $PSScriptRoot
 
 $commonSecretNames = @("PIOS_OWNER_USERNAME", "PIOS_OWNER_PASSWORD_HASH", "PIOS_OWNER_PASSWORD_SALT")
 $aiAdvisorExtraNames = @("PIOS_AI_ADVISOR_PROVIDER", "PIOS_AI_ADVISOR_QWEN_MODEL", "PIOS_AI_ADVISOR_QWEN_API_KEY")
-$identityExtraNames = @("PIOS_SMS_LOGIN", "PIOS_SMS_API_KEY", "PIOS_SMS_SENDER")
+$identityExtraNames = @("PIOS_SMS_LOGIN", "PIOS_SMS_API_KEY", "PIOS_SMS_SENDER", "PIOS_OTP_RELAY_KEY")
 $identityOptionalDefaults = @{
     PIOS_SMS_API_BASE_URL = "https://gate.smsaero.ru"
     PIOS_SMS_CONNECT_TIMEOUT_MS = "2000"
@@ -56,7 +64,7 @@ function Fail([string]$message) {
 
 # --- Step 1: read every required value from Machine-scope, once -----------
 $allRequiredNames = ($services | ForEach-Object { $_.Names } | Select-Object -Unique | Where-Object { -not $identityOptionalDefaults.ContainsKey($_) })
-$regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
+$regPath = $EnvironmentRegistryPath
 try {
     $envProps = Get-ItemProperty -Path $regPath -ErrorAction Stop
 } catch {

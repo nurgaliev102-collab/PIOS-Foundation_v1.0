@@ -45,13 +45,13 @@ class ConfirmRecoveryApplicationServiceTest {
     }
 
     private fun issueAndCapture(identityId: IdentityId, phone: Phone): String {
-        var captured = ""
         val capturingIssuer = PhoneVerificationChallengeIssuer(
-            challengeRepository, passwordHasher, OutboundSmsPort { _, code -> captured = code },
+            challengeRepository, passwordHasher, testOtpCipher(), testSmsOutbox(challengeRepository),
             ttlSeconds = 600, maxAttempts = maxAttempts, codeDigits = 6
         )
         capturingIssuer.issue(identityId, phone, PhoneVerificationPurpose.RECOVERY)
-        return captured
+        val challenge = challengeRepository.findLiveForUpdate(identityId, PhoneVerificationPurpose.RECOVERY)!!
+        return testOtpCipher().decrypt(challenge.otpCiphertext!!, challenge.otpNonce!!)
     }
 
     @Test

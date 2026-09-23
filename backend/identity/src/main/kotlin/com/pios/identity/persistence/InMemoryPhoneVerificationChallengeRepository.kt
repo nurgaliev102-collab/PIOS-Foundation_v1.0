@@ -44,4 +44,18 @@ class InMemoryPhoneVerificationChallengeRepository : PhoneVerificationChallengeR
             store[challenge.id] = challenge
         }
     }
+
+    fun findById(id: String): PhoneVerificationChallenge? = store[id]
+
+    fun nullCiphertext(id: String) {
+        synchronized(lock) {
+            store[id]?.let { store[id] = it.copy(otpCiphertext = null, otpNonce = null) }
+        }
+    }
+
+    fun supersededChallengeIds(identityId: String, purpose: String): Set<String> = synchronized(lock) {
+        store.values
+            .filter { it.identityId.value == identityId && it.purpose.name == purpose && it.supersededAt != null }
+            .mapTo(mutableSetOf()) { it.id }
+    }
 }

@@ -36,24 +36,25 @@ class RequestRecoveryApplicationService(
     private val phoneOtpRequestRateLimiter: PhoneOtpRequestRateLimiter,
     private val otpClientKeyRateLimiter: OtpClientKeyRateLimiter
 ) {
-    fun handle(rawPhone: String, clientKey: String) {
+    fun handle(rawPhone: String, clientKey: String): RecoveryRequestTimingScope {
         // Rate-limited by phone regardless of whether it resolves to
         // anything -- an attacker probing many phone numbers is bounded the
         // same way a real recovering user would be. Checked before the
         // client-key budget so a single-phone-targeted burst never spends
         // the client's own general budget it needs for other phones.
         if (!phoneOtpRequestRateLimiter.tryAcquire(rawPhone)) {
-            return
+            return RecoveryRequestTimingScope.EXCLUDED
         }
         if (!otpClientKeyRateLimiter.tryAcquire(clientKey)) {
-            return
+            return RecoveryRequestTimingScope.EXCLUDED
         }
-        val phone = phoneOrNull(rawPhone) ?: return
-        val identity = identityRepository.findByPhone(phone) ?: return
+        val phone = phoneOrNull(rawPhone) ?: return RecoveryRequestTimingScope.EXCLUDED
+        val identity = identityRepository.findByPhone(phone) ?: return RecoveryRequestTimingScope.PAD_TO_FLOOR
         if (identity.phoneVerifiedAt == null) {
-            return
+            return RecoveryRequestTimingScope.PAD_TO_FLOOR
         }
         challengeIssuer.issue(identity.id, phone, PhoneVerificationPurpose.RECOVERY)
+        return RecoveryRequestTimingScope.PAD_TO_FLOOR
     }
 
     private fun phoneOrNull(raw: String): Phone? =
@@ -63,3 +64,6 @@ class RequestRecoveryApplicationService(
             null
         }
 }
+
+/** Internal-only result; every caller still receives the same generic HTTP response. */
+enum class RecoveryRequestTimingScope { PAD_TO_FLOOR, EXCLUDED }

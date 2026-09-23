@@ -15,7 +15,7 @@ class RequestPhoneVerificationApplicationServiceTest {
     private val identityRepository = InMemoryIdentityRepository()
     private val challengeRepository = InMemoryPhoneVerificationChallengeRepository()
     private val challengeIssuer = PhoneVerificationChallengeIssuer(
-        challengeRepository, PasswordHasher(defaultIterations = 1000), OutboundSmsPort { _, _ -> },
+        challengeRepository, PasswordHasher(defaultIterations = 1000), testOtpCipher(), testSmsOutbox(challengeRepository),
         ttlSeconds = 600, maxAttempts = 5, codeDigits = 6
     )
 

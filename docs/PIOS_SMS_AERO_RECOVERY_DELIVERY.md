@@ -2,8 +2,9 @@
 
 SMS Aero is the current production provider for identity recovery SMS.
 `OutboundSmsPort` remains provider-independent:
-`PhoneVerificationChallengeIssuer` -> `OutboundSmsPort` ->
-`SmsAeroOutboundSmsAdapter` -> the [SMS Aero normal send API](https://smsaero.ru/integration/documentation/api/).
+`PhoneVerificationChallengeIssuer` -> durable Identity SMS outbox ->
+`SmsOutboxRelay` -> `OutboundSmsPort` -> `SmsAeroOutboundSmsAdapter` -> the
+[SMS Aero normal send API](https://smsaero.ru/integration/documentation/api/).
 PIOS generates its own six-digit OTP; the provider's built-in OTP and test-send
 endpoints are not used. A successful API result means accepted for processing,
 not received by the handset. There is no automatic retry, callback, or status
@@ -16,12 +17,13 @@ polling in this adapter.
 | `PIOS_SMS_LOGIN` | Yes | Machine-scope environment | SMS Aero Basic Auth username |
 | `PIOS_SMS_API_KEY` | Yes | Machine-scope environment secret | SMS Aero Basic Auth password; never commit or log |
 | `PIOS_SMS_SENDER` | Yes | Machine-scope environment | Registered SMS Aero `sign` for normal send |
+| `PIOS_OTP_RELAY_KEY` | Yes | Machine-scope environment secret | Base64-encoded AES-256-GCM relay key; exactly 32 decoded bytes; never commit or log |
 | `PIOS_SMS_API_BASE_URL` | No | Machine-scope environment or default | Default `https://gate.smsaero.ru`; only that HTTPS host is allowed to prevent a stale SMS.RU URL receiving the new credential |
 | `PIOS_SMS_CONNECT_TIMEOUT_MS` | No | Machine-scope environment or default | Default 2000 ms |
 | `PIOS_SMS_READ_TIMEOUT_MS` | No | Machine-scope environment or default | Default 5000 ms |
 
 Identity fails startup with a variable-name-only error if any required value
-is absent. `windows-services/generate-service-xml.ps1` reads these values from
+is absent or the relay key is malformed. `windows-services/generate-service-xml.ps1` reads these values from
 Machine-scope environment and renders them into the local, gitignored
 `windows-services/identity/pios-identity.xml`. Restrict access to this file:
 it contains the API key. The separate `PIOS_SESSION_SECRET` still uses its
@@ -48,15 +50,15 @@ message status, or HTTP 4xx is `FAILED`. HTTP 5xx, malformed/incomplete
 response, connection failure, and timeout are `UNKNOWN`: the provider may
 already have accepted the SMS. Neither outcome triggers an automatic retry.
 
-The OTP challenge is committed before the outbound call and remains bounded
-and single-use after a provider error. Only safe failure classifications are
-logged. The anonymous recovery endpoint still responds with `202 {}` for
-unknown phones, accepted requests, and provider failures.
+The OTP challenge and its PENDING outbox row are committed atomically before
+the relay makes an outbound call. UNKNOWN outcomes use the C-2 durable retry
+policy; explicit provider rejection does not retry. Only safe failure
+classifications are logged. The anonymous recovery endpoint still responds
+with `202 {}` for unknown phones, accepted requests, and provider failures.
 
-The synchronous request path calls SMS Aero only for eligible accounts. Its
-latency may reveal account eligibility despite identical HTTP status and
-body. This timing risk remains open and needs a separate architecture
-decision; this provider migration does not add artificial delay or a queue.
+The request path never waits for SMS Aero. It applies C-2's provisional timing
+floor after recovery handling, while the separately scheduled relay submits
+only durable, authorized outbox rows.
 
 ## Controlled real-SMS verification (separate Product Owner authorization)
 
