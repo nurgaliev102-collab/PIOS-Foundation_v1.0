@@ -2,15 +2,21 @@ package com.pios.dispatch.api
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pios.dispatch.application.AssignOrderCommand
+import com.pios.dispatch.application.ArriveAssignmentCommand
+import com.pios.dispatch.application.CompleteAssignmentCommand
 import com.pios.dispatch.application.DispatchAssignmentApplicationService
 import com.pios.dispatch.application.DispatchRequestRecord
 import com.pios.dispatch.application.DispatchRequestRepository
 import com.pios.dispatch.application.InMemoryDispatchRequestRepository
 import com.pios.dispatch.application.ProposalApplicationService
 import com.pios.dispatch.application.ProposeDriverCommand
+import com.pios.dispatch.application.StartAssignmentCommand
 import com.pios.dispatch.domain.Assignment
 import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderReference
+import com.pios.dispatch.domain.Termination
+import com.pios.dispatch.domain.TerminationInitiator
+import com.pios.dispatch.domain.TerminationReasonCode
 import com.pios.dispatch.persistence.InMemoryAssignmentRepository
 import com.pios.dispatch.persistence.InMemoryTripRepository
 import org.springframework.http.HttpStatus
@@ -193,12 +199,61 @@ class AssignmentControllerCalendarTest {
     fun `a cancelled -- TERMINATED -- assignment is absent from the calendar`() {
         val assignment = acceptedAssignment("order-cal-terminated", "driver-cal-terminated")
         routeWithPickup("order-cal-terminated", Instant.now().plusSeconds(3600))
-        assignment.terminate()
+        val termination = Termination(
+            requestId = "calendar-termination",
+            initiator = TerminationInitiator.DRIVER,
+            reasonCode = TerminationReasonCode.CANNOT_FULFILL,
+            terminatedAt = Instant.now()
+        )
+        assignment.terminate(termination.terminatedAt)
         assignmentRepository.save(assignment)
+        val trip = assertNotNull(tripRepository.findByAssignmentId(assignment.id))
+        trip.terminate(termination)
+        tripRepository.save(trip)
 
         val response = controller.driverCalendarHttp(authorization = driverToken("driver-cal-terminated"), driverId = "driver-cal-terminated")
 
         assertTrue(response.body.orEmpty().isEmpty())
+    }
+
+    @Test
+    fun `a completed trip is absent even though its Assignment status remains CREATED`() {
+        val assignment = acceptedAssignment("order-cal-completed", "driver-cal-completed")
+        routeWithPickup("order-cal-completed", Instant.now().plusSeconds(3600))
+        service.arriveAssignment(ArriveAssignmentCommand(assignment.id))
+        service.startAssignment(StartAssignmentCommand(assignment.id))
+        service.completeAssignment(CompleteAssignmentCommand(assignment.id))
+
+        val response = controller.driverCalendarHttp(
+            authorization = driverToken("driver-cal-completed"),
+            driverId = "driver-cal-completed"
+        )
+
+        assertEquals(com.pios.dispatch.domain.AssignmentStatus.CREATED, assignmentRepository.findById(assignment.id)?.status)
+        assertTrue(response.body.orEmpty().isEmpty())
+    }
+
+    @Test
+    fun `after Handoff only the executing driver sees the ride and attribution remains explicit`() {
+        val assignment = acceptedAssignment("order-cal-handoff", "driver-cal-committer")
+        routeWithPickup("order-cal-handoff", Instant.now().plusSeconds(3600))
+        val trip = assertNotNull(tripRepository.findByAssignmentId(assignment.id))
+        trip.assignExecutingDriver(DriverReference("driver-cal-substitute"))
+        tripRepository.save(trip)
+
+        val committer = controller.driverCalendarHttp(
+            authorization = driverToken("driver-cal-committer"),
+            driverId = "driver-cal-committer"
+        )
+        val substitute = controller.driverCalendarHttp(
+            authorization = driverToken("driver-cal-substitute"),
+            driverId = "driver-cal-substitute"
+        )
+
+        assertTrue(committer.body.orEmpty().isEmpty())
+        val ride = assertNotNull(substitute.body).single()
+        assertEquals("driver-cal-committer", ride.driverId)
+        assertEquals("driver-cal-substitute", ride.executingDriverId)
     }
 
     // --- 8: a historical (past) accepted ride is absent ---

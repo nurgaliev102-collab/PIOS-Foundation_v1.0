@@ -193,6 +193,30 @@ class AssignmentCompletedApplicationServiceTest {
         assertEquals(false, clientB.isRepeat)
     }
 
+    @Test
+    fun `D-07 credits execution metrics to executor and relationship facts to committer`() {
+        orderPassengerRepository.recordOrderPassenger("order-handoff-a", "passenger-handoff")
+        orderPassengerRepository.recordOrderPassenger("order-handoff-b", "passenger-handoff")
+        val committer = "driver-handoff-committer"
+        val executor = "driver-handoff-executor"
+
+        service.handle(
+            command("event-handoff-a", committer, "order-handoff-a", "2026-08-03T09:00:00Z")
+                .copy(executingDriverId = executor)
+        )
+        service.handle(
+            command("event-handoff-b", committer, "order-handoff-b", "2026-08-10T09:00:00Z")
+                .copy(executingDriverId = executor)
+        )
+
+        assertEquals(2L, driverMilestonesRepository.findByDriverId(DriverId(executor))?.completedRidesCount)
+        assertEquals(0, driverMilestonesRepository.findByDriverId(DriverId(executor))?.repeatClientsCount)
+        assertEquals(0L, driverMilestonesRepository.findByDriverId(DriverId(committer))?.completedRidesCount)
+        assertEquals(1, driverMilestonesRepository.findByDriverId(DriverId(committer))?.repeatClientsCount)
+        assertEquals(2, driverClientsRepository.findAllForDriver(DriverId(committer)).single().rideCount)
+        assertEquals(emptyList(), driverClientsRepository.findAllForDriver(DriverId(executor)))
+    }
+
     // --- ADR-065: Driver Earnings from Self-Stated Prices ---
 
     @Test

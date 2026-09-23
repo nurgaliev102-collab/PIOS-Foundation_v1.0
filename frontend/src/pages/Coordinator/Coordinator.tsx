@@ -14,9 +14,11 @@ import {
 } from '../OwnerControlCenter/ownerCredential'
 import {
   driverLabel,
+  fetchAssignmentsForOrder,
   fetchDrivers,
   fetchOrders,
   fetchProposalsForOrder,
+  type AssignmentListItem,
   type DriverListItem,
   type OrderListItem,
   type ProposalListItem,
@@ -74,6 +76,14 @@ function currentProposal(proposals: ProposalListItem[] | undefined): ProposalLis
     const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0
     return bt - at
   })[0]
+}
+
+function currentAssignment(assignments: AssignmentListItem[] | undefined): AssignmentListItem | null {
+  if (!assignments || assignments.length === 0) {
+    return null
+  }
+  return assignments.find((assignment) => assignment.status !== 'COMPLETED' && assignment.status !== 'TERMINATED')
+    ?? assignments[assignments.length - 1]
 }
 
 const ORDER_STATUS_LABEL: Record<string, string> = {
@@ -166,6 +176,7 @@ export function Coordinator() {
   const [ordersStatus, setOrdersStatus] = useState<Status>('loading')
   const [orders, setOrders] = useState<OrderListItem[]>([])
   const [proposalsByOrder, setProposalsByOrder] = useState<Record<string, ProposalListItem[]>>({})
+  const [assignmentsByOrder, setAssignmentsByOrder] = useState<Record<string, AssignmentListItem[]>>({})
 
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null)
@@ -224,6 +235,23 @@ export function Coordinator() {
           byOrder[order.id] = proposalLists[index]
         })
         setProposalsByOrder(byOrder)
+
+        const acceptedOrderIds = result
+          .filter((order) => byOrder[order.id]?.some((proposal) => proposal.status === 'ACCEPTED'))
+          .map((order) => order.id)
+        const assignmentLists = await Promise.all(
+          acceptedOrderIds.map((orderId) =>
+            fetchAssignmentsForOrder(orderId, activeCredential).catch(() => [] as AssignmentListItem[])
+          )
+        )
+        if (!active) {
+          return
+        }
+        const assignments: Record<string, AssignmentListItem[]> = {}
+        acceptedOrderIds.forEach((orderId, index) => {
+          assignments[orderId] = assignmentLists[index]
+        })
+        setAssignmentsByOrder(assignments)
       })
       .catch(() => {
         if (active) {
@@ -339,6 +367,7 @@ export function Coordinator() {
     setDrivers([])
     setOrders([])
     setProposalsByOrder({})
+    setAssignmentsByOrder({})
     setSelectedOrderId(null)
     setSelectedDriverId(null)
     setLastProposal(null)
@@ -375,6 +404,9 @@ export function Coordinator() {
             // driver's own card just below.
             const selectable = order.status === 'SUBMITTED'
             const proposal = currentProposal(proposalsByOrder[order.id])
+            const assignment = currentAssignment(assignmentsByOrder[order.id])
+            const executingDriverId = assignment?.executingDriverId ?? assignment?.driverId
+            const handedOff = assignment != null && executingDriverId != null && assignment.driverId !== executingDriverId
             const requestedPickupAtLabel = formatRequestedPickupAt(order.requestedPickupAt)
             return (
               <section
@@ -419,7 +451,16 @@ export function Coordinator() {
                     {/* ADR-061 Decision 3: driver/status/price/ETA for this
                         order's current proposal, never shown on this screen
                         before. */}
-                    {proposal && <span>Водитель: {driverLabel(proposal.driverId, drivers)}</span>}
+                    {proposal && !assignment && <span>Водитель: {driverLabel(proposal.driverId, drivers)}</span>}
+                    {assignment && !handedOff && executingDriverId && (
+                      <span>Водитель: {driverLabel(executingDriverId, drivers)}</span>
+                    )}
+                    {assignment && handedOff && executingDriverId && (
+                      <>
+                        <span>Принял: {driverLabel(assignment.driverId, drivers)}</span>
+                        <span>Исполняет: {driverLabel(executingDriverId, drivers)}</span>
+                      </>
+                    )}
                     {proposal && (
                       <span>Статус предложения: {PROPOSAL_STATUS_LABEL[proposal.status] ?? proposal.status}</span>
                     )}

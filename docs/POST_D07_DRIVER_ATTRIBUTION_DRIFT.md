@@ -2,6 +2,15 @@
 
 **This is a forensic record, not a fix, not an ADR, and not a D-08 decision.** It exists so the drift found during D-08's own analysis is not lost or silently folded into an unrelated initiative. No code, schema, migration, ADR, or test is changed by this document.
 
+> **Closure record, 2026-09-23 (append-only).** The current-behavior evidence
+> below is preserved as the historical state in which the drift was found.
+> Product readiness remediation selected the already-ratified Path A: the
+> version-1 `AssignmentCompleted` payload keeps `driverId` as the committing
+> driver and adds optional `executingDriverId`. Driver Management falls back to
+> `driverId` for old messages; completed-ride/earnings facts use the executor,
+> while client-relationship/repeat facts use the committer. Focused tests cover
+> the split and old-envelope compatibility. The drift recorded here is closed.
+
 ---
 
 ## 1. Exact Current Behavior

@@ -215,6 +215,34 @@ class DispatchAssignmentApplicationServiceTest {
     }
 
     @Test
+    fun `AssignmentCompleted preserves committer and adds executing driver after Handoff`() {
+        val recordingOutboxRepository = RecordingOutboxRepository()
+        val assignmentRepository = InMemoryAssignmentRepository()
+        val trips = InMemoryTripRepository()
+        val service = DispatchAssignmentApplicationService(
+            assignmentRepository = assignmentRepository,
+            outboxRepository = recordingOutboxRepository,
+            tripRepository = trips
+        )
+        val committer = DriverReference("driver-attribution-committer")
+        val executor = DriverReference("driver-attribution-executor")
+        val created = service.handle(AssignOrderCommand(OrderReference("order-attribution"), committer))
+        val trip = trips.findByAssignmentId(created.assignment.id)!!
+        trip.assignExecutingDriver(executor)
+        trips.save(trip)
+        service.arriveAssignment(ArriveAssignmentCommand(created.assignment.id))
+        service.startAssignment(StartAssignmentCommand(created.assignment.id))
+
+        service.completeAssignment(CompleteAssignmentCommand(created.assignment.id))
+
+        val record = recordingOutboxRepository.records.single { it.eventType == "AssignmentCompleted" }
+        val payload = ObjectMapper().readTree(record.payload).get("payload")
+        assertEquals(committer.driverId, payload.get("driverId").asText())
+        assertEquals(executor.driverId, payload.get("executingDriverId").asText())
+        assertEquals(1, ObjectMapper().readTree(record.payload).get("eventVersion").asInt())
+    }
+
+    @Test
     fun `completing an assignment never queries a Proposal repository -- two ACCEPTED proposals for the same order do not affect the amount forwarded`() {
         // D-06: even if the order somehow has two ACCEPTED proposals on file
         // (the ADR-080 termination + redispatch scenario), completion must

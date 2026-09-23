@@ -59,7 +59,12 @@ class PostgreSQLDriverMilestonesRepository(
 
     override fun incrementRepeatClientsCount(driverId: DriverId) {
         jdbcTemplate.update(
-            "UPDATE driver_milestones SET repeat_clients_count = repeat_clients_count + 1 WHERE driver_id = ?",
+            """
+            INSERT INTO driver_milestones (driver_id, completed_rides_count, current_streak_weeks, repeat_clients_count, total_stated_earnings, unpriced_rides_count)
+            VALUES (?, 0, 0, 1, 0, 0)
+            ON CONFLICT (driver_id) DO UPDATE SET
+                repeat_clients_count = driver_milestones.repeat_clients_count + 1
+            """.trimIndent(),
             driverId.value
         )
     }

@@ -28,19 +28,24 @@ internal class AssignmentCompletedMessagePublisher(connectionFactory: Connection
         eventVersion: Int = 1,
         eventType: String = "AssignmentCompleted",
         routingKey: String = RabbitMQConsumerTopologyConfiguration.ASSIGNMENT_COMPLETED_ROUTING_KEY,
-        statedPrice: String? = null
+        statedPrice: String? = null,
+        executingDriverId: String? = null
     ) {
+        val eventPayload = linkedMapOf<String, Any?>(
+            "orderId" to orderReference,
+            "driverId" to driverId,
+            "statedPrice" to statedPrice
+        )
+        if (executingDriverId != null) {
+            eventPayload["executingDriverId"] = executingDriverId
+        }
         val envelope = objectMapper.writeValueAsString(
             mapOf(
                 "eventId" to eventId,
                 "eventType" to eventType,
                 "eventVersion" to eventVersion,
                 "occurredAt" to occurredAt.toString(),
-                "payload" to mapOf(
-                    "orderId" to orderReference,
-                    "driverId" to driverId,
-                    "statedPrice" to statedPrice
-                )
+                "payload" to eventPayload
             )
         )
         rabbitTemplate.invoke { operations ->

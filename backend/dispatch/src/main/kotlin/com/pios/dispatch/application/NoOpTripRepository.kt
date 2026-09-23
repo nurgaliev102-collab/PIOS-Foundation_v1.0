@@ -1,6 +1,7 @@
 package com.pios.dispatch.application
 
 import com.pios.dispatch.domain.AssignmentId
+import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.Trip
 import com.pios.dispatch.domain.TripId
 
@@ -20,4 +21,5 @@ object NoOpTripRepository : TripRepository {
     override fun save(trip: Trip) = Unit
     override fun findById(id: TripId): Trip? = null
     override fun findByAssignmentId(assignmentId: AssignmentId): Trip? = null
+    override fun findByExecutingDriver(driver: DriverReference): List<Trip> = emptyList()
 }

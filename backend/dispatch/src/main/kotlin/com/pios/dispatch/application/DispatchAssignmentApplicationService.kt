@@ -8,6 +8,7 @@ import com.pios.dispatch.domain.AssignmentCompleted
 import com.pios.dispatch.domain.AssignmentCreated
 import com.pios.dispatch.domain.AssignmentId
 import com.pios.dispatch.domain.AssignmentStarted
+import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.OrderAssigned
 import com.pios.dispatch.domain.OrderReference
 import com.pios.dispatch.domain.Trip
@@ -333,7 +334,14 @@ class DispatchAssignmentApplicationService(
         tripRepository.save(trip)
         outboxRepository.save(outboxRecordFor(assignment.id, tripEvent))
         val compatEvent = AssignmentCompleted(orderId = tripEvent.orderId, driverId = tripEvent.driverId, occurredAt = tripEvent.occurredAt)
-        outboxRepository.save(outboxRecordFor(assignment.id, compatEvent, trip.agreedAmount))
+        outboxRepository.save(
+            outboxRecordFor(
+                assignmentId = assignment.id,
+                event = compatEvent,
+                statedPrice = trip.agreedAmount,
+                committingDriver = assignment.driver
+            )
+        )
         compatEvent
     }
 
@@ -429,14 +437,24 @@ class DispatchAssignmentApplicationService(
      * verbatim and nullable — `null` when the Trip has none. Not
      * published on any other event ([TripCompleted] included).
      */
-    private fun outboxRecordFor(assignmentId: AssignmentId, event: AssignmentCompleted, statedPrice: String?): OutboxRecord = OutboxRecord(
+    private fun outboxRecordFor(
+        assignmentId: AssignmentId,
+        event: AssignmentCompleted,
+        statedPrice: String?,
+        committingDriver: DriverReference
+    ): OutboxRecord = OutboxRecord(
         aggregateId = assignmentId.value,
         eventType = "AssignmentCompleted",
         routingKey = "assignment.completed",
         payload = envelopeFor(
             eventType = "AssignmentCompleted",
             occurredAt = event.occurredAt.toString(),
-            payload = mapOf("orderId" to event.orderId.orderId, "driverId" to event.driverId.driverId, "statedPrice" to statedPrice)
+            payload = mapOf(
+                "orderId" to event.orderId.orderId,
+                "driverId" to committingDriver.driverId,
+                "executingDriverId" to event.driverId.driverId,
+                "statedPrice" to statedPrice
+            )
         )
     )
 

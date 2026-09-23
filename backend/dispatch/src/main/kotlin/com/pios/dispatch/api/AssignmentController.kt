@@ -307,14 +307,15 @@ class AssignmentController(
     }
 
     /**
-     * The read model itself (ADR-084 Part 1/2/3), a pure computation over
-     * one already-fetched set -- no second query per ride, no new table or
-     * index. "Accepted" here means every [Assignment] this driver holds
-     * that has not been [AssignmentStatus.TERMINATED] (this module's own
-     * business meaning for "cancelled" -- see [Assignment]'s own KDoc:
-     * "every Assignment that exists, regardless of status, is treated as
-     * active" until terminated). Deliberately **not** filtered to the
-     * literal [AssignmentStatus.ACCEPTED] enum value alone: the one real
+     * The read model itself (ADR-084 Part 1/2/3), computed from the Trips
+     * currently executed by this driver. D-07 makes [Trip.executingDriver]
+     * authoritative after Handoff while preserving [Assignment.driver] as
+     * the historical committer; using Assignment ownership here would hide
+     * the commitment from the substitute and disclose it to a driver who no
+     * longer executes it. "Accepted" means a connected Trip whose authoritative
+     * execution status is still live (CREATED, ARRIVED, or IN_PROGRESS).
+     * Deliberately **not** filtered to the literal
+     * [AssignmentStatus.ACCEPTED] enum value alone: the one real
      * path that creates an Assignment
      * ([com.pios.dispatch.application.ProposalAssignmentOrchestrationService])
      * leaves it at [AssignmentStatus.CREATED] and never calls
@@ -335,34 +336,31 @@ class AssignmentController(
      *
      * The overlap flag (Part 3, ratified 60-minutes-inclusive) is computed
      * only against the other rides in this same already-fetched, already-
-     * future-filtered set -- every one of them is already known to belong
-     * to this same driver ([AssignmentRepository.findByDriver]), so no
-     * further same-driver check is needed.
+     * future-filtered set -- every Trip is already known to have this same
+     * current executor, so no further same-driver check is needed.
      */
     internal fun driverCalendar(driverId: String): List<AssignmentResponse> {
         val requests = dispatchRequestRepository ?: return emptyList()
-        val committed = assignmentRepository.findByDriver(DriverReference(driverId))
-            .filter { it.status != AssignmentStatus.TERMINATED }
-        if (committed.isEmpty()) {
+        val executableTrips = tripRepository.findByExecutingDriver(DriverReference(driverId))
+            .filter { it.status != TripStatus.COMPLETED && it.status != TripStatus.TERMINATED }
+        if (executableTrips.isEmpty()) {
             return emptyList()
         }
-        val pickupTimes = requests.findPickupTimesForOrders(committed.map { it.order.orderId })
+        val assignmentsById = assignmentRepository.findByOrders(executableTrips.map { it.order })
+            .associateBy { it.id }
+        val pickupTimes = requests.findPickupTimesForOrders(executableTrips.map { it.order.orderId })
         val now = Instant.now()
-        val futureRides = committed.mapNotNull { assignment ->
-            val pickupAt = pickupTimes[assignment.order.orderId] ?: return@mapNotNull null
+        val futureRides = executableTrips.mapNotNull { trip ->
+            val assignment = assignmentsById[trip.assignmentId] ?: return@mapNotNull null
+            val pickupAt = pickupTimes[trip.order.orderId] ?: return@mapNotNull null
             if (!pickupAt.isAfter(now)) return@mapNotNull null
-            assignment to pickupAt
+            Triple(assignment, trip, pickupAt)
         }
-        return futureRides.map { (assignment, pickupAt) ->
-            val hasOverlap = futureRides.any { (other, otherPickupAt) ->
+        return futureRides.map { (assignment, trip, pickupAt) ->
+            val hasOverlap = futureRides.any { (other, _, otherPickupAt) ->
                 other.id != assignment.id && Duration.between(pickupAt, otherPickupAt).abs() <= OVERLAP_THRESHOLD
             }
-            AssignmentResponse(
-                assignmentId = assignment.id.value,
-                orderId = assignment.order.orderId,
-                driverId = assignment.driver.driverId,
-                status = assignment.status.name,
-                statusChangedAt = assignment.statusChangedAt?.toString(),
+            assignment.toResponse(trip).copy(
                 requestedPickupAt = pickupAt.toString(),
                 hasPotentialOverlap = hasOverlap
             )

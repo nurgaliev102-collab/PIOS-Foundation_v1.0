@@ -2,8 +2,8 @@
 .SYNOPSIS
     Renders the six PIOS WinSW service XML files from their .xml.template
     counterparts, substituting the shared ADR-044 owner credential, the
-    ai-advisor Qwen config, and identity SMS Aero config read from
-    Machine-scope environment variables.
+    ai-advisor Qwen config, identity SMS Aero config, and Dispatch VAPID
+    config read from Machine-scope environment variables.
 
 .DESCRIPTION
     Git tracks only the *.xml.template files (no secrets). The real
@@ -40,6 +40,7 @@ $scriptDir = $PSScriptRoot
 $commonSecretNames = @("PIOS_OWNER_USERNAME", "PIOS_OWNER_PASSWORD_HASH", "PIOS_OWNER_PASSWORD_SALT")
 $aiAdvisorExtraNames = @("PIOS_AI_ADVISOR_PROVIDER", "PIOS_AI_ADVISOR_QWEN_MODEL", "PIOS_AI_ADVISOR_QWEN_API_KEY")
 $identityExtraNames = @("PIOS_SMS_LOGIN", "PIOS_SMS_API_KEY", "PIOS_SMS_SENDER", "PIOS_OTP_RELAY_KEY")
+$dispatchExtraNames = @("PIOS_PUSH_VAPID_PUBLIC_KEY", "PIOS_PUSH_VAPID_PRIVATE_KEY", "PIOS_PUSH_VAPID_SUBJECT")
 $identityOptionalDefaults = @{
     PIOS_SMS_API_BASE_URL = "https://gate.smsaero.ru"
     PIOS_SMS_CONNECT_TIMEOUT_MS = "2000"
@@ -48,7 +49,7 @@ $identityOptionalDefaults = @{
 
 $services = @(
     @{ Dir = "ai-advisor"; File = "pios-ai-advisor.xml"; Names = $commonSecretNames + $aiAdvisorExtraNames },
-    @{ Dir = "dispatch"; File = "pios-dispatch.xml"; Names = $commonSecretNames },
+    @{ Dir = "dispatch"; File = "pios-dispatch.xml"; Names = $commonSecretNames + $dispatchExtraNames },
     @{ Dir = "driver-management"; File = "pios-driver-management.xml"; Names = $commonSecretNames },
     @{ Dir = "identity"; File = "pios-identity.xml"; Names = $commonSecretNames + $identityExtraNames + @($identityOptionalDefaults.Keys) },
     @{ Dir = "order-management"; File = "pios-order-management.xml"; Names = $commonSecretNames },

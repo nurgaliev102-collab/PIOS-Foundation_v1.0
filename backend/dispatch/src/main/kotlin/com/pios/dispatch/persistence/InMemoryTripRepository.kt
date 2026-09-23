@@ -2,6 +2,7 @@ package com.pios.dispatch.persistence
 
 import com.pios.dispatch.application.TripRepository
 import com.pios.dispatch.domain.AssignmentId
+import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.Trip
 import com.pios.dispatch.domain.TripId
 import java.util.concurrent.ConcurrentHashMap
@@ -23,4 +24,7 @@ class InMemoryTripRepository : TripRepository {
 
     override fun findByAssignmentId(assignmentId: AssignmentId): Trip? =
         store.values.firstOrNull { it.assignmentId == assignmentId }
+
+    override fun findByExecutingDriver(driver: DriverReference): List<Trip> =
+        store.values.filter { it.executingDriver == driver }
 }

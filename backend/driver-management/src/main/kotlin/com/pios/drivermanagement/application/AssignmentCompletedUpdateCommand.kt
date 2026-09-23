@@ -25,6 +25,11 @@ import java.time.Instant
  * that passenger back up locally, never to reach into Order Management's
  * own domain.
  *
+ * [executingDriverId] is D-07's additive attribution fact. [driverId]
+ * remains the immutable committing driver for relationship-facing facts;
+ * ride count and earnings belong to [executingDriverId]. Older event
+ * envelopes omit it, so the transport adapter falls back to [driverId].
+ *
  * [statedPrice] (ADR-065, Driver Earnings from Self-Stated Prices) is
  * Dispatch's own `payload.statedPrice` — the order's `ACCEPTED` Proposal's
  * stated price, forwarded verbatim and unparsed. `null` for an event
@@ -40,5 +45,6 @@ data class AssignmentCompletedUpdateCommand(
     val driverId: String,
     val orderId: String,
     val occurredAt: Instant,
-    val statedPrice: String? = null
+    val statedPrice: String? = null,
+    val executingDriverId: String = driverId
 )

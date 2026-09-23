@@ -4,6 +4,16 @@
 
 **Accepted, 2026-09-19, by the Product Owner.** Architecture-only ratification — **no code has been written for this ADR.** Implementation may begin only after all four process gates below exist, per this ADR's own Developer Handoff (Part 8).
 
+> **Implementation record, 2026-09-23 (append-only).** The sentence above is
+> preserved as the historical state at ratification. D-10 is now implemented:
+> Dispatch persists authenticated driver subscriptions, sends only N1/N2 after
+> commit, exposes only the public VAPID key, and the frontend owns the approved
+> service-worker/deep-link behavior. Production configuration is supplied by
+> `PIOS_PUSH_VAPID_PUBLIC_KEY`, `PIOS_PUSH_VAPID_PRIVATE_KEY`, and
+> `PIOS_PUSH_VAPID_SUBJECT`; the WinSW template/generator and
+> `docs/PIOS_DEPLOYMENT_SECRETS.md` now name all three without committing key
+> material. Blank application properties still disable push fail-closed.
+
 **Proposed Date:** 2026-09-19. **Ratified Date:** 2026-09-19. **Author:** Architect role.
 
 ### Process gates (all four required before any code)

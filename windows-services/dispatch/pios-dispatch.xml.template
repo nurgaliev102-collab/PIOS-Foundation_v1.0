@@ -11,6 +11,9 @@
   <env name="PIOS_OWNER_USERNAME" value="__PIOS_OWNER_USERNAME__"/>
   <env name="PIOS_OWNER_PASSWORD_HASH" value="__PIOS_OWNER_PASSWORD_HASH__"/>
   <env name="PIOS_OWNER_PASSWORD_SALT" value="__PIOS_OWNER_PASSWORD_SALT__"/>
+  <env name="PIOS_PUSH_VAPID_PUBLIC_KEY" value="__PIOS_PUSH_VAPID_PUBLIC_KEY__"/>
+  <env name="PIOS_PUSH_VAPID_PRIVATE_KEY" value="__PIOS_PUSH_VAPID_PRIVATE_KEY__"/>
+  <env name="PIOS_PUSH_VAPID_SUBJECT" value="__PIOS_PUSH_VAPID_SUBJECT__"/>
   <log mode="none"/>
   <onfailure action="restart" delay="30 sec"/>
   <onfailure action="restart" delay="60 sec"/>

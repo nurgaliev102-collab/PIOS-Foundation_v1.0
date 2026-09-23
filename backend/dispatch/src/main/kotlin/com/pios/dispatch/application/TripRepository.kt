@@ -1,6 +1,7 @@
 package com.pios.dispatch.application
 
 import com.pios.dispatch.domain.AssignmentId
+import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.Trip
 import com.pios.dispatch.domain.TripId
 
@@ -25,4 +26,5 @@ interface TripRepository {
     fun save(trip: Trip)
     fun findById(id: TripId): Trip?
     fun findByAssignmentId(assignmentId: AssignmentId): Trip?
+    fun findByExecutingDriver(driver: DriverReference): List<Trip>
 }

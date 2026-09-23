@@ -61,6 +61,10 @@ class AssignmentCompletedListener(
         val driverId = data.get("driverId")?.asText()
         require(!driverId.isNullOrBlank()) { "Missing payload.driverId" }
 
+        val executingDriverId = data.get("executingDriverId")?.asText()
+            ?.takeIf { it.isNotBlank() }
+            ?: driverId
+
         val orderId = data.get("orderId")?.asText()
         require(!orderId.isNullOrBlank()) { "Missing payload.orderId" }
 
@@ -86,7 +90,8 @@ class AssignmentCompletedListener(
                 driverId = driverId,
                 orderId = orderId,
                 occurredAt = Instant.parse(occurredAtText),
-                statedPrice = statedPrice
+                statedPrice = statedPrice,
+                executingDriverId = executingDriverId
             )
         )
     }

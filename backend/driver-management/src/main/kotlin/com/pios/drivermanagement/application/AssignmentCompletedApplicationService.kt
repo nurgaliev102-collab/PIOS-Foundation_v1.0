@@ -62,24 +62,25 @@ class AssignmentCompletedApplicationService(
     fun handle(command: AssignmentCompletedUpdateCommand) = transactionRunner.run {
         val isNewEvent = assignmentCompletedRepository.markProcessed(command.eventId)
         if (isNewEvent) {
-            val driverId = DriverId(command.driverId)
+            val executingDriverId = DriverId(command.executingDriverId)
+            val committingDriverId = DriverId(command.driverId)
             val statedPriceParsed = PriceParser.parse(command.statedPrice)
-            driverMilestonesRepository.recordCompletedRide(driverId, command.occurredAt, statedPriceParsed)
-            driverRideStatedPricesRepository.record(command.eventId, driverId, command.statedPrice, statedPriceParsed)
+            driverMilestonesRepository.recordCompletedRide(executingDriverId, command.occurredAt, statedPriceParsed)
+            driverRideStatedPricesRepository.record(command.eventId, executingDriverId, command.statedPrice, statedPriceParsed)
 
             val passengerReference = orderPassengerRepository.findPassengerReference(command.orderId)
             if (passengerReference != null) {
                 val becameRepeatClient =
-                    driverClientsRepository.recordRideForClient(driverId, passengerReference, command.occurredAt)
+                    driverClientsRepository.recordRideForClient(committingDriverId, passengerReference, command.occurredAt)
                 if (becameRepeatClient) {
-                    driverMilestonesRepository.incrementRepeatClientsCount(driverId)
+                    driverMilestonesRepository.incrementRepeatClientsCount(committingDriverId)
                 }
             } else {
                 logger.warn(
                     "No known passenger for order {} while recording completed ride for driver {} " +
                         "(eventId {}) -- repeat-client count not updated for this ride",
                     command.orderId,
-                    command.driverId,
+                    command.executingDriverId,
                     command.eventId
                 )
             }

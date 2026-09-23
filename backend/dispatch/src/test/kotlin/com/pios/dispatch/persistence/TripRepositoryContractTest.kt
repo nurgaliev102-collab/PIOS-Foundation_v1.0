@@ -88,6 +88,18 @@ abstract class TripRepositoryContractTest {
 
         assertNull(repository.findByAssignmentId(newAssignment("4").id))
     }
+
+    @Test
+    fun `findByExecutingDriver follows a reassigned executor and not the immutable committer`() {
+        val repository = createRepository()
+        val created = Trip.create(newAssignment("5"))
+        val substitute = DriverReference("trip-contract-test-substitute-${created.trip.id.value}")
+        created.trip.assignExecutingDriver(substitute)
+        repository.save(created.trip)
+
+        assertEquals(listOf(created.trip.id), repository.findByExecutingDriver(substitute).map { it.id })
+        assertEquals(emptyList(), repository.findByExecutingDriver(created.trip.driver))
+    }
 }
 
 class InMemoryTripRepositoryContractTest : TripRepositoryContractTest() {

@@ -4,6 +4,17 @@
 
 **Accepted, 2026-09-19, by the Product Owner.** Architecture-only ratification — **no code has been written for this ADR.** Implementation may begin only after the process gates in Part 6 exist.
 
+> **Implementation record and D-07 clarification, 2026-09-23 (append-only).**
+> The sentence above is preserved as the historical state at ratification.
+> D-11.B is implemented. After Handoff, “the driver's own accepted future
+> rides” follows `Trip.executingDriver`, because D-07 transfers execution while
+> preserving `Assignment.driver` as historical committer. Live/completed state
+> follows authoritative `Trip.status`, not the pre-convergence
+> `Assignment.status`. The response continues to expose both `driverId`
+> (committer) and `executingDriverId`, so attribution is not erased. The view
+> remains read-only and has no dispatch effect. No new table, event, or
+> cross-module call was introduced.
+
 **Proposed Date:** 2026-09-19. **Ratified Date:** 2026-09-19. **Author:** Architect role.
 
 ### The Product Owner decision this ADR sits under

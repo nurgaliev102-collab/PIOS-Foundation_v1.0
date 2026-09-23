@@ -83,11 +83,12 @@ export interface AssignmentListItem {
   assignmentId: string
   orderId: string
   driverId: string
-  status: 'CREATED' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED'
+  status: 'CREATED' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED' | 'TERMINATED'
   arrivedAt: string | null
   startedAt: string | null
   completedAt: string | null
   isTest: boolean
+  executingDriverId?: string | null
 }
 
 /**
@@ -336,7 +337,7 @@ export async function loadTodaySnapshot(credential: OwnerCredential): Promise<To
   }
 
   for (const assignment of assignments) {
-    const driver = driverLabel(assignment.driverId, drivers)
+    const driver = driverLabel(assignment.executingDriverId ?? assignment.driverId, drivers)
     if (assignment.arrivedAt && isToday(assignment.arrivedAt)) {
       events.push({ at: assignment.arrivedAt, text: `${driver} на месте` })
     }

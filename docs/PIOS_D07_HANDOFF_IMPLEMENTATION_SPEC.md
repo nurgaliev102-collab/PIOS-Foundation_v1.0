@@ -2,6 +2,15 @@
 
 **Type: SPECIFICATION, not implementation. FINAL LOCK.** Consolidates every Product Owner decision locked to date: `docs/PIOS_D07_HANDOFF_RECONCILIATION.md`'s own "Product Owner Decision — D-07 (2026-09-18)" section (architecture = DESIGN 1), this document's own first pass (OQ-1/OQ-2/OQ-3/OQ-4/OQ-7, at `HEAD = 12b8bbe`), and this final pass's own further-locked decisions (substitute acceptance, withdrawal, no TTL, eligibility, guest consent, atomic revalidation). No code, schema, migration, API, frontend, test, or event contract was changed to produce this document. Written against `HEAD = 378c878fa874678f0dda04cf2314ce69d66df25e`.
 
+> **Implementation correction record, 2026-09-23 (append-only).** The
+> pre-implementation statement above remains historical. OQ-3 Option C is now
+> implemented completely: `AssignmentCompleted` version 1 preserves `driverId`
+> as committer and adds optional `executingDriverId`; old envelopes fall back
+> safely to `driverId`. Execution count/earnings use the executor, while
+> relationship/repeat-client facts use the committer. This is the bounded
+> Path A recorded in `POST_D07_DRIVER_ATTRIBUTION_DRIFT.md`, not a change to
+> Handoff semantics.
+
 **Nothing below reopens** D-07's architecture (DESIGN 1), OQ-1, OQ-2, OQ-3, OQ-4, OQ-7, substitute acceptance, expiry, withdrawal, eligibility, or guest consent — all are now locked. Where the *first* pass of this specification marked something **OPEN**, this revision states plainly whether that item is now **RESOLVED** (with the resolving decision cited) or remains genuinely open — the first pass's own reasoning for why it was open is preserved inline, not deleted, so the resolution history stays legible.
 
 ---

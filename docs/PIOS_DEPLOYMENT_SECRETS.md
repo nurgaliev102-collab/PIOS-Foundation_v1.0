@@ -1,6 +1,75 @@
-# PIOS Deployment Secrets — `pios.session.secret`
+# PIOS Deployment Secrets and Runtime Credentials
 
-**Status: confirmed, currently active mechanism.** This document exists to close the exact gap that made this value invisible to every earlier read-only gate in the pilot's security-remediation arc: nothing pointed at where to look. It records *where the value lives* and *how to safely confirm its presence* — it never records, logs, or fingerprints the value itself, in this document or in any check it prescribes.
+**Status: authoritative launch-preparation inventory, 2026-09-23.** This
+document records names, purpose, injection point, and failure behavior. It
+never records, logs, fingerprints, or supplies a real value.
+
+## Required inventory
+
+| Variable | Service(s) | Purpose | Launch requirement | Configuration location | Missing/invalid behavior |
+|---|---|---|---|---|---|
+| `PIOS_SESSION_SECRET` | identity, dispatch, driver-management, order-management, passenger-experience | Shared HMAC secret for session issue/verification | Required; identical value on all five services | Per-service SCM `Environment` entry (details below) | Protected endpoints fail closed; services whose verifier is eagerly constructed reject blank/invalid configuration |
+| `PIOS_OWNER_USERNAME` | all six WinSW templates | Single-owner Basic-auth name | Required by the XML generator | Machine-scope environment, rendered by `windows-services/generate-service-xml.ps1` | Generator aborts before writing XML |
+| `PIOS_OWNER_PASSWORD_HASH` | all six WinSW templates | PBKDF2 owner credential hash | Required by the XML generator | Same | Generator aborts before writing XML; never store plaintext owner password |
+| `PIOS_OWNER_PASSWORD_SALT` | all six WinSW templates | Salt paired with owner hash | Required by the XML generator | Same | Generator aborts before writing XML |
+| `PIOS_SMS_LOGIN` | identity | SMS Aero Basic-auth login | Required | Machine-scope environment, rendered into ignored identity WinSW XML | Generator and Identity startup fail closed when blank |
+| `PIOS_SMS_API_KEY` | identity | SMS Aero Basic-auth secret | Required secret | Same | Generator and Identity startup fail closed when blank |
+| `PIOS_SMS_SENDER` | identity | Approved SMS Aero sender name | Required configuration | Same | Generator and Identity startup fail closed when blank |
+| `PIOS_OTP_RELAY_KEY` | identity | AES-256 key encrypting queued OTP plaintext until relay | Required secret; exactly 32 decoded bytes | Same | Generator aborts when absent; Identity startup rejects blank, invalid Base64, or wrong length |
+| `PIOS_PUSH_VAPID_PUBLIC_KEY` | dispatch | Browser-visible VAPID public key | Required for Web Push launch | Machine-scope environment, rendered into ignored dispatch WinSW XML | Generator aborts when absent; without it the application disables push and public-key API returns 404 |
+| `PIOS_PUSH_VAPID_PRIVATE_KEY` | dispatch | VAPID signing private key | Required secret for Web Push launch | Same; backend only | Generator aborts when absent; application disables push if blank; never expose through API or frontend source |
+| `PIOS_PUSH_VAPID_SUBJECT` | dispatch | RFC 8292 operator contact (`mailto:` or HTTPS URI) | Required for Web Push launch | Same | Generator aborts when absent; invalid contact can make delivery fail, so validate in preflight |
+| `SPRING_DATASOURCE_URL` | every deployed database-owning backend | PostgreSQL JDBC endpoint | Required production override per service | Service environment/secret deployment layer | Current source defaults are local-development values; missing override is **not** an application-level fail-closed gate and must block deployment preflight |
+| `SPRING_DATASOURCE_USERNAME` | same | PostgreSQL role | Required production override | Same | Same preflight requirement |
+| `SPRING_DATASOURCE_PASSWORD` | same | PostgreSQL password | Required secret | Same | Missing/invalid normally fails connection/Flyway, but must be rejected before service launch |
+| `SPRING_RABBITMQ_USERNAME` | dispatch, driver-management, order-management, passenger-experience | RabbitMQ runtime role | Required production override | Service environment/secret deployment layer | Checked-in `guest` is local-only and is not a production-safe fallback; deployment preflight must reject it |
+| `SPRING_RABBITMQ_PASSWORD` | same | RabbitMQ password | Required secret | Same | Same preflight requirement |
+| `SPRING_RABBITMQ_HOST`, `SPRING_RABBITMQ_PORT`, `SPRING_RABBITMQ_VIRTUAL_HOST` | same | Broker endpoint and isolated vhost | Required deployment configuration (not secrets) | Same | Local defaults are not evidence of production readiness |
+| `PIOS_AI_ADVISOR_QWEN_API_KEY` | ai-advisor WinSW service | Qwen provider credential | Required secret when that service/provider is enabled | Machine-scope environment, rendered into ignored XML | Generator aborts when absent |
+| `PIOS_AI_ADVISOR_PROVIDER`, `PIOS_AI_ADVISOR_QWEN_MODEL` | ai-advisor WinSW service | Provider/model selection | Required by current generator | Same | Generator aborts when absent |
+| `PIOS_TEST_DATA_CREDENTIAL_HASH` / `pios.test-data.credential-hash` | driver-management only when synthetic-data API is intentionally enabled | SHA-256 hash of test-data credential | Optional; leave blank to disable | Service property/environment mapping | Blank disables the privileged test-data branch (fail closed) |
+
+The generated `windows-services/*/pios-*.xml` files contain secrets and are
+gitignored deployment artifacts. Restrict their ACLs to the service account
+and administrators. Never attach them to tickets, logs, chat, or commits.
+
+## VAPID generation and configuration
+
+Generate one keypair on a trusted administrative machine, not in frontend
+code and not on a public CI log. A standard compatible command is:
+
+```powershell
+npx web-push generate-vapid-keys
+```
+
+Store the two outputs separately as `PIOS_PUSH_VAPID_PUBLIC_KEY` and
+`PIOS_PUSH_VAPID_PRIVATE_KEY` in the Machine-scope secret/config store. Set
+`PIOS_PUSH_VAPID_SUBJECT` to an operator-controlled `mailto:` address or HTTPS
+contact URI. Run `windows-services/generate-service-xml.ps1`; it validates
+presence by variable name only, XML-escapes values, and never prints them.
+The public key may be returned only by Dispatch's authenticated
+`GET /v1/driver-push-subscriptions/public-key`; the private key must remain
+backend-only. Rotating the keypair invalidates existing browser subscriptions,
+so rotation requires drivers to subscribe again.
+
+## SMS/OTP generation and configuration
+
+Provision SMS Aero credentials without recording their values in repository
+files. Generate the relay key once with `openssl rand -base64 32`, store the
+result as `PIOS_OTP_RELAY_KEY`, and keep it available while queued OTP records
+encrypted with it can still exist. `PIOS_SMS_API_BASE_URL` defaults to the
+fixed HTTPS SMS Aero origin; connect/read timeouts default to 2000/5000 ms and
+may be overridden by the non-secret variables already present in the Identity
+template.
+
+## PostgreSQL and RabbitMQ launch rule
+
+Spring's checked-in datasource and broker values are development defaults,
+not production credentials and not a production safety gate. Launch
+preparation must explicitly provide per-service database roles/passwords and
+non-`guest`, isolated RabbitMQ credentials, then validate connectivity without
+printing values. This document does not authorize changing the checked-in core
+or module `application.yml` files, applying migrations, or starting services.
 
 ## Where `pios.session.secret` actually lives
 

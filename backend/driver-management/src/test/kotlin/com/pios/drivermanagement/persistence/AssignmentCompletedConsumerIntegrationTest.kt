@@ -154,6 +154,33 @@ class AssignmentCompletedConsumerIntegrationTest {
     }
 
     @Test
+    fun `D-07 split attribution persists execution for executor and relationship for committer`() {
+        val committerId = "assignment-completed-it-committer-${UUID.randomUUID()}"
+        val executorId = "assignment-completed-it-executor-${UUID.randomUUID()}"
+        seedDriver(committerId)
+        seedDriver(executorId)
+        val passengerReference = "passenger-${UUID.randomUUID()}"
+        val firstOrderId = "order-${UUID.randomUUID()}"
+        val secondOrderId = "order-${UUID.randomUUID()}"
+        orderSubmittedPublisher.publishOrderSubmitted(firstOrderId, passengerReference)
+        orderSubmittedPublisher.publishOrderSubmitted(secondOrderId, passengerReference)
+        awaitUntilNotNull { orderPassengerRepository.findPassengerReference(firstOrderId) }
+        awaitUntilNotNull { orderPassengerRepository.findPassengerReference(secondOrderId) }
+
+        publisher.publishAssignmentCompleted(committerId, firstOrderId, executingDriverId = executorId)
+        publisher.publishAssignmentCompleted(committerId, secondOrderId, executingDriverId = executorId)
+
+        awaitUntilNotNull {
+            driverMilestonesRepository.findByDriverId(DriverId(committerId))?.takeIf { it.repeatClientsCount == 1 }
+        }
+        assertEquals(2L, driverMilestonesRepository.findByDriverId(DriverId(executorId))?.completedRidesCount)
+        assertEquals(0L, driverMilestonesRepository.findByDriverId(DriverId(committerId))?.completedRidesCount)
+        assertEquals(1, driverMilestonesRepository.findByDriverId(DriverId(committerId))?.repeatClientsCount)
+        assertEquals(2, driverClientsRepository.findAllForDriver(DriverId(committerId)).single().rideCount)
+        assertEquals(emptyList(), driverClientsRepository.findAllForDriver(DriverId(executorId)))
+    }
+
+    @Test
     fun `an AssignmentCompleted for an order whose OrderSubmitted was never consumed still counts the ride`() {
         val driverId = "assignment-completed-it-no-passenger-${UUID.randomUUID()}"
         seedDriver(driverId)

@@ -2,6 +2,7 @@ package com.pios.dispatch.persistence
 
 import com.pios.dispatch.application.TripRepository
 import com.pios.dispatch.domain.AssignmentId
+import com.pios.dispatch.domain.DriverReference
 import com.pios.dispatch.domain.Trip
 import com.pios.dispatch.domain.TripId
 import com.pios.dispatch.domain.TripStatus
@@ -123,6 +124,20 @@ class PostgreSQLTripRepository(
         )
         return rows.firstOrNull()
     }
+
+    override fun findByExecutingDriver(driver: DriverReference): List<Trip> =
+        jdbcTemplate.query(
+            """
+            SELECT id, assignment_id, order_reference, driver_reference, status, status_changed_at,
+                   arrived_at, started_at, completed_at, is_test, termination_request_id,
+                   termination_initiator, termination_reason_code, termination_note, terminated_at,
+                   agreed_amount, executing_driver_reference
+            FROM trips
+            WHERE COALESCE(executing_driver_reference, driver_reference) = ?
+            """.trimIndent(),
+            { rs, _ -> reconstruct(rs) },
+            driver.driverId
+        )
 
     private fun reconstruct(rs: ResultSet): Trip {
         val constructor = Trip::class.java.getDeclaredConstructor(

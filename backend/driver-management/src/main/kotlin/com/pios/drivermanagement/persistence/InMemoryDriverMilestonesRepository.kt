@@ -38,8 +38,18 @@ class InMemoryDriverMilestonesRepository : DriverMilestonesRepository {
     }
 
     override fun incrementRepeatClientsCount(driverId: DriverId) {
-        val existing = store[driverId] ?: return
-        store[driverId] = existing.copy(repeatClientsCount = existing.repeatClientsCount + 1)
+        val existing = store[driverId]
+        store[driverId] = if (existing == null) {
+            DriverMilestones(
+                driverId = driverId,
+                completedRidesCount = 0,
+                currentStreakWeeks = 0,
+                lastCompletedAt = null,
+                repeatClientsCount = 1
+            )
+        } else {
+            existing.copy(repeatClientsCount = existing.repeatClientsCount + 1)
+        }
     }
 
     override fun findByDriverId(driverId: DriverId): DriverMilestones? = store[driverId]

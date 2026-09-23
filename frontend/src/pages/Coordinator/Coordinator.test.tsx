@@ -119,6 +119,19 @@ describe('Coordinator', () => {
         respondedAt: '2026-08-16T09:02:00Z',
       },
     ]) // GET /v1/proposals?orderId=order-1
+    mockedRequest.mockResolvedValueOnce([
+      {
+        assignmentId: 'assignment-1',
+        orderId: 'order-1',
+        driverId: 'driver-1',
+        executingDriverId: 'driver-1',
+        status: 'CREATED',
+        arrivedAt: null,
+        startedAt: null,
+        completedAt: null,
+        isTest: false,
+      },
+    ]) // GET /v1/assignments?orderId=order-1
 
     render(<Coordinator />)
 
@@ -127,6 +140,57 @@ describe('Coordinator', () => {
     expect(screen.getByText('Стоимость: 950')).toBeInTheDocument()
     expect(screen.getByText('ETA: 7 мин')).toBeInTheDocument()
     expect(screen.getByText(/Предварительный заказ/)).toBeInTheDocument()
+  })
+
+  it('shows the current executing driver after Handoff while preserving the original committer', async () => {
+    seedOwnerCredential()
+    mockedRequest.mockResolvedValueOnce([
+      { id: 'driver-original', availability: 'AVAILABLE', displayName: 'Иван', registeredAt: null },
+      { id: 'driver-executor', availability: 'AVAILABLE', displayName: 'Пётр', registeredAt: null },
+    ])
+    mockedRequest.mockResolvedValueOnce([
+      {
+        id: 'order-handoff',
+        status: 'SUBMITTED',
+        origin: 'passenger-1',
+        destination: 'Уфа',
+        passengerName: 'Анна',
+        createdAt: '2026-08-16T09:00:00Z',
+        pickupAddress: 'Агидель',
+        requestedPickupAt: null,
+      },
+    ])
+    mockedRequest.mockResolvedValueOnce([
+      {
+        proposalId: 'proposal-handoff',
+        orderId: 'order-handoff',
+        driverId: 'driver-original',
+        status: 'ACCEPTED',
+        statedPrice: '950',
+        statedEtaMinutes: 7,
+        createdAt: '2026-08-16T09:01:00Z',
+        respondedAt: '2026-08-16T09:02:00Z',
+      },
+    ])
+    mockedRequest.mockResolvedValueOnce([
+      {
+        assignmentId: 'assignment-handoff',
+        orderId: 'order-handoff',
+        driverId: 'driver-original',
+        executingDriverId: 'driver-executor',
+        status: 'CREATED',
+        arrivedAt: null,
+        startedAt: null,
+        completedAt: null,
+        isTest: false,
+      },
+    ])
+
+    render(<Coordinator />)
+
+    expect(await screen.findByText('Принял: Иван')).toBeInTheDocument()
+    expect(screen.getByText('Исполняет: Пётр')).toBeInTheDocument()
+    expect(screen.queryByText('Водитель: Иван')).not.toBeInTheDocument()
   })
 
   it('shows a withdrawn proposal with its own distinct Russian label', async () => {

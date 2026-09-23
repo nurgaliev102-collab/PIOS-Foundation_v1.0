@@ -4,6 +4,15 @@
 
 **Ratified by the Product Owner, 2026-09-17 (D-02).** Documentation/verification-only — no code, schema, migration, or API change is authorized or required by this decision.
 
+> **Narrow attribution amendment pointer, 2026-09-23 (append-only).** D-07,
+> ratified after this ADR, requires split attribution after Handoff: execution
+> facts (`completedRidesCount`, stated earnings) belong to the executing driver;
+> relationship facts (`driver_client_rides`, `repeatClientsCount`) remain with
+> the committing driver. The additive `AssignmentCompleted.executingDriverId`
+> implementation now enforces that split while keeping every metric private
+> and non-load-bearing exactly as this ADR requires. No metric gains monetary,
+> ranking, trust, eligibility, or passenger-facing meaning.
+
 ## Context
 
 `completedRidesCount`, `repeatClientsCount`, `totalStatedEarnings`, `driver_client_rides`, and `invitedDriversCount` are five self-reported, derived read-model figures Driver Management computes from Dispatch's and Order Management's own event stream (`AssignmentCompleted`, `OrderSubmitted`), for a driver's own private "Мой бизнес" screen.
