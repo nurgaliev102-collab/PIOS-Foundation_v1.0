@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "data": {
+    "id": 123456789,
+    "from": "FixtureSign",
+    "number": "TEST_NUMBER",
+    "text": "<REDACTED>",
+    "status": 0,
+    "extendStatus": "queue"
+  },
+  "message": null
+}

@@ -43,7 +43,7 @@ class SmsAeroOutboundSmsAdapterTest {
     @Test
     fun `posts one normal send with Basic Auth and accepts provider message id`() {
         FakeSmsAeroServer(200, accepted()).use { server ->
-            adapter(server.baseUrl).sendVerificationCode(phone, code)
+            assertEquals(1L, adapter(server.baseUrl).sendVerificationCode(phone, code))
 
             val request = server.requests.remove()
             assertEquals("POST", request.method)
@@ -85,8 +85,8 @@ class SmsAeroOutboundSmsAdapterTest {
     fun `explicit API failure and rejected message status are failed`() {
         val responses = listOf(
             """{"success":false,"data":null,"message":"$fakeKey $code ${phone.value}"}""",
-            """{"success":true,"data":[{"id":1,"number":"79990000001","status":2}]}""",
-            """{"success":true,"data":[{"id":1,"number":"79990000001","status":6}]}"""
+            """{"success":true,"data":{"id":1,"number":"79990000001","status":2}}""",
+            """{"success":true,"data":{"id":1,"number":"79990000001","status":6}}"""
         )
         for (body in responses) {
             FakeSmsAeroServer(200, body).use { server ->
@@ -114,10 +114,12 @@ class SmsAeroOutboundSmsAdapterTest {
     fun `malformed or incomplete success remains unknown`() {
         val responses = listOf(
             "not JSON $fakeKey $code", "{}", "null",
-            """{"success":true,"data":[]}""",
-            """{"success":true,"data":[{"number":"79990000001","status":0}]}""",
-            """{"success":true,"data":[{"id":1,"number":"79990000002","status":0}]}""",
-            """{"success":true,"data":[{"id":1,"number":"79990000001","status":99}]}"""
+            "", """{"success":true,"data":[]}""", """{"success":true,"data":"unexpected"}""",
+            """{"success":true,"data":null}""", """{"success":true,"data":{}}""",
+            """{"success":true,"data":{"number":"79990000001","status":0}}""",
+            """{"success":true,"data":{"id":"1","number":"79990000001","status":0}}""",
+            """{"success":true,"data":{"id":1,"number":"79990000002","status":0}}""",
+            """{"success":true,"data":{"id":1,"number":"79990000001","status":99}}"""
         )
         for (body in responses) {
             FakeSmsAeroServer(200, body).use { server ->
@@ -128,6 +130,80 @@ class SmsAeroOutboundSmsAdapterTest {
                 assertEquals(SmsSubmissionFailure.MALFORMED_RESPONSE, failure.failure)
                 assertSafe(failure)
             }
+        }
+    }
+
+    @Test
+    fun `response diagnostics classify every response validation branch without response values`() {
+        val cases = listOf(
+            DiagnosticCase("not JSON $fakeKey $code", SmsAeroResponseDiagnosticReason.NON_JSON_BODY),
+            DiagnosticCase("[]", SmsAeroResponseDiagnosticReason.ROOT_NOT_OBJECT),
+            DiagnosticCase("{}", SmsAeroResponseDiagnosticReason.SUCCESS_MISSING),
+            DiagnosticCase("""{"success":"true"}""", SmsAeroResponseDiagnosticReason.SUCCESS_NOT_BOOLEAN),
+            DiagnosticCase("""{"success":false}""", SmsAeroResponseDiagnosticReason.SUCCESS_FALSE, SmsSubmissionState.FAILED),
+            DiagnosticCase("""{"success":true}""", SmsAeroResponseDiagnosticReason.DATA_MISSING),
+            DiagnosticCase("""{"success":true,"data":[]}""", SmsAeroResponseDiagnosticReason.DATA_NOT_OBJECT),
+            DiagnosticCase("""{"success":true,"data":"unexpected"}""", SmsAeroResponseDiagnosticReason.DATA_NOT_OBJECT),
+            DiagnosticCase("""{"success":true,"data":null}""", SmsAeroResponseDiagnosticReason.DATA_NOT_OBJECT),
+            DiagnosticCase("""{"success":true,"data":{}}""", SmsAeroResponseDiagnosticReason.MESSAGE_ID_MISSING),
+            DiagnosticCase("""{"success":true,"data":{"id":0}}""", SmsAeroResponseDiagnosticReason.MESSAGE_ID_INVALID),
+            DiagnosticCase("""{"success":true,"data":{"id":"1"}}""", SmsAeroResponseDiagnosticReason.MESSAGE_ID_INVALID),
+            DiagnosticCase("""{"success":true,"data":{"id":9223372036854775808}}""", SmsAeroResponseDiagnosticReason.MESSAGE_ID_INVALID),
+            DiagnosticCase("""{"success":true,"data":{"id":1}}""", SmsAeroResponseDiagnosticReason.NUMBER_MISSING),
+            DiagnosticCase("""{"success":true,"data":{"id":1,"number":null}}""", SmsAeroResponseDiagnosticReason.NUMBER_MISSING),
+            DiagnosticCase("""{"success":true,"data":{"id":1,"number":"79990000002"}}""", SmsAeroResponseDiagnosticReason.NUMBER_MISMATCH),
+            DiagnosticCase("""{"success":true,"data":{"id":1,"number":"79990000001"}}""", SmsAeroResponseDiagnosticReason.STATUS_MISSING),
+            DiagnosticCase("""{"success":true,"data":{"id":1,"number":"79990000001","status":null}}""", SmsAeroResponseDiagnosticReason.STATUS_MISSING),
+            DiagnosticCase("""{"success":true,"data":{"id":1,"number":"79990000001","status":"0"}}""", SmsAeroResponseDiagnosticReason.STATUS_INVALID),
+            DiagnosticCase("""{"success":true,"data":{"id":1,"number":"79990000001","status":4294967296}}""", SmsAeroResponseDiagnosticReason.STATUS_INVALID),
+            DiagnosticCase("""{"success":true,"data":{"id":1,"number":"79990000001","status":99}}""", SmsAeroResponseDiagnosticReason.STATUS_INVALID)
+        )
+
+        for (case in cases) {
+            FakeSmsAeroServer(200, case.body).use { server ->
+                val diagnostics = mutableListOf<SmsAeroResponseDiagnostic>()
+                val failure = assertFailsWith<OutboundSmsDeliveryException> {
+                    adapter(server.baseUrl, diagnosticSink = diagnostics::add).sendVerificationCode(phone, code)
+                }
+                assertEquals(case.state, failure.state, case.reason.name)
+                val diagnostic = diagnostics.single()
+                assertEquals(200, diagnostic.httpStatus)
+                assertEquals(case.reason, diagnostic.reason)
+                assertEquals(case.body.toByteArray(StandardCharsets.UTF_8).size, diagnostic.bodyLength)
+                assertEquals("application/json", diagnostic.contentType)
+                assertSafe(diagnostic.toString())
+            }
+        }
+    }
+
+    @Test
+    fun `controlled live SMS Aero data object fixture is accepted and exposes only structural diagnostics`() {
+        FakeSmsAeroServer(200, actualDataObjectResponse()).use { server ->
+            val diagnostics = mutableListOf<SmsAeroResponseDiagnostic>()
+            val providerMessageId = adapter(server.baseUrl, diagnosticSink = diagnostics::add)
+                .sendVerificationCode(phone, code)
+
+            assertEquals(123456789L, providerMessageId)
+            assertEquals(1, server.requests.size) // Fake server only; no real SMS Aero call.
+            val diagnostic = diagnostics.single()
+            assertEquals(SmsAeroResponseDiagnosticReason.RESPONSE_VALID, diagnostic.reason)
+            assertEquals("application/json", diagnostic.contentType)
+            assertEquals(listOf("data", "message", "success"), diagnostic.rootKeys)
+            assertEquals(listOf("extendStatus", "from", "id", "number", "status", "text"), diagnostic.itemKeys)
+            assertEquals("INTEGER", diagnostic.idType)
+            assertTrue(diagnostic.numberPresent == true)
+            assertEquals("INTEGER", diagnostic.statusType)
+            assertTrue(diagnostic.statusValueAllowed == true)
+            assertSafe(diagnostic.toString())
+        }
+    }
+
+    @Test
+    fun `Russian eight-prefix recipient echo is correlated without accepting a different number`() {
+        val body = """{"success":true,"data":{"id":77,"number":"89990000001","status":0},"message":null}"""
+        FakeSmsAeroServer(200, body).use { server ->
+            assertEquals(77L, adapter(server.baseUrl).sendVerificationCode(phone, code))
+            assertEquals(1, server.requests.size)
         }
     }
 
@@ -223,9 +299,17 @@ class SmsAeroOutboundSmsAdapterTest {
     }
 
     private fun accepted(status: Int = 0) =
-        """{"success":true,"data":[{"id":1,"number":"79990000001","status":$status}],"message":null}"""
+        """{"success":true,"data":{"id":1,"number":"79990000001","status":$status},"message":null}"""
 
-    private fun adapter(baseUrl: String, readTimeout: Duration = Duration.ofSeconds(5)): SmsAeroOutboundSmsAdapter {
+    private fun actualDataObjectResponse(): String = requireNotNull(
+        javaClass.getResource("/sms-aero/send-success-data-object.json")
+    ).readText().replace("TEST_NUMBER", phone.value.removePrefix("+"))
+
+    private fun adapter(
+        baseUrl: String,
+        readTimeout: Duration = Duration.ofSeconds(5),
+        diagnosticSink: ((SmsAeroResponseDiagnostic) -> Unit)? = null
+    ): SmsAeroOutboundSmsAdapter {
         val requestFactory = ClientHttpRequestFactories.get(
             ClientHttpRequestFactorySettings.DEFAULTS
                 .withConnectTimeout(Duration.ofSeconds(2))
@@ -234,19 +318,32 @@ class SmsAeroOutboundSmsAdapterTest {
         val client = RestClient.builder().baseUrl(baseUrl)
             .defaultHeaders { it.setBasicAuth(login, fakeKey, StandardCharsets.UTF_8) }
             .requestFactory(requestFactory).build()
-        return SmsAeroOutboundSmsAdapter(client, ObjectMapper(), sender)
+        return if (diagnosticSink == null) {
+            SmsAeroOutboundSmsAdapter(client, ObjectMapper(), sender)
+        } else {
+            SmsAeroOutboundSmsAdapter.withDiagnosticSink(client, ObjectMapper(), sender, diagnosticSink)
+        }
     }
 
     private fun assertSafe(failure: OutboundSmsDeliveryException) {
-        val text = failure.toString()
+        assertSafe(failure.toString())
+        assertNull(failure.cause)
+    }
+
+    private fun assertSafe(text: String) {
         val authorization = "Basic " + Base64.getEncoder()
             .encodeToString("$login:$fakeKey".toByteArray(StandardCharsets.UTF_8))
         assertFalse(text.contains(fakeKey))
         assertFalse(text.contains(authorization))
         assertFalse(text.contains(code))
         assertFalse(text.contains(phone.value))
-        assertNull(failure.cause)
     }
+
+    private data class DiagnosticCase(
+        val body: String,
+        val reason: SmsAeroResponseDiagnosticReason,
+        val state: SmsSubmissionState = SmsSubmissionState.UNKNOWN
+    )
 }
 
 private data class CapturedSmsRequest(
@@ -258,7 +355,11 @@ private data class CapturedSmsRequest(
     val form: Map<String, String>
 )
 
-private class FakeSmsAeroServer(private val status: Int, private val response: String) : AutoCloseable {
+private class FakeSmsAeroServer(
+    private val status: Int,
+    private val response: String,
+    private val responseContentType: String = "application/json"
+) : AutoCloseable {
     val requests = LinkedBlockingQueue<CapturedSmsRequest>()
     private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
         createContext("/v2/sms/send") { exchange -> handle(exchange) }
@@ -279,6 +380,7 @@ private class FakeSmsAeroServer(private val status: Int, private val response: S
             exchange.requestHeaders.getFirst("Authorization") ?: "", form
         ))
         val bytes = response.toByteArray(Charsets.UTF_8)
+        exchange.responseHeaders.set("Content-Type", responseContentType)
         exchange.sendResponseHeaders(status, bytes.size.toLong())
         exchange.responseBody.use { it.write(bytes) }
     }
