@@ -5,9 +5,9 @@
   <executable>C:\Program Files\nodejs\node.exe</executable>
   <arguments>server\serve.mjs</arguments>
   <workingdirectory>C:\Projects\PIOS-Foundation_v1.0\frontend</workingdirectory>
-  <!-- No HOST/PORT/PUBLIC_ORIGIN env override below: serve.mjs's own
-       defaults already match every constraint the old vite preview
-       flags encoded.
+  <env name="PUBLIC_ORIGIN" value="https://piosapp.ru"/>
+  <!-- No HOST/PORT override below: serve.mjs's own defaults already match
+       every constraint the old vite preview flags encoded.
 
        HOST 0.0.0.0, not 127.0.0.1 or vite's own "localhost" default: this
        machine's IPv6 loopback is broken (a third-party VPN/proxy TUN
@@ -21,10 +21,9 @@
        strictPort flag, serve.mjs has no competing dev server default to
        fall back to, so there is nothing to silently bind instead.
 
-       PUBLIC_ORIGIN defaults to https://home-pc.tail385153.ts.net, the
-       same Tailscale Funnel hostname vite.config.ts's own
-       preview.allowedHosts already allows, used only to build the
-       absolute og:url/og:image a link-preview crawler requires. -->
+       PUBLIC_ORIGIN is explicit above so the production WinSW contract and
+       the absolute og:url/og:image emitted for link-preview crawlers cannot
+       drift from the canonical https://piosapp.ru origin. -->
   <log mode="none"/>
   <onfailure action="restart" delay="30 sec"/>
   <onfailure action="restart" delay="60 sec"/>

@@ -23,7 +23,9 @@
     Run from any location; paths are resolved relative to this script's own
     directory. Does not install, start, restart, or stop any Windows
     service -- generation and service lifecycle are deliberately separate
-    steps.
+    steps. Production generation must run from an elevated administrative
+    shell so the restricted LocalSystem/Administrators/SYSTEM ACL can be
+    applied before any secret-bearing content is written.
 #>
 
 param(
@@ -31,7 +33,12 @@ param(
     # only to let the repository's isolated verification use a temporary
     # per-user registry key; it does not introduce an alternate deployment
     # secret source.
-    [string]$EnvironmentRegistryPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
+    [string]$EnvironmentRegistryPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+
+    # WinSW uses LocalSystem unless a template explicitly declares another
+    # service account. Tests pass their isolated runner SID here; production
+    # must keep the default unless the WinSW account is deliberately changed.
+    [string]$ServiceAccount = "S-1-5-18"
 )
 
 $ErrorActionPreference = "Stop"
@@ -61,6 +68,66 @@ function Fail([string]$message) {
     # variable NAMES or file paths, never resolved secret content.
     Write-Error "generate-service-xml: $message"
     exit 1
+}
+
+function Resolve-AccountSid([string]$account) {
+    try {
+        if ($account -match '^S-\d-(?:\d+-)+\d+$') {
+            return [System.Security.Principal.SecurityIdentifier]::new($account)
+        }
+        return [System.Security.Principal.NTAccount]::new($account).Translate([System.Security.Principal.SecurityIdentifier])
+    } catch {
+        throw "could not resolve service account '$account' to a Windows SID."
+    }
+}
+
+function Assert-RestrictedSecretFileAcl([string]$path, [System.Security.Principal.SecurityIdentifier[]]$allowedSids) {
+    $actualAcl = Get-Acl -LiteralPath $path
+    if (-not $actualAcl.AreAccessRulesProtected) {
+        throw "ACL inheritance remains enabled on $path."
+    }
+
+    $allowedByValue = @{}
+    foreach ($sid in $allowedSids) {
+        $allowedByValue[$sid.Value] = $true
+    }
+
+    $rules = @($actualAcl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+    foreach ($rule in $rules) {
+        if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow -or
+            -not $allowedByValue.ContainsKey($rule.IdentityReference.Value)) {
+            throw "unexpected ACL principal or rule remains on $path."
+        }
+    }
+
+    foreach ($sid in $allowedSids) {
+        $hasFullControl = @($rules | Where-Object {
+            $_.IdentityReference.Value -eq $sid.Value -and
+            $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow -and
+            (($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq
+                [System.Security.AccessControl.FileSystemRights]::FullControl)
+        }).Count -gt 0
+        if (-not $hasFullControl) {
+            throw "required full-control ACL is missing on $path."
+        }
+    }
+}
+
+function Set-RestrictedSecretFileAcl([string]$path, [System.Security.Principal.SecurityIdentifier[]]$allowedSids) {
+    $acl = [System.Security.AccessControl.FileSecurity]::new()
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($sid in $allowedSids) {
+        $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+            $sid,
+            [System.Security.AccessControl.FileSystemRights]::FullControl,
+            [System.Security.AccessControl.InheritanceFlags]::None,
+            [System.Security.AccessControl.PropagationFlags]::None,
+            [System.Security.AccessControl.AccessControlType]::Allow
+        )
+        [void]$acl.AddAccessRule($rule)
+    }
+    Set-Acl -LiteralPath $path -AclObject $acl
+    Assert-RestrictedSecretFileAcl -path $path -allowedSids $allowedSids
 }
 
 # --- Step 1: read every required value from Machine-scope, once -----------
@@ -101,7 +168,18 @@ foreach ($svc in $services) {
     }
 }
 
-# --- Step 3: render each service's XML atomically --------------------------
+# Only the WinSW service identity, Administrators, and SYSTEM may read or
+# modify rendered XML. Use well-known SIDs so this remains deterministic on
+# localized Windows installations. Duplicate SIDs (LocalSystem == SYSTEM)
+# are collapsed before rules are created.
+$serviceSid = Resolve-AccountSid $ServiceAccount
+$allowedSidsByValue = @{}
+foreach ($sidValue in @("S-1-5-18", "S-1-5-32-544", $serviceSid.Value)) {
+    $allowedSidsByValue[$sidValue] = [System.Security.Principal.SecurityIdentifier]::new($sidValue)
+}
+$allowedSids = [System.Security.Principal.SecurityIdentifier[]]@($allowedSidsByValue.Values)
+
+# --- Step 3: render each service's XML with a restricted ACL ---------------
 $generated = @()
 try {
     foreach ($svc in $services) {
@@ -128,8 +206,17 @@ try {
             Fail "unresolved placeholder(s) remain in generated $($svc.File) after substitution. Generation aborted for this file; no output written."
         }
 
+        # Create and restrict an empty file before any secret-bearing content
+        # is written. A non-elevated production run cannot access the file
+        # after hardening and therefore fails before secrets reach disk.
+        if (Test-Path -LiteralPath $tempPath) {
+            Remove-Item -LiteralPath $tempPath -Force
+        }
+        New-Item -Path $tempPath -ItemType File | Out-Null
+        Set-RestrictedSecretFileAcl -path $tempPath -allowedSids $allowedSids
         [System.IO.File]::WriteAllText($tempPath, $content, [System.Text.UTF8Encoding]::new($false))
         Move-Item -Path $tempPath -Destination $targetPath -Force
+        Assert-RestrictedSecretFileAcl -path $targetPath -allowedSids $allowedSids
         $generated += $svc.File
     }
 } catch {

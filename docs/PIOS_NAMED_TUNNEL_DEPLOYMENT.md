@@ -10,12 +10,13 @@
 
 ## Что уже сделано в репозитории этим документом
 
-- `windows-services/frontend/pios-frontend.xml` — порт изменён с `5173` на `4173`, добавлен `--strictPort`. Это ровно порт и флаг, которые `PIOS_PILOT_INFRASTRUCTURE_DECISION.md` Раздел 4 уже описывает для туннелируемой поверхности.
+- `windows-services/frontend/pios-frontend.xml` — custom Node server слушает release-порт `4173`; `PUBLIC_ORIGIN=https://piosapp.ru` задан явно для canonical/OpenGraph URL.
 - `windows-services/cloudflared/pios-cloudflared.xml` — новое определение службы Windows для `cloudflared`, по тому же шаблону WinSW, что и остальные шесть служб. Не новый компонент архитектуры: `cloudflared` как цель T-2 уже был назван в `ENGINEERING_EXECUTION_PLAN_SPRINT_1_PLATFORM_OPERATIONS_MVP.md` («a versioned WinSW XML per target… plus `cloudflared`»), тогда отложенный до «следующего этапа» (O-2). Сейчас этот этап наступил.
-- `.gitignore` — добавлены `windows-services/cloudflared/config.yml` и `windows-services/cloudflared/*.json`: файл конфигурации туннеля и файл учётных данных (закрытый ключ туннеля) никогда не должны попасть в git.
-- **Все пять** `windows-services/{dispatch,driver-management,identity,order-management,passenger-experience}/pios-*.xml` — `PIOS_PILOT_FRONTEND_ORIGIN` обновлён на `https://piosapp.ru`. Проверено: во всей папке `windows-services/` не осталось ни одного рабочего упоминания `192.168.*` или порта `5173` (кроме одного документирующего комментария в `pios-frontend.xml`, объясняющего сам факт смены порта).
+- `windows-services/cloudflared/run-tunnel.ps1` и `config.production.yml` — один воспроизводимый production-контракт: token mode, секрет только в environment службы Windows, отслеживаемый non-secret ingress только на `127.0.0.1:4173`, обязательный catch-all `404`.
+- `.gitignore` — локальные `config.yml`, credentials JSON и token-файлы остаются исключёнными как исторические/диагностические артефакты. Ни один из них не является входом production-службы.
+- **Все пять** `windows-services/{dispatch,driver-management,identity,order-management,passenger-experience}/pios-*.xml.template` задают `PIOS_PILOT_FRONTEND_ORIGIN=https://piosapp.ru`; generator переносит это значение в gitignored service XML.
 
-Ничего из перечисленного не закоммичено и не запушено — изменения остаются локальными до отдельного подтверждения.
+Этот документ не разрешает запуск, перезапуск или изменение live-туннеля. Provisioning и запуск выполняются только отдельной deployment-командой.
 
 ---
 
@@ -31,66 +32,45 @@
 
 ### Шаг 2 — Установить `cloudflared` на ASUS
 
-Скачать официальный установщик Windows (`cloudflared-windows-amd64.msi`) с `https://github.com/cloudflare/cloudflared/releases/latest` и установить. Стандартный путь установки — `C:\Program Files (x86)\cloudflared\cloudflared.exe` (именно этот путь уже прописан в `windows-services/cloudflared/pios-cloudflared.xml`; если установщик выбрал другой путь — поправить `<executable>` в этом файле перед установкой службы на Шаге 6).
+Скачать официальный установщик Windows (`cloudflared-windows-amd64.msi`) с `https://github.com/cloudflare/cloudflared/releases/latest` и установить. Стандартный путь установки — `C:\Program Files (x86)\cloudflared\cloudflared.exe` (именно этот путь проверяет `windows-services/cloudflared/run-tunnel.ps1`; иной install path требует осознанного изменения wrapper и повторного config-теста до deployment).
 
 Проверить:
 ```
 "C:\Program Files (x86)\cloudflared\cloudflared.exe" --version
 ```
 
-### Шаг 3 — Авторизация
+### Шаг 3 — Получить connector token существующего туннеля
 
-```
-cloudflared tunnel login
-```
-Откроется браузер — выбрать аккаунт Cloudflare и зону `piosapp.ru`. Появится сертификат авторизации на диске (`%USERPROFILE%\.cloudflared\cert.pem`) — этого шага достаточно один раз.
+В Cloudflare Dashboard открыть существующий production tunnel для `piosapp.ru` и получить его connector token. Новый tunnel, tunnel UUID, `cert.pem` или credentials JSON для этого release-контракта не нужны. Значение токена нельзя помещать в Git, XML, PowerShell-файл, командный лог или ticket.
 
-### Шаг 4 — Создать именованный туннель
+### Шаг 4 — Получить release-конфигурацию
 
-```
-cloudflared tunnel create pios-pilot
-```
-Команда выведет **UUID туннеля** и создаст файл учётных данных, обычно `%USERPROFILE%\.cloudflared\<UUID>.json`. Записать UUID — он понадобится в Шаге 5.
+После отдельно разрешённого `git pull` проверить наличие:
 
-**Перенести** файл учётных данных в `C:\Projects\PIOS-Foundation_v1.0\windows-services\cloudflared\<UUID>.json` (не копировать — переносить, чтобы не оставлять второй экземпляр секрета на диске без необходимости). `.gitignore` уже настроен так, что этот файл не попадёт в git из этой папки.
+- `windows-services/cloudflared/config.production.yml` — только `piosapp.ru → http://127.0.0.1:4173` и catch-all `404`;
+- `windows-services/cloudflared/run-tunnel.ps1` — читает только `PIOS_CLOUDFLARED_TUNNEL_TOKEN` из process environment;
+- `windows-services/cloudflared/pios-cloudflared.xml` — запускает wrapper через Windows PowerShell.
 
-### Шаг 5 — Привязать домен к туннелю и создать файл конфигурации
+Backend-порты (`8081`–`8086`, `8091`) в ingress запрещены. Внешний запрос всегда приходит на frontend `4173`; только frontend proxy направляет разрешённые `/v1/...` маршруты локальным backend-службам. `/v1/persons` отсутствует, поэтому dormant Network Management не экспонируется.
 
-```
-cloudflared tunnel route dns pios-pilot piosapp.ru
-```
-Cloudflare сам создаст нужную DNS-запись в зоне домена (CNAME с flattening на корне — Cloudflare поддерживает это для apex-доменов). Ничего в панели Cloudflare руками создавать не нужно.
+### Шаг 5 — Установить службу без запуска и provision токен
 
-Затем создать `C:\Projects\PIOS-Foundation_v1.0\windows-services\cloudflared\config.yml` (этот файл не в git — создаётся один раз, вручную, прямо на ASUS):
+Скопировать `WinSW.exe` в `windows-services\cloudflared\` под именем `pios-cloudflared.exe`, затем выполнить elevated:
 
-```yaml
-tunnel: <UUID из Шага 4>
-credentials-file: C:\Projects\PIOS-Foundation_v1.0\windows-services\cloudflared\<UUID>.json
-
-ingress:
-  - hostname: piosapp.ru
-    service: http://127.0.0.1:4173
-  - service: http_status:404
-```
-
-Маршрут только один — на фронтенд (`4173`). Ни один backend-порт (`8081`–`8086`) здесь не упоминается и не должен: фронтенд уже проксирует все пять модулей через собственную таблицу `preview.proxy` (`frontend/vite.config.ts`) — так было устроено с самого начала (`PIOS_PILOT_INFRASTRUCTURE_DECISION.md`), туннель просто становится входной точкой перед тем же самым механизмом, ничего в нём не меняя.
-
-### Шаг 6 — Получить обновлённую конфигурацию на ASUS
-
-```
-git pull
-```
-Подтягивает уже подготовленные изменения: `PIOS_PILOT_FRONTEND_ORIGIN=https://piosapp.ru` во всех пяти backend-службах, порт `4173` у фронтенда, файл службы `cloudflared`. Выполняется после того, как эти изменения будут закоммичены и запушены — то есть после отдельного подтверждения commit'а.
-
-### Шаг 7 — Установить и запустить службу `cloudflared`
-
-Скопировать `WinSW.exe` (тот же файл, что уже используется для остальных шести служб) в `windows-services\cloudflared\` под именем `pios-cloudflared.exe` — по тому же соглашению, что и у существующих служб (исполняемый файл и `.xml`-конфигурация с одинаковым именем в одной папке). Затем из этой папки:
-```
+```powershell
 pios-cloudflared.exe install
+```
+
+После появления `HKLM:\SYSTEM\CurrentControlSet\Services\pios-cloudflared` добавить к этой службе `REG_MULTI_SZ` value `Environment` с единственной парой `PIOS_CLOUDFLARED_TUNNEL_TOKEN=<connector token>`. Это ACL-защищённая конфигурация SCM; токен получает только процесс службы. Не использовать Machine-wide environment и не создавать `tunnel.token` рядом с исходниками. До наличия непустой переменной wrapper завершится с кодом `1`, ничего не подключая.
+
+### Шаг 6 — Запустить службу `cloudflared`
+
+Только после отдельного deployment-разрешения и boolean-проверки наличия переменной (не печатая значение):
+```
 pios-cloudflared.exe start
 ```
 
-### Шаг 8 — Перезапустить остальные шесть служб
+### Шаг 7 — Перезапустить остальные шесть служб
 
 После `git pull` (обновлённые `PIOS_PILOT_FRONTEND_ORIGIN` и порт фронтенда):
 ```
@@ -98,7 +78,7 @@ services.msc
 ```
 или через `sc.exe` — перезапустить `pios-frontend`, `pios-dispatch`, `pios-driver-management`, `pios-identity`, `pios-order-management`, `pios-passenger-experience`. `pios-platform-ops` этот документ не трогает.
 
-### Шаг 9 — Проверка с реального телефона, не на Wi-Fi ASUS
+### Шаг 8 — Проверка с реального телефона, не на Wi-Fi ASUS
 
 1. Отключить Wi-Fi на телефоне (мобильный интернет).
 2. Открыть `https://piosapp.ru` — должен открыться фронтенд PIOS, замок HTTPS в адресной строке.
@@ -106,13 +86,13 @@ services.msc
 4. На экране водителя (`DriverHome.tsx`) проверить кнопки «Копировать»/«Поделиться» — они не работали по `http://` на локальный IP, должны заработать по `https://`.
 5. Создать тестовый заказ и убедиться, что запрос действительно доходит до backend (в частности, ответ не блокируется CORS) — это прямая проверка того, что `PIOS_PILOT_FRONTEND_ORIGIN` во всех пяти службах реально совпадает с адресом, по которому открыт фронтенд.
 
-Если шаг 5 не проходит — почти наверняка одна из пяти служб backend не была перезапущена после Шага 8, и всё ещё держит в памяти старое значение `PIOS_PILOT_FRONTEND_ORIGIN` (переменные окружения WinSW читаются один раз при старте процесса).
+Если backend-вызов не проходит CORS — проверить, что пять generated WinSW XML созданы из актуальных templates с `PIOS_PILOT_FRONTEND_ORIGIN=https://piosapp.ru`, а службы перезапущены после генерации. Если connector не стартует — проверить только наличие `PIOS_CLOUDFLARED_TUNNEL_TOKEN` в SCM environment и существование tracked `config.production.yml`, не выводя токен.
 
 ---
 
 ## Чего этот документ не решает
 
-- **Второй адрес для удалённого управления** (например, `ops.piosapp.ru` → `platform-ops` на `127.0.0.1:8090`) — предусмотрен `ADR-048`, но тот ADR всё ещё Draft. Один и тот же туннель технически способен обслуживать оба хоста (`ADR-048` Decision 1 это и описывает), поэтому когда `ADR-048` будет ратифицирован, добавление второго `ingress`-правила в уже существующий `config.yml` — небольшое, чисто аддитивное расширение, а не повторная настройка с нуля. Делать это сейчас — преждевременно и не входит в задачу.
+- **Второй адрес для удалённого управления** (например, `ops.piosapp.ru` → `platform-ops` на `127.0.0.1:8090`) — предусмотрен `ADR-048`, но тот ADR всё ещё Draft. Его нет в `config.production.yml`; добавление запрещено без отдельной ратификации и review.
 - **Внешний шлюз доступа (Cloudflare Access) перед `piosapp.ru`** — и не должен: `ADR-044` Decision 11 и `ADR-048` Decision 3 прямо говорят, что аутентификация перед поверхностью водителей и пассажиров означала бы участническую аутентификацию, что вне текущей архитектуры.
 - **Постоянство самого домена** (продление регистрации, оплата) — операционная задача владельца аккаунта, не техническая.
 
@@ -131,4 +111,4 @@ services.msc
 
 ## Files Changed
 
-`windows-services/frontend/pios-frontend.xml` (порт 5173→4173, `--strictPort`), `windows-services/cloudflared/pios-cloudflared.xml` (новый), `.gitignore` (исключения для `config.yml`/учётных данных туннеля), `windows-services/{dispatch,driver-management,identity,order-management,passenger-experience}/pios-*.xml` (`PIOS_PILOT_FRONTEND_ORIGIN` → `https://piosapp.ru`), `docs/PIOS_NAMED_TUNNEL_DEPLOYMENT.md` (этот документ). Ничего не закоммичено.
+Актуальный release-контракт находится в `windows-services/frontend/pios-frontend.xml`, `windows-services/cloudflared/{pios-cloudflared.xml,run-tunnel.ps1,config.production.yml}`, пяти backend `*.xml.template`, `frontend/server/backendRoutes.mjs` и этом документе. Generated XML, connector token, credentials JSON и локальный `config.yml` не входят в Git.

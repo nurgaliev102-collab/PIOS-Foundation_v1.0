@@ -34,6 +34,7 @@ import { resolveBackendTarget, BACKEND_ROUTES } from './backendRoutes.mjs'
 import { clientIpForBackend } from './clientIp.mjs'
 import { safeStaticPath } from './safeStaticPath.mjs'
 import { injectDriverPreview } from './injectMeta.mjs'
+import { resolvePublicOrigin } from './publicOrigin.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DIST_DIR = path.resolve(__dirname, '..', 'dist')
@@ -43,9 +44,9 @@ const HOST = process.env.HOST ?? '0.0.0.0'
 const PORT = Number(process.env.PORT ?? 4173)
 // Used to build the absolute og:url / og:image a crawler needs -- these
 // tags must be absolute URLs, a relative one is invalid per the Open Graph
-// spec. Defaults to this machine's own public Tailscale Funnel hostname
-// (docs/PIOS_NAMED_TUNNEL_DEPLOYMENT.md), overridable for local testing.
-const PUBLIC_ORIGIN = process.env.PUBLIC_ORIGIN ?? 'https://home-pc.tail385153.ts.net'
+// spec. The release default is the Product Owner's canonical production
+// origin; PUBLIC_ORIGIN remains overridable for isolated local testing.
+const PUBLIC_ORIGIN = resolvePublicOrigin()
 
 const DRIVER_CODE_ROUTE = /^\/i\/([^/]+)(?:\/request)?\/?$/
 

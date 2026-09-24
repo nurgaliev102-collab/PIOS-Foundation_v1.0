@@ -15,6 +15,7 @@ export const BACKEND_ROUTES = {
   '/v1/orders': 'http://localhost:8083',
   '/v1/proposals': 'http://localhost:8084',
   '/v1/assignments': 'http://localhost:8084',
+  '/v1/handoffs': 'http://localhost:8084',
   // ADR-083 (D-10, Driver Web Push): Dispatch's own new
   // /v1/driver-push-subscriptions endpoints, same port as every other
   // Dispatch-owned prefix above.

@@ -27,11 +27,29 @@ never records, logs, fingerprints, or supplies a real value.
 | `SPRING_RABBITMQ_HOST`, `SPRING_RABBITMQ_PORT`, `SPRING_RABBITMQ_VIRTUAL_HOST` | same | Broker endpoint and isolated vhost | Required deployment configuration (not secrets) | Same | Local defaults are not evidence of production readiness |
 | `PIOS_AI_ADVISOR_QWEN_API_KEY` | ai-advisor WinSW service | Qwen provider credential | Required secret when that service/provider is enabled | Machine-scope environment, rendered into ignored XML | Generator aborts when absent |
 | `PIOS_AI_ADVISOR_PROVIDER`, `PIOS_AI_ADVISOR_QWEN_MODEL` | ai-advisor WinSW service | Provider/model selection | Required by current generator | Same | Generator aborts when absent |
+| `PIOS_CLOUDFLARED_TUNNEL_TOKEN` | pios-cloudflared | Connector credential for the existing `piosapp.ru` tunnel (token mode) | Required before tunnel service start | Per-service SCM `Environment` value at `HKLM:\SYSTEM\CurrentControlSet\Services\pios-cloudflared`; never source, XML, token file, or Machine-wide environment | `run-tunnel.ps1` exits `1` before invoking cloudflared when blank/missing |
 | `PIOS_TEST_DATA_CREDENTIAL_HASH` / `pios.test-data.credential-hash` | driver-management only when synthetic-data API is intentionally enabled | SHA-256 hash of test-data credential | Optional; leave blank to disable | Service property/environment mapping | Blank disables the privileged test-data branch (fail closed) |
 
 The generated `windows-services/*/pios-*.xml` files contain secrets and are
-gitignored deployment artifacts. Restrict their ACLs to the service account
-and administrators. Never attach them to tickets, logs, chat, or commits.
+gitignored deployment artifacts. `generate-service-xml.ps1` creates an empty
+temporary file, disables inherited ACLs, grants FullControl only to the WinSW
+service account (LocalSystem by default), BUILTIN\Administrators, and SYSTEM,
+verifies that exact allowlist, and only then writes secret-bearing XML. It
+verifies the final file again after the atomic move and fails closed on any
+ACL error. Run the generator from an elevated administrative shell; never
+attach generated XML to tickets, logs, chat, or commits.
+
+Deterministic verification without production values:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File windows-services\test-production-config.ps1
+```
+
+The test uses a temporary HKCU fixture registry key and the current test
+account as an isolated service account. Deployment verification may inspect
+only `AreAccessRulesProtected` and the ACL principals/rights; it must never
+print generated file contents. Ordinary Users (`S-1-5-32-545`) and
+Authenticated Users (`S-1-5-11`) must have no rule.
 
 ## VAPID generation and configuration
 

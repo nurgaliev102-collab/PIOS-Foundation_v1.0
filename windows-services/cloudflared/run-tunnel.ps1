@@ -1,24 +1,35 @@
-# Launches the existing "pios-pilot" Cloudflare Tunnel in token mode.
+# Launches the production Cloudflare Tunnel connector in token mode.
 #
-# Why token mode: this tunnel (70a49741-67dd-4f86-8ab1-7c42186c2fbf, DNS
-# already routed to piosapp.ru) has no local credentials JSON on this
-# machine -- only the account-level cert.pem exists. `cloudflared tunnel
-# run pios-pilot` fails with "tunnel credentials file not found" without
-# one. A token (`cloudflared tunnel token pios-pilot`) is the connector
-# credential for the same, already-existing tunnel -- it does not create a
-# new tunnel and carries no local ingress configuration of its own (this
-# tunnel's public-hostname routing lives on Cloudflare's side).
-#
-# Why a wrapper script instead of an inline WinSW <env>: `pios-cloudflared.xml`
-# is committed to git. The token must never appear in a tracked file's
-# content, so it lives only in `tunnel.token` (gitignored, see .gitignore's
-# "Cloudflare named tunnel" block) and is read into an environment variable
-# here, at process start, never echoed.
-$tokenPath = Join-Path $PSScriptRoot 'tunnel.token'
-if (-not (Test-Path $tokenPath)) {
-    Write-Error "tunnel.token not found at $tokenPath -- run: cloudflared tunnel token pios-pilot > `"$tokenPath`""
+# Authentication has exactly one source: the service process environment
+# variable PIOS_CLOUDFLARED_TUNNEL_TOKEN, provisioned in the Windows SCM
+# service Environment value. The connector token is never stored in this
+# repository or printed.
+# Ingress is non-secret and versioned in config.production.yml so a clean
+# host deterministically exposes only the frontend on 127.0.0.1:4173.
+$ErrorActionPreference = 'Stop'
+
+$cloudflaredPath = 'C:\Program Files (x86)\cloudflared\cloudflared.exe'
+$configPath = Join-Path $PSScriptRoot 'config.production.yml'
+$token = $env:PIOS_CLOUDFLARED_TUNNEL_TOKEN
+
+if ([string]::IsNullOrWhiteSpace($token)) {
+    Write-Error 'PIOS_CLOUDFLARED_TUNNEL_TOKEN is missing from the service environment; tunnel startup is refused.'
     exit 1
 }
-$env:TUNNEL_TOKEN = (Get-Content -Raw -Path $tokenPath).Trim()
-& 'C:\Program Files (x86)\cloudflared\cloudflared.exe' tunnel run
-exit $LASTEXITCODE
+if (-not (Test-Path -LiteralPath $cloudflaredPath -PathType Leaf)) {
+    Write-Error "cloudflared executable not found at $cloudflaredPath."
+    exit 1
+}
+if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+    Write-Error "production ingress configuration not found at $configPath."
+    exit 1
+}
+
+$env:TUNNEL_TOKEN = $token.Trim()
+try {
+    & $cloudflaredPath tunnel --config $configPath --protocol http2 run
+    exit $LASTEXITCODE
+} finally {
+    Remove-Item Env:TUNNEL_TOKEN -ErrorAction SilentlyContinue
+    $token = $null
+}

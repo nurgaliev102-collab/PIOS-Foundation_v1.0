@@ -265,18 +265,14 @@ windows-services/identity/pios-identity.xml
 windows-services/order-management/pios-order-management.xml
 windows-services/passenger-experience/pios-passenger-experience.xml
 
-# Cloudflare named tunnel (docs/PIOS_NAMED_TUNNEL_DEPLOYMENT.md): config.yml
-# and the tunnel credentials JSON are created once, by hand, on the machine
-# that runs the tunnel. The credentials file is the tunnel's private key
-# material -- it must never enter version control. config.yml itself isn't
-# secret, but it's machine-specific (absolute paths, tunnel ID) and kept
-# alongside it rather than split across "committed" and "not committed"
-# halves of the same setup step.
+# Legacy/local Cloudflare tunnel artifacts. The production release uses the
+# tracked non-secret config.production.yml plus token mode; connector auth is
+# injected through the Windows SCM service environment. Local config.yml,
+# credentials JSON, and token files remain ignored so historical or
+# diagnostic artifacts can never enter version control accidentally.
 windows-services/cloudflared/config.yml
 windows-services/cloudflared/*.json
-# Token-mode connector auth (used when the classic credentials JSON above
-# isn't available locally for an existing, already-created tunnel) -- same
-# "never enters version control" reasoning, same machine-local creation step.
+# A token file is not part of the production contract, but remains ignored.
 windows-services/cloudflared/*.token
 
 # Rolling log files (T-1, ADR-049 Decision 5) -- runtime output, not source.
